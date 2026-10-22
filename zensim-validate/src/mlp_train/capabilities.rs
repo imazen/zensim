@@ -22,6 +22,18 @@ pub fn validate_training_capabilities(
             "smooth hinge requires plain one-layer N, uniform/minibatch1, no transforms, pooled objectives or K penalty"
         );
     }
+    if hyperparams.nonneg_thresholds {
+        assert!(
+            hyperparams.nonneg_distance
+                && hyperparams.n_hidden_layers == 1
+                && !hyperparams.smooth_hinge
+                && hyperparams.steer_pairs.is_none()
+                && !hyperparams.pool_head
+                && !hyperparams.hybrid_head
+                && !hyperparams.per_sample_alpha_head,
+            "--nonneg-thresholds requires plain one-layer N without smooth hinge, heads or the K penalty"
+        );
+    }
     assert!(
         hyperparams.steer_lambda.is_finite() && hyperparams.steer_lambda >= 0.0,
         "--steer-lambda must be finite and nonnegative"

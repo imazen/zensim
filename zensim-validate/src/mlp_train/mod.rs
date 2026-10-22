@@ -117,6 +117,17 @@ pub struct MlpHyperparams {
     /// `nonneg_distance` is set. `100.0` matches the dial contract's identity
     /// band `[97.5, 100]`.
     pub nonneg_pin: f64,
+    /// Under `nonneg_distance`, project the hidden biases to `b1 <= 0` after
+    /// every step instead of freezing them at `0`. `h(0⃗) = ReLU(b1) = 0⃗` still
+    /// holds exactly, so `raw(0⃗) = pin` and `raw <= pin` are unchanged; each
+    /// unit becomes a hinge with a non-negative activation threshold.
+    ///
+    /// Why it exists: with `monotone_cbc` (W1 >= 0) and non-negative inputs,
+    /// zero biases make every unit always active, so the network is exactly
+    /// linear (E34 arm L's class at any width). Thresholds restore capacity
+    /// inside the monotone class: `raw` stays non-increasing in every input,
+    /// pinned at identity, and convex piecewise-linear. Plain one-layer N only.
+    pub nonneg_thresholds: bool,
     pub n_hidden: usize,
     pub n_epochs: usize,
     pub pairs_per_epoch: usize,
@@ -954,6 +965,7 @@ impl Default for MlpHyperparams {
             pooled_pearson_weight: 0.0,
             nonneg_distance: false,
             nonneg_pin: 100.0,
+            nonneg_thresholds: false,
             n_hidden: 32,
             n_epochs: 200,
             pairs_per_epoch: 50_000,
@@ -1369,7 +1381,12 @@ fn project_plain(
     pin: Option<f64>,
     hp: &MlpHyperparams,
 ) {
-    nonneg_project(w2, b1, b2, pin);
+    if hp.nonneg_thresholds && pin.is_some() {
+        nonneg_project_thresholds(b1);
+        nonneg_project_w2b2(w2, b2, pin);
+    } else {
+        nonneg_project(w2, b1, b2, pin);
+    }
     if hp.monotone_cbc {
         project_monotone_w1(
             w1,
@@ -1378,6 +1395,75 @@ fn project_plain(
             hp.monotone_strict && !hp.monotone_pin_during_training,
         );
     }
+}
+
+/// `--nonneg-thresholds`' replacement for the `b1 := 0` third: `b1 := min(b1, 0)`.
+/// `ReLU(min(b, 0)) = 0`, so `h(0⃗) = 0⃗` and the pin guarantee are unchanged.
+fn nonneg_project_thresholds(b1: &mut [f64]) {
+    for b in b1.iter_mut() {
+        if *b > 0.0 {
+            *b = 0.0;
+        }
+    }
+}
+
+/// Upper end of the per-unit quantile range [`init_thresholds`] draws from.
+const THRESHOLD_INIT_MAX_Q: f64 = 0.9;
+/// Training rows [`init_thresholds`] samples to place each unit's threshold.
+const THRESHOLD_INIT_ROWS: usize = 4096;
+
+/// `--nonneg-thresholds` initialization. With `W1 >= 0`, `b1 = 0` and
+/// non-negative inputs every unit is active on every row, so the within-pair
+/// rank loss gives `b1` an exactly zero gradient (a shared shift cancels in the
+/// pair difference) and only the absolute term could ever move it. Each unit
+/// therefore starts as a hinge: `b1[j] = -quantile(z_j, u_j)` with
+/// `u_j ~ U[0, THRESHOLD_INIT_MAX_Q)` over a fixed sample of training rows,
+/// where `z_j` is the unit's pre-activation. Its own stream (derived from the
+/// init seed), so no other recipe's init or sample draws move. Returns the
+/// number of rows sampled.
+fn init_thresholds(
+    w1: &[f64],
+    b1: &mut [f64],
+    std_features: &StdFeatures,
+    groups: &[TrainingGroup<'_>],
+    train_indices: &[usize],
+    n_hidden: usize,
+    seed: u64,
+) -> usize {
+    let mut rng = SplitMix64::new(seed ^ 0x6279_635f_7468_7265);
+    let counts: Vec<usize> = train_indices
+        .iter()
+        .map(|&gi| groups[gi].human_scores.len())
+        .collect();
+    let total: usize = counts.iter().sum();
+    if total == 0 {
+        return 0;
+    }
+    let n = THRESHOLD_INIT_ROWS.min(total);
+    let mut z: Vec<Vec<f64>> = vec![Vec::with_capacity(n); n_hidden];
+    for _ in 0..n {
+        let mut r = (rng.next_u64() % total as u64) as usize;
+        let mut pos = 0;
+        while r >= counts[pos] {
+            r -= counts[pos];
+            pos += 1;
+        }
+        let x = std_features.row_cow(train_indices[pos], r);
+        for (j, zj) in z.iter_mut().enumerate() {
+            let mut acc = 0.0;
+            for (k, &xk) in x.iter().enumerate() {
+                acc += xk * w1[k * n_hidden + j];
+            }
+            zj.push(acc);
+        }
+    }
+    for (j, zj) in z.iter_mut().enumerate() {
+        zj.sort_by(f64::total_cmp);
+        let q = rng.next_f64_unit() * THRESHOLD_INIT_MAX_Q;
+        let at = ((zj.len() - 1) as f64 * q).floor() as usize;
+        b1[j] = -zj[at].max(0.0);
+    }
+    n
 }
 
 /// The `b1 := 0` third of [`nonneg_project`]. Split out for the
@@ -2607,6 +2693,13 @@ pub fn train_mlp_strategy_pairs(
                 log,
             );
         }
+        if hyperparams.nonneg_thresholds {
+            log_line(
+                "MLP train: --nonneg-thresholds — hidden biases projected <= 0 \
+                 (trainable thresholds) instead of frozen at 0",
+                log,
+            );
+        }
     }
     let scaler_mean = scaler_mean;
 
@@ -2722,6 +2815,25 @@ pub fn train_mlp_strategy_pairs(
                 "[keep-features] pinned {masked_rows} of {n_features} layer-1 input rows to 0 \
                  (effective width {})",
                 n_features - masked_rows
+            ),
+            log,
+        );
+    }
+    if hyperparams.nonneg_thresholds {
+        let sampled = init_thresholds(
+            &w1,
+            &mut b1,
+            &std_features,
+            groups,
+            &train_indices,
+            n_hidden,
+            hyperparams.init_seed.unwrap_or(hyperparams.seed),
+        );
+        log_line(
+            &format!(
+                "[nonneg-thresholds] b1 initialized at per-unit pre-activation quantiles \
+                 U[0, {THRESHOLD_INIT_MAX_Q}) over {sampled} training rows; min b1 {:.6}",
+                b1.iter().copied().fold(0.0, f64::min)
             ),
             log,
         );
@@ -2953,7 +3065,9 @@ pub fn train_mlp_strategy_pairs(
     //  - coarse decay off (checked per step — `apply_post_adam_penalties`
     //    writes w1 after the walk when on);
     //  - not the epoch's last pair (the next draw belongs to the next
-    //    epoch and may never happen under early stop).
+    //    epoch and may never happen under early stop);
+    //  - no `--nonneg-thresholds`: the armed step projects b1 with the
+    //    `b1 := 0` third, which would erase the thresholds.
     #[cfg(e36_tv)]
     let tv_pool_ready = e36_pool.is_some();
     #[cfg(not(e36_tv))]
@@ -2964,6 +3078,7 @@ pub fn train_mlp_strategy_pairs(
     let pooled_on = !hyperparams.pooled_legs.is_empty();
     let lookahead_ok = fuse_w1
         && !hyperparams.monotone_cbc
+        && !hyperparams.nonneg_thresholds
         && !parallel
         && !nin_on
         && !tv_can_fire

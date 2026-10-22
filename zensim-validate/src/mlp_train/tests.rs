@@ -3843,6 +3843,112 @@ fn e34_plain_monotone_refusals() {
     }
 }
 
+/// `--nonneg-thresholds` with `--monotone-cbc`: trainable `b1 <= 0` keeps the
+/// identity pin bit-exact in f32 and f16, and the baked model is non-increasing
+/// along every non-negative direction (checked exactly, since every forward op
+/// is monotone under round-to-nearest). Without thresholds the same projection
+/// is linear on the non-negative orthant; with them, units switch on at a
+/// threshold, which this target (a hinge in x0) rewards.
+#[test]
+fn byc_monotone_thresholds_identity_and_monotonicity() {
+    let rows: Vec<Vec<f64>> = (0..64)
+        .map(|i| vec![(i % 16) as f64 / 15., (i / 16) as f64 / 3.])
+        .collect();
+    let refs: Vec<&[f64]> = rows.iter().map(Vec::as_slice).collect();
+    let scores: Vec<f64> = rows
+        .iter()
+        .map(|x| 100. - 80. * (x[0] - 0.6).max(0.) - 1. * x[1])
+        .collect();
+    for dtype in [WeightDtype::F32, WeightDtype::F16] {
+        let hp = MlpHyperparams {
+            nonneg_distance: true,
+            monotone_cbc: true,
+            nonneg_thresholds: true,
+            n_hidden: 8,
+            n_epochs: 80,
+            pairs_per_epoch: 1024,
+            seed: 7,
+            out_dtype: dtype,
+            early_stop_patience: 0,
+            ..Default::default()
+        };
+        let mut groups = [TrainingGroup {
+            name: "invented".into(),
+            human_scores: &scores,
+            features: FeatureRows::Borrowed(&refs),
+            metric_sigmas: None,
+            train_weight: 1.,
+            validation_weight: 1.,
+            ref_ids: None,
+            loss_mode: GroupLossMode::Both,
+        }];
+        let mut log = Vec::new();
+        let bytes = train_mlp(&mut groups, 2, &hp, &mut log);
+        let model = zenpredict::Model::from_bytes(&bytes).unwrap();
+        let biases = model.layer(0).biases;
+        assert!(biases.iter().all(|&b| b <= 0.0), "b1 must stay <= 0: {biases:?}");
+        assert!(
+            biases.iter().any(|&b| b < 0.0),
+            "a hinge target must move at least one threshold: {biases:?}\n{}",
+            log.join("\n")
+        );
+        let mut predictor = zenpredict::Predictor::new(&model);
+        assert_eq!(
+            predictor.predict(&[0., 0.]).unwrap()[0].to_bits(),
+            100.0_f32.to_bits()
+        );
+        let mut rng = 0x9e37_79b9_7f4a_7c15u64;
+        let mut next = || {
+            rng ^= rng << 13;
+            rng ^= rng >> 7;
+            rng ^= rng << 17;
+            (rng >> 11) as f32 / (1u64 << 53) as f32
+        };
+        for _ in 0..2000 {
+            let x = [2. * next(), 2. * next()];
+            let y = [x[0] + next(), x[1] + next() * 0.25];
+            let fx = predictor.predict(&x).unwrap()[0];
+            let fy = predictor.predict(&y).unwrap()[0];
+            assert!(fy <= fx && fx <= 100., "monotone violation {x:?}->{fx} {y:?}->{fy}");
+        }
+    }
+}
+
+#[test]
+fn byc_thresholds_refuse_unsupported_modes() {
+    let enabled = MlpHyperparams {
+        nonneg_distance: true,
+        nonneg_thresholds: true,
+        ..Default::default()
+    };
+    validate_training_capabilities(&enabled, true, 0);
+    for hp in [
+        MlpHyperparams {
+            nonneg_distance: false,
+            ..enabled.clone()
+        },
+        MlpHyperparams {
+            smooth_hinge: true,
+            ..enabled.clone()
+        },
+        MlpHyperparams {
+            steer_pairs: Some("not-read.parquet".into()),
+            steer_lambda: 1.,
+            ..enabled.clone()
+        },
+        MlpHyperparams {
+            pool_head: true,
+            ..enabled.clone()
+        },
+        MlpHyperparams {
+            n_hidden_layers: 2,
+            ..enabled.clone()
+        },
+    ] {
+        assert!(std::panic::catch_unwind(|| validate_training_capabilities(&hp, true, 0)).is_err());
+    }
+}
+
 #[test]
 fn e34_k_refuses_incomplete_or_incompatible_options() {
     let enabled = MlpHyperparams {

@@ -867,6 +867,13 @@ struct Args {
     #[arg(long, default_value_t = false)]
     nonneg_distance: bool,
 
+    /// Under `--nonneg-distance`, project hidden biases to `<= 0` instead of
+    /// freezing them at 0 (`raw(0⃗) = pin` stays exact). With `--monotone-cbc`
+    /// this gives a monotone, identity-pinned, convex piecewise-linear model
+    /// that is not restricted to linear. Plain one-layer N only.
+    #[arg(long, requires = "nonneg_distance", conflicts_with_all = ["steer_pairs", "smooth_hinge", "pool_head", "hybrid_head", "per_sample_alpha_head", "skip_connection"])]
+    nonneg_thresholds: bool,
+
     /// STEER S: fixed tau1/8 C1 convex hinge; plain N only.
     #[arg(long, requires = "nonneg_distance", conflicts_with_all = ["steer_pairs", "pool_head", "hybrid_head", "per_sample_alpha_head", "skip_connection"])]
     smooth_hinge: bool,
@@ -3312,6 +3319,7 @@ fn main() {
         pooled_pearson_weight: args.pooled_pearson_weight,
         nonneg_distance: args.nonneg_distance,
         nonneg_pin: args.nonneg_pin,
+        nonneg_thresholds: args.nonneg_thresholds,
         n_hidden: args.hidden,
         n_epochs: args.epochs,
         pairs_per_epoch: args.pairs_per_epoch,
