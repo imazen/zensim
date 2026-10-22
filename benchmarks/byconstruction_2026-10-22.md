@@ -628,7 +628,8 @@ E21 Δ **−0.0216 (0.0031)**; KADID −0.0192, TID −0.0447, KonFiG −0.0280,
 FR −0.0039). Ringing forced to count as damage is not what over-penalizes the global-change
 types; the mse-type, transducer and hf_loss families do that. What ringing gives a signed model
 is an accidental **global-change detector**, which it subtracts to discount those other
-features (FR's large negative ringing weights). Fixing ringing alone would remove that signal.
+features (FR's large negative ringing weights). Fixing ringing alone would remove that signal. DR's mixture
+test: 0–3 inversions per cell, max +4.26, dithering only (like T).
 
 **Revised design.** (1) Make ringing measure ringing (high-pass error), closing the chroma-noise
 loophole. (2) Add an explicit global-change descriptor, zero at identity and blind to noise —
