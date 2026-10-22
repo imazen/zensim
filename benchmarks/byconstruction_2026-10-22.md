@@ -486,3 +486,18 @@ as well as a monotone combiner; the mixture test is the practical check.
 E21 Δ **−0.0204 (0.0029)**; KADID −0.0186, TID −0.0423, KonFiG −0.0266, CID22-A +0.0060 — the
 same as T, confirming T was the linear class in effect. (E34's L in the A family: −0.0226.)
 12 cells in 68 s: width 1 is cheap.
+
+### Seed stability (`scripts/byconstruction/seed_spread.py`)
+
+Mean E21 pooled SROCC over the four sources, seeds 0–2:
+
+| Model | mean | per seed | sd |
+|---|---|---|---|
+| `base-c` (B's recipe) | 0.8722 | 0.8665 / 0.8769 / 0.8733 | 0.0053 |
+| E34 `w-c` (H32) | 0.8775 | 0.8758 / 0.8785 / 0.8782 | 0.0015 |
+| T / Lc / G / E5 / E20 / R | 0.8497–0.8569 | — | 0.0008–0.0015 |
+| M | 0.8579 | 0.8532 / 0.8646 / 0.8558 | 0.0060 |
+
+The sign-constrained arms are 4–6× more seed-stable than B's recipe; M's single max pair brings
+the variance back (which pair is found depends on the seed). E34's narrow `w-c` is both more
+stable and higher than B's own width: plain capacity reduction is a cheap stabilizer.
