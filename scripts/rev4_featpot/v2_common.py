@@ -271,6 +271,10 @@ def recipe_of(spec: str) -> dict:
             out["smooth_hinge"] = True
         elif tok in ("fx1", "fx2") and "derived_inputs" not in out:
             out["derived_inputs"] = tok
+        elif tok == "mono" and "mono_all" not in out:  # by-construction exploration: W1 >= 0 on every input
+            out["mono_all"] = True
+        elif tok == "thr" and "thresholds" not in out:  # by-construction exploration: trainable b1 <= 0
+            out["thresholds"] = True
         elif tok.startswith("cv") and "coverage_weight" not in out and 0 < float(tok[2:]) <= 64:
             out["coverage_weight"] = float(tok[2:])
         elif (tok.startswith("cf") and "coverage_mask" not in out

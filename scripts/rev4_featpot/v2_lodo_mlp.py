@@ -154,6 +154,13 @@ def train_command(groups: list, init_seed: int, sample_seed: int, width: int, ke
         cmd += ["--derived-inputs", str(declaration_path)]
     if head == "N":
         cmd.append("--nonneg-distance")
+    if recipe.get("mono_all") or recipe.get("thresholds"):
+        if head != "N" or recipe.get("monotone_cbc") or recipe.get("smooth_hinge") or recipe.get("steer_pairs"):
+            raise ValueError("by-construction tokens require the plain N head without E34 L/K or sh1")
+        if recipe.get("mono_all"):
+            cmd.append("--monotone-cbc")
+        if recipe.get("thresholds"):
+            cmd.append("--nonneg-thresholds")
     if recipe.get("monotone_cbc"):
         if head != "N" or recipe.get("derived_inputs") or recipe.get("hidden") != 1:
             raise ValueError("E34 L requires A's plain N H1 recipe")
