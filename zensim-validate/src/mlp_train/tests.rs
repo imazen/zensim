@@ -4133,6 +4133,171 @@ fn byc_certificate_free_amplitude_is_exact_and_tight() {
     assert!(certify_monotone_bake(&zenpredict::Model::from_bytes(&bad).unwrap(), 100.0).is_err());
 }
 
+/// The gate projection: any input lands in `{a >= 0, s_p·a + s_d·b >= 0}`,
+/// with the f16 margin, and a point well inside the cone is unchanged.
+#[test]
+fn byc_gate_projection_property() {
+    let mut rng = 0x5eed_0f_9a7e_u64;
+    let mut next = || {
+        rng ^= rng << 13;
+        rng ^= rng >> 7;
+        rng ^= rng << 17;
+        (rng >> 11) as f64 / (1u64 << 53) as f64
+    };
+    for _ in 0..20_000 {
+        let (a, b) = (4.0 * next() - 2.0, 4.0 * next() - 2.0);
+        let (sd, sp) = (0.01 + 3.0 * next(), 0.01 + 3.0 * next());
+        let (pa, pb) = project_gate(a, b, sd, sp);
+        assert!(pa >= 0.0, "a {pa}");
+        assert!(sp * pa + sd * pb >= GATE_MARGIN * sp * pa * (1.0 - 1e-9) - 1e-15, "({a},{b}) -> ({pa},{pb})");
+        if pb < 0.0 {
+            assert!(pa >= GATE_MIN_DIRECT);
+        }
+    }
+    assert_eq!(project_gate(1.0, -0.5, 1.0, 1.0), (1.0, -0.5));
+    assert_eq!(project_gate(1.0, 0.25, 1.0, 1.0), (1.0, 0.25));
+}
+
+/// Content-gated training: inputs `[d0, d1, d0·f0, d1·f1]` with f in (0, 1],
+/// a target whose gain on `d0` falls with `f0`. The trained model keeps every
+/// unit's gain non-negative for every f (checked on the baked f32 weights and
+/// scaler), uses a negative product weight somewhere (the gate is exercised),
+/// and is exactly non-increasing in each damage input for random fragilities.
+#[test]
+fn byc_gated_products_train_monotone_in_damage() {
+    let mut rng = 0x00c0_ffee_u64;
+    let mut next = || {
+        rng ^= rng << 13;
+        rng ^= rng >> 7;
+        rng ^= rng << 17;
+        (rng >> 11) as f64 / (1u64 << 53) as f64
+    };
+    let rows: Vec<Vec<f64>> = (0..256)
+        .map(|_| {
+            let (d0, d1, f0, f1) = (next(), next(), 0.05 + 0.95 * next(), 0.05 + 0.95 * next());
+            vec![d0, d1, d0 * f0, d1 * f1]
+        })
+        .collect();
+    let refs: Vec<&[f64]> = rows.iter().map(Vec::as_slice).collect();
+    let scores: Vec<f64> = rows
+        .iter()
+        .map(|x| 100. - 40. * (x[0] - 0.8 * x[2]) - 10. * x[1])
+        .collect();
+    let hp = MlpHyperparams {
+        nonneg_distance: true,
+        monotone_cbc: true,
+        nonneg_thresholds: true,
+        monotone_product_pairs: vec![(0, 2), (1, 3)],
+        n_hidden: 8,
+        n_epochs: 60,
+        pairs_per_epoch: 2048,
+        seed: 9,
+        early_stop_patience: 0,
+        ..Default::default()
+    };
+    let mut groups = [TrainingGroup {
+        name: "invented".into(),
+        human_scores: &scores,
+        features: FeatureRows::Borrowed(&refs),
+        metric_sigmas: None,
+        train_weight: 1.,
+        validation_weight: 1.,
+        ref_ids: None,
+        loss_mode: GroupLossMode::Both,
+    }];
+    let bytes = train_mlp(&mut groups, 4, &hp, &mut Vec::new());
+    let model = zenpredict::Model::from_bytes(&bytes).unwrap();
+    let (l0, l1) = (model.layer(0), model.layer(1));
+    let zenpredict::WeightStorage::F32(w1) = l0.weights else { panic!("f32 test bake") };
+    let zenpredict::WeightStorage::F32(w2) = l1.weights else { panic!("f32 test bake") };
+    let s = model.scaler_scale();
+    let h = l0.out_dim;
+    let mut used_negative = false;
+    for j in (0..h).filter(|&j| w2[j] != 0.0) {
+        for (d, p) in [(0usize, 2usize), (1, 3)] {
+            let a = f64::from(w1[d * h + j]) / f64::from(s[d]);
+            let b = f64::from(w1[p * h + j]) / f64::from(s[p]);
+            assert!(a >= 0.0 && a + b.min(0.0) >= 0.0, "unit {j}: gain {a} {b}");
+            used_negative |= b < 0.0;
+        }
+    }
+    assert!(used_negative, "the target needs a falling gain; no negative product weight was used");
+    let mut predictor = zenpredict::Predictor::new(&model);
+    for _ in 0..3000 {
+        let (d0, d1, f0, f1) = (2.0 * next(), 2.0 * next(), 0.01 + 0.99 * next(), 0.01 + 0.99 * next());
+        let (e0, e1) = (next(), next());
+        let x = [d0 as f32, d1 as f32, (d0 * f0) as f32, (d1 * f1) as f32];
+        let y = [(d0 + e0) as f32, (d1 + e1) as f32, ((d0 + e0) * f0) as f32, ((d1 + e1) * f1) as f32];
+        let (fx, fy) = (predictor.predict(&x).unwrap()[0], predictor.predict(&y).unwrap()[0]);
+        assert!(fy <= fx + 1e-4 && fx <= 100.0, "monotone violation {x:?}->{fx} {y:?}->{fy}");
+    }
+}
+
+fn byc_derived_bake(w1: &[f32], b1: &[f32], w2: &[f32], products: &str) -> Vec<u8> {
+    let text = format!("zensim-derived-inputs v1\nin 13\nin 14\n{products}");
+    let meta = [BakeMetadataEntry {
+        key: "zensim.derived_inputs",
+        kind: zenpredict::MetadataType::Utf8,
+        value: text.as_bytes(),
+    }];
+    bake(&BakeRequest {
+        schema_hash: 0,
+        flags: 0,
+        scaler_mean: &[0.0; 4],
+        scaler_scale: &[1.0, 2.0, 1.0, 0.5],
+        layers: &[
+            BakeLayer {
+                in_dim: 4,
+                out_dim: 2,
+                activation: Activation::Relu,
+                dtype: WeightDtype::F32,
+                weights: w1,
+                biases: b1,
+            },
+            BakeLayer {
+                in_dim: 2,
+                out_dim: 1,
+                activation: Activation::Identity,
+                dtype: WeightDtype::F32,
+                weights: w2,
+                biases: &[100.0],
+            },
+        ],
+        feature_bounds: &[],
+        metadata: &meta,
+        output_specs: &[],
+        discrete_sets: &[],
+        sparse_overrides: &[],
+        feature_order: None,
+        output_order: None,
+        compressed: false,
+        hu_permutations: None,
+    })
+    .unwrap()
+}
+
+/// Certificate on declared `fx1` products: a negative product weight inside
+/// the gate cone certifies; one outside it, or a factor that is not a
+/// `pjnd_fragility` slot, refuses.
+#[test]
+fn byc_certificate_gated_products() {
+    // inputs: d13, d14, d13·f422, d14·f480; scales 1, 2, 1, 0.5; two units.
+    // unit 0: a=1 on d13, b=-0.9 on its product (gain 1 - 0.9f >= 0.1). unit 1: plain on d14.
+    let ok = [1.0f32, 0.0, 0.0, 0.5, -0.9, 0.0, 0.0, 0.2];
+    let fx1 = "product 13 422\nproduct 14 480\n";
+    let good = byc_derived_bake(&ok, &[0.0, -0.1], &[-1.0, -2.0], fx1);
+    let cert = certify_monotone_bake(&zenpredict::Model::from_bytes(&good).unwrap(), 100.0);
+    assert_eq!(cert, Ok(MonotoneCertificate { ramps: 0, free_ramps: 0, free_amplitude: 0.0 }));
+    // b = -1.1 makes the gain negative at f = 1.
+    let mut bad = ok;
+    bad[4] = -1.1;
+    let refused = byc_derived_bake(&bad, &[0.0, -0.1], &[-1.0, -2.0], fx1);
+    assert!(certify_monotone_bake(&zenpredict::Model::from_bytes(&refused).unwrap(), 100.0).is_err());
+    // 423 is not a fragility slot ((423 - 372) % 29 != 21).
+    let wrong = byc_derived_bake(&ok, &[0.0, -0.1], &[-1.0, -2.0], "product 13 423\nproduct 14 480\n");
+    assert!(certify_monotone_bake(&zenpredict::Model::from_bytes(&wrong).unwrap(), 100.0).is_err());
+}
+
 /// Negative control: B's recipe class (`--nonneg-distance`, signed W1) trains
 /// negative first-layer weights, which the certificate must refuse.
 #[test]

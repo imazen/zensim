@@ -891,6 +891,13 @@ struct Args {
     #[arg(long, default_value_t = 0.0)]
     free_budget: f64,
 
+    /// With `--monotone-cbc` and `--derived-inputs`: content-gated
+    /// monotonicity. Product rows are not clamped `>= 0`; each unit's
+    /// (direct, product) weights keep the gain on every damage feature
+    /// non-negative for any fragility in (0, 1].
+    #[arg(long, requires_all = ["derived_inputs", "monotone_cbc", "nonneg_distance"])]
+    monotone_gated_products: bool,
+
     /// STEER S: fixed tau1/8 C1 convex hinge; plain N only.
     #[arg(long, requires = "nonneg_distance", conflicts_with_all = ["steer_pairs", "pool_head", "hybrid_head", "per_sample_alpha_head", "skip_connection"])]
     smooth_hinge: bool,
@@ -4114,6 +4121,15 @@ fn main() {
     hyperparams.feature_transforms = feature_transforms.clone();
     hyperparams.feature_transform_params = feature_transform_params.clone();
     hyperparams.monotone_feature_pin = monotone_feature_pin;
+    if args.monotone_gated_products {
+        let (decl, _) = derived.as_ref().expect("--monotone-gated-products requires --derived-inputs");
+        hyperparams.monotone_product_pairs = decl
+            .products
+            .iter()
+            .enumerate()
+            .map(|(j, &[direct, _])| (direct, decl.product_column(args.max_features, j)))
+            .collect();
+    }
 
     println!(
         "Training: {} groups, {n_features} features, {hyperparams:?}",

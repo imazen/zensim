@@ -34,6 +34,14 @@ pub fn validate_training_capabilities(
             "--nonneg-thresholds requires plain one-layer N without smooth hinge, heads or the K penalty"
         );
     }
+    if !hyperparams.monotone_product_pairs.is_empty() {
+        assert!(
+            hyperparams.nonneg_distance
+                && hyperparams.monotone_cbc
+                && hyperparams.monotone_feature_pin.is_none(),
+            "--monotone-gated-products requires --nonneg-distance and --monotone-cbc on every input"
+        );
+    }
     if hyperparams.free_ramps > 0 {
         assert!(
             hyperparams.nonneg_thresholds

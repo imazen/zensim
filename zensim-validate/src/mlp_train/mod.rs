@@ -149,6 +149,18 @@ pub struct MlpHyperparams {
     pub free_ramps: usize,
     /// Cap on the free ramps' summed amplitude, in raw score units.
     pub free_budget: f64,
+    /// Content-gated monotonicity over `fx1` products. Each `(direct, product)`
+    /// input-index pair carries `d` and `d·f` with `f ∈ (0, 1]` a reference
+    /// fragility. With `monotone_cbc`, the product's W1 row is not clamped
+    /// `>= 0`; instead each unit's `(a, b)` is projected onto
+    /// `{a >= 0, a/s_d + b/s_p >= 0}` (`s` = scaler scales), so the unit's gain
+    /// on `d`, `a/s_d + b·f/s_p`, is non-negative for every `f ∈ (0, 1]`: the
+    /// model stays non-increasing in every damage feature while its gain may
+    /// rise or fall with content. Empty = off.
+    pub monotone_product_pairs: Vec<(usize, usize)>,
+    /// Filled by the trainer from its scaler (`(s_d, s_p)` per pair); callers
+    /// leave it empty.
+    pub monotone_product_scales: Vec<(f64, f64)>,
     pub n_hidden: usize,
     pub n_epochs: usize,
     pub pairs_per_epoch: usize,
@@ -990,6 +1002,8 @@ impl Default for MlpHyperparams {
             monotone_ramps: 0,
             free_ramps: 0,
             free_budget: 0.0,
+            monotone_product_pairs: Vec::new(),
+            monotone_product_scales: Vec::new(),
             n_hidden: 32,
             n_epochs: 200,
             pairs_per_epoch: 50_000,
@@ -1423,7 +1437,31 @@ fn project_plain(
     } else {
         nonneg_project(w2, b1, b2, pin);
     }
-    if hp.monotone_cbc && hp.free_ramps > 0 {
+    if hp.monotone_cbc && !hp.monotone_product_pairs.is_empty() {
+        let n_in = w1.len() / n_hidden;
+        let mut gated = vec![false; n_in];
+        for &(_, p) in &hp.monotone_product_pairs {
+            gated[p] = true;
+        }
+        for (k, block) in w1.chunks_exact_mut(n_hidden).enumerate() {
+            if !gated[k] {
+                for v in &mut block[..first_free] {
+                    *v = v.max(0.0);
+                }
+            }
+        }
+        for (&(d, p), &(sd, sp)) in hp
+            .monotone_product_pairs
+            .iter()
+            .zip(&hp.monotone_product_scales)
+        {
+            for j in 0..first_free {
+                let (a, b) = project_gate(w1[d * n_hidden + j], w1[p * n_hidden + j], sd, sp);
+                w1[d * n_hidden + j] = a;
+                w1[p * n_hidden + j] = b;
+            }
+        }
+    } else if hp.monotone_cbc && hp.free_ramps > 0 {
         // Free ramp rows keep their sign; only the monotone units are clamped.
         for block in w1.chunks_exact_mut(n_hidden) {
             for v in &mut block[..first_free] {
@@ -1444,6 +1482,39 @@ fn project_plain(
     if hp.free_ramps > 0 {
         project_free_budget(w2, b1, first_free, hp.free_ramps, hp.free_budget);
     }
+}
+
+/// Smallest direct weight that may carry a negative product weight: the f16
+/// normal range, so packing cannot flush `a` to zero while `b < 0` survives.
+const GATE_MIN_DIRECT: f64 = 1.0 / 8192.0;
+/// Relative margin kept inside the gate cone so f16 packing (relative error
+/// <= 2^-11 per weight) cannot move a boundary pair outside it.
+const GATE_MARGIN: f64 = 1.0 / 256.0;
+
+/// Projects one unit's `(a, b)` (direct, product weights) onto the gate cone
+/// `{a >= 0, s_p·a + s_d·b >= GATE_MARGIN·s_p·a}`: the closer of the two edge
+/// rays when outside, then the f16 safety rules above.
+fn project_gate(a: f64, b: f64, sd: f64, sp: f64) -> (f64, f64) {
+    let (mut a, mut b) = if a >= 0.0 && sp * a + sd * b >= 0.0 {
+        (a, b)
+    } else {
+        let n = (sd * sd + sp * sp).sqrt();
+        let (ux, uy) = (sd / n, -sp / n);
+        let t1 = b.max(0.0);
+        let t2 = (a * ux + b * uy).max(0.0);
+        let d1 = a * a + (b - t1) * (b - t1);
+        let d2 = (a - t2 * ux).powi(2) + (b - t2 * uy).powi(2);
+        if d1 <= d2 { (0.0, t1) } else { (t2 * ux, t2 * uy) }
+    };
+    if b < 0.0 {
+        if a < GATE_MIN_DIRECT {
+            b = 0.0;
+        } else {
+            b = b.max(-a * (sp / sd) * (1.0 - GATE_MARGIN));
+        }
+    }
+    a = a.max(0.0);
+    (a, b)
 }
 
 /// Scales the free ramps' output weights so `Σ |v|·(b_p - b_q) <= budget`.
@@ -1524,7 +1595,9 @@ pub struct MonotoneCertificate {
 /// - every hidden unit with a positive output weight is a ramp's upper unit,
 ///   matched one-to-one to a distinct lower unit with a bit-identical W1
 ///   column, the exactly negated output weight and `b1_lower >= b1_upper`;
-/// - a negative W1 entry appears only in such a pair (a *free* ramp).
+/// - a negative W1 entry appears only in such a pair (a *free* ramp), or on
+///   an `fx1` fragility product whose unit keeps a non-negative gain on its
+///   damage feature for every fragility in (0, 1] (`zensim.derived_inputs`).
 ///   Hidden units may be stored in any order.
 ///
 /// Each plain unit contributes `w2·ReLU(z + b) <= 0` with `w2 <= 0`, non-
@@ -1583,7 +1656,24 @@ pub fn certify_monotone_bake(
         return Err(format!("output bias {} != pin {pin}", l1.biases[0]));
     }
     let column = |j: usize| -> Vec<u32> { (0..n_in).map(|k| w1[k * n_hidden + j].to_bits()).collect() };
-    let signed = |j: usize| (0..n_in).any(|k| w1[k * n_hidden + j] < 0.0);
+    // `fx1` products: (direct input, product input) pairs whose second factor
+    // is a `pjnd_fragility` slot, bounded in (0, 1] by construction. A unit is
+    // monotone in a damage feature when its gain `a/s_d + b·f/s_p` is >= 0 for
+    // every such f, i.e. `a >= 0` and `a/s_d + min(0, b)/s_p >= 0`.
+    let gates = derived_gates(model)?;
+    let scale = model.scaler_scale();
+    let mut gated = vec![false; n_in];
+    for &(_, p) in &gates {
+        gated[p] = true;
+    }
+    let signed = |j: usize| {
+        (0..n_in).any(|k| !gated[k] && w1[k * n_hidden + j] < 0.0)
+            || gates.iter().any(|&(d, p)| {
+                let a = f64::from(w1[d * n_hidden + j]) / f64::from(scale[d]);
+                let b = f64::from(w1[p * n_hidden + j]) / f64::from(scale[p]);
+                a < 0.0 || a + b.min(0.0) < 0.0
+            })
+    };
     let mut used = vec![false; n_hidden];
     let mut cert = MonotoneCertificate { ramps: 0, free_ramps: 0, free_amplitude: 0.0 };
     for up in 0..n_hidden {
@@ -1615,6 +1705,46 @@ pub fn certify_monotone_bake(
         return Err(format!("unit {j}: negative first-layer weight outside a ramp pair"));
     }
     Ok(cert)
+}
+
+/// `(direct input, product input)` index pairs from a bake's
+/// `zensim.derived_inputs` declaration, each product's second factor checked
+/// to be a `pjnd_fragility` slot (v2 signal 21: `372 + 29·cell + 21`). No
+/// declaration = no pairs. Anything else in the declaration refuses.
+fn derived_gates(model: &zenpredict::Model) -> Result<Vec<(usize, usize)>, String> {
+    let Ok(text) = model.metadata().get_utf8("zensim.derived_inputs") else {
+        return Ok(Vec::new());
+    };
+    let mut lines = text.lines();
+    if lines.next() != Some("zensim-derived-inputs v1") {
+        return Err("unknown derived-inputs header".into());
+    }
+    let mut direct_pos = std::collections::BTreeMap::new();
+    let mut pairs = Vec::new();
+    for (pos, line) in lines.filter(|l| !l.is_empty()).enumerate() {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        let id = |s: &str| s.parse::<usize>().map_err(|_| format!("bad derived-inputs id {s:?}"));
+        match parts.as_slice() {
+            ["in", a] => {
+                direct_pos.insert(id(a)?, pos);
+            }
+            ["product", a, f] => {
+                let (a, f) = (id(a)?, id(f)?);
+                if !(372..720).contains(&f) || (f - 372) % 29 != 21 {
+                    return Err(format!("product factor {f} is not a pjnd_fragility slot"));
+                }
+                let d = *direct_pos
+                    .get(&a)
+                    .ok_or_else(|| format!("product of {a} precedes or lacks its direct input"))?;
+                pairs.push((d, pos));
+            }
+            _ => return Err(format!("unknown derived-inputs line {line:?}")),
+        }
+    }
+    if direct_pos.len() + pairs.len() != model.n_inputs() {
+        return Err("derived-inputs declaration does not cover the model inputs".into());
+    }
+    Ok(pairs)
 }
 
 /// Upper end of the per-unit quantile range [`init_thresholds`] draws from.
@@ -2912,6 +3042,22 @@ pub fn train_mlp_strategy_pairs(
         }
     }
     let scaler_mean = scaler_mean;
+    // `--monotone-gated-products`: the gate cone is defined in standardized
+    // units, so its scales come from this run's scaler.
+    let gated_hp;
+    let hyperparams = if hyperparams.monotone_product_pairs.is_empty() {
+        hyperparams
+    } else {
+        gated_hp = MlpHyperparams {
+            monotone_product_scales: hyperparams
+                .monotone_product_pairs
+                .iter()
+                .map(|&(d, p)| (scaler_scale[d].max(1e-12), scaler_scale[p].max(1e-12)))
+                .collect(),
+            ..hyperparams.clone()
+        };
+        &gated_hp
+    };
 
     // 2. Standardize features per group up-front. Standardizing now
     //    avoids redoing it inside the per-step inner loop and lets the
