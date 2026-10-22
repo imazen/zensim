@@ -447,4 +447,4 @@ CID22-A +0.0060 (T: −0.0205). Dense bakes certify monotone through the gate ru
 cell keeps one live unit, now a linear model whose damage gains move with fragility in both
 directions (product weights down to −1.99, inside the cone). Pair classes match T (cross-type
 KADID −0.0123, TID −0.0205). Content-dependent gain is not what the monotone class lacks; the
-deficit is cross-type.
+deficit is cross-type. Mixture test: 0–4 inversions per cell, max +4.49, dithering cases only.
