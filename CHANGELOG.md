@@ -14,7 +14,7 @@ None.
 
 ### Added
 
-- zensim-validate `gram_lasso`: `ridge_solve`, the exact L2 solution on the standardized z-space system shared with `lasso_cd`/`box_cd` (`(G/W + λI) w = c/W`, Cholesky; λ = 0 is the OLS optimum), and `symmetric_eigen`, a deterministic cyclic-Jacobi eigendecomposition for principal-component projections of a standardized Gram. Five unit tests (λ = 0 parity with `lasso_cd`, orthogonal closed form, singular refusal, reconstruction/ordering, known spectra). New public items in the unpublished validation crate; reviewed through a PR assigned to lilith.
+- zensim-validate `gram_lasso`: `ridge_solve`, the exact L2 solution on the standardized z-space system shared with `lasso_cd`/`box_cd` (`(G/W + λI) w = c/W`, Cholesky; λ = 0 is the OLS optimum), and `symmetric_eigen`, a deterministic cyclic-Jacobi eigendecomposition for principal-component projections of a standardized Gram. Refuses a numerically singular system (a Cholesky pivot at or below `RIDGE_PIVOT_FLOOR` = 1e-12 of its diagonal). Seven unit tests (λ = 0 parity with `lasso_cd`, orthogonal closed form, singular and near-singular refusal, reconstruction/ordering, known spectra, a 372-feature Gram at the documented default `tol = 1e-30`). New public items in the unpublished validation crate; reviewed through a PR assigned to lilith.
 
 ### Changed
 
