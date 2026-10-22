@@ -267,3 +267,38 @@ cell's dense bake certifies monotone with 5,535 negative product weights.
 
 The same decision rule applies to each: E33 point form on the 3-seed screen, then seeds 3–9
 and the full-data gates for any arm that meets it.
+
+**Per-type calibration bias** (`scripts/byconstruction/type_bias.py`; mean pooled prediction rank
+minus pooled human rank, seeds 0–2; negative = rated worse than humans). Largest T − `base-c`
+gaps:
+
+| Set | Type | T | `base-c` |
+|---|---|---|---|
+| KADID | contrast change | −0.132 | −0.023 |
+| KADID | color shift | −0.006 | +0.098 |
+| KADID | color quantization | −0.059 | +0.003 |
+| KADID | non-eccentricity patch | −0.086 | −0.036 |
+| TID2013 | high-frequency pattern noise | −0.217 | −0.095 |
+| TID2013 | local block-wise | +0.040 | +0.150 |
+| TID2013 | denoising | −0.087 | −0.003 |
+
+The deficit is two-sided: the monotone model over-penalizes types that light up many damage
+features (contrast change, pattern noise, denoising), while B's recipe over-forgives some
+others (color shift, block-wise) where T is closer to the human rank. "Benign global change"
+is part of the story, not all of it.
+
+### Arm E5 (`mono:thr:fr32:fb5`, certified budget 5): budget fully used, no E21 gain
+
+`526261c3` trainer, 1,910 s for 12 cells, peak RSS 1.03 GiB.
+
+| | E21 Δ vs `base-c`, seeds 0–2 |
+|---|---|
+| mean (seed-unit SE) | **−0.0194 (0.0027)** |
+| KADID / TID2013 / KonFiG / CID22-A | −0.0158 / −0.0403 / −0.0231 / +0.0014 |
+
+Every cell certifies (`certify-monotone` on its dense bake) with 5–21 live free ramps and a
+certified free amplitude of 3.47–4.98 of the 5-unit budget: the optimizer wants more
+non-monotone room than 5 points, and 5 points buys nothing measurable on E21. Pair classes
+match T (same ladder KADID +0.0067, TID +0.0057; cross-type −0.0110 / −0.0189; cross-source
+−0.0099 / −0.0226). Mixture test: 3–8 inversions per cell, max rise +5.01 (dithering cases; the
+budget bound plus the feature-space-to-pixel gap).
