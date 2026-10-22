@@ -501,3 +501,8 @@ Mean E21 pooled SROCC over the four sources, seeds 0–2:
 The sign-constrained arms are 4–6× more seed-stable than B's recipe; M's single max pair brings
 the variance back (which pair is found depends on the seed). E34's narrow `w-c` is both more
 stable and higher than B's own width: plain capacity reduction is a cheap stabilizer.
+
+**Seed ensembles** (`seed_ensemble.py`; mean raw prediction over seeds 0–2; averaging
+certified-monotone models stays monotone): `base-c` 0.8722 → 0.8760, M 0.8579 → 0.8599, E20
+0.8569 → 0.8578, T 0.8517 → 0.8519. Ensemble gaps vs `base-c`: M −0.0161, E20 −0.0182, T
+−0.0241. B's recipe gains more from ensembling, so this does not close the gap.
