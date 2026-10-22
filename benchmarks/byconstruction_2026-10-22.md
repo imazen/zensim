@@ -649,3 +649,10 @@ removing the best global (or low-frequency) affine tone map per channel — the 
 plus a small set of global-change magnitude features, and combine all of them monotonically.
 Global changes are then discounted by a small learned weight on their own terms, with nothing
 subtracted.
+
+**Arm DG (`mono:thr:dropglobal`), rule fixed before its result.** Exactly monotone (strict
+mask) with every damage family dropped whose probe response to a mild or clipping-free global
+edit exceeds its response to a visible σ1.2 blur: mse, masked_mse, iw_mse, pjnd_transducer,
+transducer_lowk, transducer_highk, ringing (`masks/global_sensitive.tsv`). The selection uses
+only the label-free probe, not assessment labels. A cheap proxy for "structure-only residual
+damage"; if it beats T clearly, the affine-residual feature design is worth building.
