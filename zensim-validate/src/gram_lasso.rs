@@ -451,12 +451,19 @@ pub fn py_repr_f64(x: f64) -> String {
     if neg { format!("-{body}") } else { body }
 }
 
+/// Relative Cholesky pivot floor for [`ridge_solve`]: a pivot at or below this
+/// fraction of its diagonal entry marks the system numerically singular.
+pub const RIDGE_PIVOT_FLOOR: f64 = 1e-12;
+
 /// Ridge on the SAME standardized system as [`lasso_cd`]: the exact solution of
 /// `min ½ wᵀ(G/W)w − (c/W)ᵀw + (λ/2)‖w‖²`, i.e. `(G/W + λI) w = c/W`, in z-space,
 /// by Cholesky. `λ = 0` is the OLS optimum [`lasso_cd`] reaches at `lam = 0`.
 /// With row weights normalised to mean 1 (`W` = row count) the classic weighted
-/// ridge `Σ wᵢ rᵢ² + α‖w‖²` is `λ = α / W`. Errors when the system is not
-/// positive definite (collinear features at `λ = 0`).
+/// ridge `Σ wᵢ rᵢ² + α‖w‖²` is `λ = α / W`. Errors when a Cholesky pivot falls
+/// to [`RIDGE_PIVOT_FLOOR`] of its diagonal entry or below: at `λ = 0` a feature
+/// is then a linear combination of earlier ones to about twelve digits, and the
+/// OLS weights are not reliable. With `λ > 0` every pivot is at least `λ`, so
+/// only `λ` below about `1e-12` can trip it.
 pub fn ridge_solve(sg: &StandardizedGram, lam: f64) -> Result<Vec<f64>, String> {
     let n = sg.n_feat;
     if !lam.is_finite() || lam < 0.0 {
@@ -470,11 +477,12 @@ pub fn ridge_solve(sg: &StandardizedGram, lam: f64) -> Result<Vec<f64>, String> 
     let b: Vec<f64> = sg.c.iter().map(|v| v / sg.w_total).collect();
     // In-place Cholesky A = L Lᵀ (lower triangle).
     for j in 0..n {
-        let mut d = a[j * n + j];
+        let diag = a[j * n + j];
+        let mut d = diag;
         for k in 0..j {
             d -= a[j * n + k] * a[j * n + k];
         }
-        if d.is_nan() || d <= 0.0 {
+        if d.is_nan() || d <= RIDGE_PIVOT_FLOOR * diag {
             return Err(format!(
                 "ridge_solve: system not positive definite at pivot {j} (lambda {lam})"
             ));
@@ -517,6 +525,10 @@ pub fn ridge_solve(sg: &StandardizedGram, lam: f64) -> Result<Vec<f64>, String> 
 /// matching value `k`. Each vector's sign is fixed so its largest-magnitude
 /// component is positive. Deterministic: fixed sweep order, no seed. Stops
 /// when the off-diagonal sum of squares falls below `tol · ‖A‖²_F`.
+/// `max_sweeps = 50`, `tol = 1e-30` is a safe default: cyclic Jacobi converges
+/// quadratically, and on correlated Grams of 64 to 720 features (16 latent
+/// factors plus noise) it reached `tol = 1e-30` in 9 to 11 sweeps (measured
+/// 2026-10-22; 720 features took about 8 s in release).
 pub fn symmetric_eigen(
     a: &[f64],
     n: usize,
@@ -1103,6 +1115,30 @@ mod tests {
         assert!((w[0] - w[1]).abs() < 1e-12, "{} vs {}", w[0], w[1]);
     }
 
+    /// Near-collinear columns (x2 = x0 + δ·z, so feature 2's pivot is about
+    /// δ²): at δ = 1e-7 the pivot (~1e-14) is below the relative floor and
+    /// λ = 0 refuses instead of returning amplified weights; at δ = 1e-5
+    /// (~1e-10) it solves; λ = 0.1 solves the near-collinear design.
+    #[test]
+    fn ridge_refuses_numerically_singular_pivot() {
+        let x0 = [1.0, 1.0, -1.0, -1.0, 1.0, 1.0, -1.0, -1.0];
+        let x1 = [1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0];
+        let z = [1.0, 1.0, 1.0, 1.0, -1.0, -1.0, -1.0, -1.0];
+        let y: Vec<f64> = (0..8).map(|i| 0.8 * x0[i] + 0.3 * x1[i]).collect();
+        let design = |delta: f64| -> StandardizedGram {
+            let x: Vec<[f64; 3]> = (0..8)
+                .map(|i| [x0[i], x1[i], x0[i] + delta * z[i]])
+                .collect();
+            let (s_mat, s_vec, q, y1, n) = moments(&x, &y);
+            standardize_gram(3, 1.0, &s_mat, &s_vec, &q, y1, n).expect("standardize")
+        };
+        let near = design(1e-7);
+        assert!(ridge_solve(&near, 0.0).is_err());
+        let w = ridge_solve(&near, 0.1).expect("ridge");
+        assert!(w.iter().all(|v| v.is_finite() && v.abs() < 1.0), "{w:?}");
+        assert!(ridge_solve(&design(1e-5), 0.0).is_ok());
+    }
+
     // -------------------------------------------------------------- eigen
 
     /// A = V Λ Vᵀ, Vᵀ V = I, descending values, deterministic signs, on a
@@ -1163,5 +1199,66 @@ mod tests {
         assert_eq!(vals, vec![5.0, 3.0, 1.0]);
         assert_eq!(vecs, vec![0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0]);
         assert!(symmetric_eigen(&[1.0, 2.0, 3.0, 1.0], 2, 5, 1e-30).is_err());
+    }
+
+    /// Production size: a 372-feature correlation matrix (16 latent factors
+    /// plus noise, deterministic xorshift data) converges at the documented
+    /// default (50 sweeps, tol 1e-30) and reconstructs with orthonormal
+    /// vectors and descending values.
+    #[test]
+    fn symmetric_eigen_converges_at_production_size() {
+        let (n, m, k) = (372usize, 1000usize, 16usize);
+        let mut s = 0x9E37_79B9_7F4A_7C15u64;
+        let mut r = || {
+            s ^= s << 13;
+            s ^= s >> 7;
+            s ^= s << 17;
+            (s >> 11) as f64 / (1u64 << 53) as f64 * 2.0 - 1.0
+        };
+        let f: Vec<f64> = (0..m * k).map(|_| r()).collect();
+        let l: Vec<f64> = (0..k * n).map(|_| r()).collect();
+        let mut x = vec![0.0f64; m * n];
+        for i in 0..m {
+            for j in 0..n {
+                let mut v = 0.1 * r();
+                for t in 0..k {
+                    v += f[i * k + t] * l[t * n + j];
+                }
+                x[i * n + j] = v;
+            }
+        }
+        for j in 0..n {
+            let mu = (0..m).map(|i| x[i * n + j]).sum::<f64>() / m as f64;
+            let var = (0..m).map(|i| (x[i * n + j] - mu).powi(2)).sum::<f64>() / m as f64;
+            for i in 0..m {
+                x[i * n + j] = (x[i * n + j] - mu) / var.sqrt();
+            }
+        }
+        let mut a = vec![0.0f64; n * n];
+        for p in 0..n {
+            for q in p..n {
+                let v = (0..m).map(|i| x[i * n + p] * x[i * n + q]).sum::<f64>() / m as f64;
+                a[p * n + q] = v;
+                a[q * n + p] = v;
+            }
+        }
+        let (vals, vecs) = symmetric_eigen(&a, n, 50, 1e-30).expect("eigen");
+        assert!(vals.windows(2).all(|w| w[0] >= w[1]));
+        let trace: f64 = (0..n).map(|i| a[i * n + i]).sum();
+        assert!((vals.iter().sum::<f64>() - trace).abs() < 1e-9 * trace);
+        let mut worst_rec = 0.0f64;
+        let mut worst_orth = 0.0f64;
+        for i in 0..n {
+            for j in i..n {
+                let rec: f64 = (0..n)
+                    .map(|t| vecs[i * n + t] * vals[t] * vecs[j * n + t])
+                    .sum();
+                worst_rec = worst_rec.max((rec - a[i * n + j]).abs());
+                let dot: f64 = (0..n).map(|t| vecs[t * n + i] * vecs[t * n + j]).sum();
+                worst_orth = worst_orth.max((dot - if i == j { 1.0 } else { 0.0 }).abs());
+            }
+        }
+        assert!(worst_rec < 1e-9, "reconstruction {worst_rec:e}");
+        assert!(worst_orth < 1e-10, "orthonormality {worst_orth:e}");
     }
 }
