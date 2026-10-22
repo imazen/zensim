@@ -40,7 +40,9 @@ pub fn validate_training_capabilities(
                 && hyperparams.monotone_cbc
                 && hyperparams.monotone_feature_pin.is_none()
                 && hyperparams.monotone_product_pairs.is_empty()
-                && 2 * (hyperparams.max_pairs + hyperparams.monotone_ramps + hyperparams.free_ramps)
+                && 2 * (hyperparams.max_pairs
+                    + hyperparams.monotone_ramps
+                    + hyperparams.free_ramps)
                     <= hyperparams.n_hidden,
             "--max-pairs requires --nonneg-thresholds, --monotone-cbc on every input, no gated products, and room in --hidden"
         );
@@ -60,7 +62,8 @@ pub fn validate_training_capabilities(
                 && hyperparams.monotone_feature_pin.is_none()
                 && hyperparams.free_budget.is_finite()
                 && hyperparams.free_budget >= 0.0
-                && 2 * (hyperparams.monotone_ramps + hyperparams.free_ramps) <= hyperparams.n_hidden,
+                && 2 * (hyperparams.monotone_ramps + hyperparams.free_ramps)
+                    <= hyperparams.n_hidden,
             "--free-ramps requires --nonneg-thresholds, --monotone-cbc on every input, a finite \
              --free-budget >= 0 and 2*(ramps + free ramps) <= hidden"
         );

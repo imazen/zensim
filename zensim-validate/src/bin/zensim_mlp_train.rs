@@ -4130,7 +4130,9 @@ fn main() {
     hyperparams.feature_transform_params = feature_transform_params.clone();
     hyperparams.monotone_feature_pin = monotone_feature_pin;
     if args.monotone_gated_products {
-        let (decl, _) = derived.as_ref().expect("--monotone-gated-products requires --derived-inputs");
+        let (decl, _) = derived
+            .as_ref()
+            .expect("--monotone-gated-products requires --derived-inputs");
         hyperparams.monotone_product_pairs = decl
             .products
             .iter()

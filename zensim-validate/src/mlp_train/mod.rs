@@ -1445,7 +1445,11 @@ fn project_plain(
     // Max pairs: keep each v row's sign through the per-unit clamp below, and
     // tie the pair's output weight (mean, then <= 0).
     let max_v_rows: Vec<Vec<f64>> = (0..hp.max_pairs)
-        .map(|i| w1.chunks_exact(n_hidden).map(|row| row[2 * i + 1]).collect())
+        .map(|i| {
+            w1.chunks_exact(n_hidden)
+                .map(|row| row[2 * i + 1])
+                .collect()
+        })
         .collect();
     let max_w2: Vec<f64> = (0..hp.max_pairs)
         .map(|i| (0.5 * (w2[2 * i] + w2[2 * i + 1])).min(0.0))
@@ -1537,7 +1541,11 @@ fn project_gate(a: f64, b: f64, sd: f64, sp: f64) -> (f64, f64) {
         let t2 = (a * ux + b * uy).max(0.0);
         let d1 = a * a + (b - t1) * (b - t1);
         let d2 = (a - t2 * ux).powi(2) + (b - t2 * uy).powi(2);
-        if d1 <= d2 { (0.0, t1) } else { (t2 * ux, t2 * uy) }
+        if d1 <= d2 {
+            (0.0, t1)
+        } else {
+            (t2 * ux, t2 * uy)
+        }
     };
     if b < 0.0 {
         if a < GATE_MIN_DIRECT {
@@ -1560,7 +1568,11 @@ fn project_free_budget(w2: &mut [f64], b1: &[f64], first_free: usize, n: usize, 
         })
         .sum();
     if amplitude > budget {
-        let s = if amplitude > 0.0 { budget / amplitude } else { 0.0 };
+        let s = if amplitude > 0.0 {
+            budget / amplitude
+        } else {
+            0.0
+        };
         for i in 0..n {
             let p = first_free + 2 * i;
             w2[p] *= s;
@@ -1664,7 +1676,8 @@ pub fn certify_monotone_bake(
         return Err(format!("{} layers, expected 2", model.n_layers()));
     }
     let (l0, l1) = (model.layer(0), model.layer(1));
-    if l0.activation != Activation::Relu || l1.activation != Activation::Identity || l1.out_dim != 1 {
+    if l0.activation != Activation::Relu || l1.activation != Activation::Identity || l1.out_dim != 1
+    {
         return Err("needs ReLU hidden layer and identity scalar output".into());
     }
     if model
@@ -1674,7 +1687,10 @@ pub fn certify_monotone_bake(
         return Err("feature transforms present".into());
     }
     if model.scaler_mean().iter().any(|&m| m != 0.0)
-        || model.scaler_scale().iter().any(|&s| !(s > 0.0 && s.is_finite()))
+        || model
+            .scaler_scale()
+            .iter()
+            .any(|&s| !(s > 0.0 && s.is_finite()))
     {
         return Err("standardization is not scale-only and positive".into());
     }
@@ -1690,7 +1706,8 @@ pub fn certify_monotone_bake(
     if l1.biases[0].to_bits() != pin.to_bits() {
         return Err(format!("output bias {} != pin {pin}", l1.biases[0]));
     }
-    let column = |j: usize| -> Vec<u32> { (0..n_in).map(|k| w1[k * n_hidden + j].to_bits()).collect() };
+    let column =
+        |j: usize| -> Vec<u32> { (0..n_in).map(|k| w1[k * n_hidden + j].to_bits()).collect() };
     // `fx1` products: (direct input, product input) pairs whose second factor
     // is a `pjnd_fragility` slot, bounded in (0, 1] by construction. A unit is
     // monotone in a damage feature when its gain `a/s_d + b·f/s_p` is >= 0 for
@@ -1710,7 +1727,12 @@ pub fn certify_monotone_bake(
             })
     };
     let mut used = vec![false; n_hidden];
-    let mut cert = MonotoneCertificate { ramps: 0, free_ramps: 0, free_amplitude: 0.0, max_pairs: 0 };
+    let mut cert = MonotoneCertificate {
+        ramps: 0,
+        free_ramps: 0,
+        free_amplitude: 0.0,
+        max_pairs: 0,
+    };
     for up in 0..n_hidden {
         if !(w2[up] > 0.0) {
             continue;
@@ -1725,7 +1747,9 @@ pub fn certify_monotone_bake(
                 && column(j) == col
         });
         let Some(lo) = lo else {
-            return Err(format!("unit {up}: positive output weight without a ramp partner"));
+            return Err(format!(
+                "unit {up}: positive output weight without a ramp partner"
+            ));
         };
         used[lo] = true;
         used[up] = true;
@@ -1740,7 +1764,8 @@ pub fn certify_monotone_bake(
     // with bias exactly 0, the bit-identical output weight, a non-negative
     // column, and column(u) + column(v) >= 0: then c·(ReLU(a·x) + ReLU((b-a)·x - t))
     // = c·max(a·x, b·x - t) on non-negative inputs.
-    let col_f = |j: usize| -> Vec<f64> { (0..n_in).map(|k| f64::from(w1[k * n_hidden + j])).collect() };
+    let col_f =
+        |j: usize| -> Vec<f64> { (0..n_in).map(|k| f64::from(w1[k * n_hidden + j])).collect() };
     for v in 0..n_hidden {
         if used[v] || !signed(v) || w2[v] == 0.0 {
             continue;
@@ -1752,7 +1777,10 @@ pub fn certify_monotone_bake(
                 && l0.biases[u] == 0.0
                 && w2[u].to_bits() == w2[v].to_bits()
                 && !signed(u)
-                && col_f(u).iter().zip(&cv).all(|(a, b)| *a >= 0.0 && a + b >= 0.0)
+                && col_f(u)
+                    .iter()
+                    .zip(&cv)
+                    .all(|(a, b)| *a >= 0.0 && a + b >= 0.0)
         });
         match u {
             Some(u) => {
@@ -1760,7 +1788,11 @@ pub fn certify_monotone_bake(
                 used[v] = true;
                 cert.max_pairs += 1;
             }
-            None => return Err(format!("unit {v}: negative first-layer weight outside a ramp or max pair")),
+            None => {
+                return Err(format!(
+                    "unit {v}: negative first-layer weight outside a ramp or max pair"
+                ));
+            }
         }
     }
     Ok(cert)
@@ -1782,7 +1814,10 @@ fn derived_gates(model: &zenpredict::Model) -> Result<Vec<(usize, usize)>, Strin
     let mut pairs = Vec::new();
     for (pos, line) in lines.filter(|l| !l.is_empty()).enumerate() {
         let parts: Vec<&str> = line.split_whitespace().collect();
-        let id = |s: &str| s.parse::<usize>().map_err(|_| format!("bad derived-inputs id {s:?}"));
+        let id = |s: &str| {
+            s.parse::<usize>()
+                .map_err(|_| format!("bad derived-inputs id {s:?}"))
+        };
         match parts.as_slice() {
             ["in", a] => {
                 direct_pos.insert(id(a)?, pos);

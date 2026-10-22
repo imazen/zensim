@@ -3886,7 +3886,10 @@ fn byc_monotone_thresholds_identity_and_monotonicity() {
         let bytes = train_mlp(&mut groups, 2, &hp, &mut log);
         let model = zenpredict::Model::from_bytes(&bytes).unwrap();
         let biases = model.layer(0).biases;
-        assert!(biases.iter().all(|&b| b <= 0.0), "b1 must stay <= 0: {biases:?}");
+        assert!(
+            biases.iter().all(|&b| b <= 0.0),
+            "b1 must stay <= 0: {biases:?}"
+        );
         assert!(
             biases.iter().any(|&b| b < 0.0),
             "a hinge target must move at least one threshold: {biases:?}\n{}",
@@ -3894,7 +3897,12 @@ fn byc_monotone_thresholds_identity_and_monotonicity() {
         );
         assert_eq!(
             certify_monotone_bake(&model, 100.0),
-            Ok(MonotoneCertificate { ramps: 0, free_ramps: 0, free_amplitude: 0.0, max_pairs: 0 }),
+            Ok(MonotoneCertificate {
+                ramps: 0,
+                free_ramps: 0,
+                free_amplitude: 0.0,
+                max_pairs: 0
+            }),
             "certificate"
         );
         let mut predictor = zenpredict::Predictor::new(&model);
@@ -3914,7 +3922,10 @@ fn byc_monotone_thresholds_identity_and_monotonicity() {
             let y = [x[0] + next(), x[1] + next() * 0.25];
             let fx = predictor.predict(&x).unwrap()[0];
             let fy = predictor.predict(&y).unwrap()[0];
-            assert!(fy <= fx && fx <= 100., "monotone violation {x:?}->{fx} {y:?}->{fy}");
+            assert!(
+                fy <= fx && fx <= 100.,
+                "monotone violation {x:?}->{fx} {y:?}->{fy}"
+            );
         }
     }
 }
@@ -3963,7 +3974,10 @@ fn byc_monotone_ramps_structure_identity_and_monotonicity() {
         let model = zenpredict::Model::from_bytes(&bytes).unwrap();
         // A pair can train to output weight 0 (two dead units), so live ramps <= ramps.
         let cert = certify_monotone_bake(&model, 100.0).expect("certificate");
-        assert!(cert.ramps <= ramps && cert.free_ramps == 0 && cert.free_amplitude == 0.0, "{cert:?}");
+        assert!(
+            cert.ramps <= ramps && cert.free_ramps == 0 && cert.free_amplitude == 0.0,
+            "{cert:?}"
+        );
         let mut predictor = zenpredict::Predictor::new(&model);
         assert_eq!(
             predictor.predict(&[0., 0.]).unwrap()[0].to_bits(),
@@ -3981,7 +3995,10 @@ fn byc_monotone_ramps_structure_identity_and_monotonicity() {
             let y = [x[0] + next(), x[1] + next() * 0.25];
             let fx = predictor.predict(&x).unwrap()[0];
             let fy = predictor.predict(&y).unwrap()[0];
-            assert!(fy <= fx && fx <= 100., "monotone violation {x:?}->{fx} {y:?}->{fy}");
+            assert!(
+                fy <= fx && fx <= 100.,
+                "monotone violation {x:?}->{fx} {y:?}->{fy}"
+            );
         }
     }
 }
@@ -3996,7 +4013,10 @@ fn byc_free_ramps_certified_budget() {
         .map(|i| vec![(i % 16) as f64 / 15., (i / 16) as f64 / 3.])
         .collect();
     let refs: Vec<&[f64]> = rows.iter().map(Vec::as_slice).collect();
-    let scores: Vec<f64> = rows.iter().map(|x| 100. - 40. * x[0] + 15. * x[1] * x[0]).collect();
+    let scores: Vec<f64> = rows
+        .iter()
+        .map(|x| 100. - 40. * x[0] + 15. * x[1] * x[0])
+        .collect();
     let budget = 3.0;
     for dtype in [WeightDtype::F32, WeightDtype::F16] {
         let hp = MlpHyperparams {
@@ -4029,7 +4049,10 @@ fn byc_free_ramps_certified_budget() {
         let cert = certify_monotone_bake(&model, 100.0).expect("certificate");
         assert!(cert.free_amplitude <= budget * (1. + 1e-3), "{cert:?}");
         let mut predictor = zenpredict::Predictor::new(&model);
-        assert_eq!(predictor.predict(&[0., 0.]).unwrap()[0].to_bits(), 100.0_f32.to_bits());
+        assert_eq!(
+            predictor.predict(&[0., 0.]).unwrap()[0].to_bits(),
+            100.0_f32.to_bits()
+        );
         let mut rng = 0x1234_5678_9abc_def1u64;
         let mut next = || {
             rng ^= rng << 13;
@@ -4043,7 +4066,10 @@ fn byc_free_ramps_certified_budget() {
             let y = [x[0] + next(), x[1] + next()];
             let fx = predictor.predict(&x).unwrap()[0];
             let fy = predictor.predict(&y).unwrap()[0];
-            assert!(fy <= fx + slack && fx <= 100., "budget violation {x:?}->{fx} {y:?}->{fy} {cert:?}");
+            assert!(
+                fy <= fx + slack && fx <= 100.,
+                "budget violation {x:?}->{fx} {y:?}->{fy} {cert:?}"
+            );
         }
     }
 }
@@ -4075,17 +4101,25 @@ fn byc_free_ramp_projection_contract() {
     let mut b2 = vec![0.0];
     project_plain(&mut w1, &mut w2, &mut b1, &mut b2, Some(100.0), &hp);
     let col = |j: usize| [w1[j], w1[h + j]];
-    assert!(col(0).iter().all(|&v| v >= 0.0) && col(1) == col(2) && col(1).iter().all(|&v| v >= 0.0));
+    assert!(
+        col(0).iter().all(|&v| v >= 0.0) && col(1) == col(2) && col(1).iter().all(|&v| v >= 0.0)
+    );
     assert_eq!(col(3), col(4));
     assert_eq!(col(5), col(6));
-    assert!(col(3).iter().chain(col(5).iter()).any(|&v| v < 0.0), "free rows must keep their sign");
+    assert!(
+        col(3).iter().chain(col(5).iter()).any(|&v| v < 0.0),
+        "free rows must keep their sign"
+    );
     assert!(b1.iter().all(|&b| b <= 0.0) && b1[2] <= b1[1] && b1[4] <= b1[3] && b1[6] <= b1[5]);
     for p in [1, 3, 5] {
         assert!(w2[p] <= 0.0 && w2[p + 1] == -w2[p]);
     }
     assert!(w2[0] <= 0.0 && b2[0] == 100.0);
     let amplitude = -w2[3] * (b1[3] - b1[4]) - w2[5] * (b1[5] - b1[6]);
-    assert!(amplitude <= 2.0 + 1e-12 && amplitude > 1.9, "amplitude {amplitude}");
+    assert!(
+        amplitude <= 2.0 + 1e-12 && amplitude > 1.9,
+        "amplitude {amplitude}"
+    );
 }
 
 /// A hand-built bake with one free ramp certifies to exactly its amplitude, and
@@ -4117,17 +4151,40 @@ fn byc_certificate_free_amplitude_is_exact_and_tight() {
     );
     let model = zenpredict::Model::from_bytes(&bytes).unwrap();
     let cert = certify_monotone_bake(&model, 100.0).expect("certificate");
-    assert_eq!(cert, MonotoneCertificate { ramps: 0, free_ramps: 1, free_amplitude: 3.0, max_pairs: 0 });
+    assert_eq!(
+        cert,
+        MonotoneCertificate {
+            ramps: 0,
+            free_ramps: 1,
+            free_amplitude: 3.0,
+            max_pairs: 0
+        }
+    );
     let mut predictor = zenpredict::Predictor::new(&model);
     let lo = predictor.predict(&[3.0, 0.0]).unwrap()[0];
     let hi = predictor.predict(&[3.0, 5.0]).unwrap()[0];
     assert!(hi > lo, "the free ramp must make this step raise the score");
-    assert!((hi - lo - 3.0).abs() <= 1e-5, "rise {} should equal the certified amplitude 3", hi - lo);
+    assert!(
+        (hi - lo - 3.0).abs() <= 1e-5,
+        "rise {} should equal the certified amplitude 3",
+        hi - lo
+    );
     // Breaking the tie (one weight changed) must refuse.
     let mut w2_bad = w2;
     w2_bad[2] = 1.4;
     let bad = bake_two_layer_znpr_v3(
-        &[0.0, 0.0], &[1.0, 1.0], &w1, &b1, &w2_bad, &b2, 2, 3, 1, WeightDtype::F32, None, None,
+        &[0.0, 0.0],
+        &[1.0, 1.0],
+        &w1,
+        &b1,
+        &w2_bad,
+        &b2,
+        2,
+        3,
+        1,
+        WeightDtype::F32,
+        None,
+        None,
         Activation::Relu,
     );
     assert!(certify_monotone_bake(&zenpredict::Model::from_bytes(&bad).unwrap(), 100.0).is_err());
@@ -4149,7 +4206,10 @@ fn byc_gate_projection_property() {
         let (sd, sp) = (0.01 + 3.0 * next(), 0.01 + 3.0 * next());
         let (pa, pb) = project_gate(a, b, sd, sp);
         assert!(pa >= 0.0, "a {pa}");
-        assert!(sp * pa + sd * pb >= GATE_MARGIN * sp * pa * (1.0 - 1e-9) - 1e-15, "({a},{b}) -> ({pa},{pb})");
+        assert!(
+            sp * pa + sd * pb >= GATE_MARGIN * sp * pa * (1.0 - 1e-9) - 1e-15,
+            "({a},{b}) -> ({pa},{pb})"
+        );
         if pb < 0.0 {
             assert!(pa >= GATE_MIN_DIRECT);
         }
@@ -4208,8 +4268,12 @@ fn byc_gated_products_train_monotone_in_damage() {
     let bytes = train_mlp(&mut groups, 4, &hp, &mut Vec::new());
     let model = zenpredict::Model::from_bytes(&bytes).unwrap();
     let (l0, l1) = (model.layer(0), model.layer(1));
-    let zenpredict::WeightStorage::F32(w1) = l0.weights else { panic!("f32 test bake") };
-    let zenpredict::WeightStorage::F32(w2) = l1.weights else { panic!("f32 test bake") };
+    let zenpredict::WeightStorage::F32(w1) = l0.weights else {
+        panic!("f32 test bake")
+    };
+    let zenpredict::WeightStorage::F32(w2) = l1.weights else {
+        panic!("f32 test bake")
+    };
     let s = model.scaler_scale();
     let h = l0.out_dim;
     let mut used_negative = false;
@@ -4221,15 +4285,34 @@ fn byc_gated_products_train_monotone_in_damage() {
             used_negative |= b < 0.0;
         }
     }
-    assert!(used_negative, "the target needs a falling gain; no negative product weight was used");
+    assert!(
+        used_negative,
+        "the target needs a falling gain; no negative product weight was used"
+    );
     let mut predictor = zenpredict::Predictor::new(&model);
     for _ in 0..3000 {
-        let (d0, d1, f0, f1) = (2.0 * next(), 2.0 * next(), 0.01 + 0.99 * next(), 0.01 + 0.99 * next());
+        let (d0, d1, f0, f1) = (
+            2.0 * next(),
+            2.0 * next(),
+            0.01 + 0.99 * next(),
+            0.01 + 0.99 * next(),
+        );
         let (e0, e1) = (next(), next());
         let x = [d0 as f32, d1 as f32, (d0 * f0) as f32, (d1 * f1) as f32];
-        let y = [(d0 + e0) as f32, (d1 + e1) as f32, ((d0 + e0) * f0) as f32, ((d1 + e1) * f1) as f32];
-        let (fx, fy) = (predictor.predict(&x).unwrap()[0], predictor.predict(&y).unwrap()[0]);
-        assert!(fy <= fx + 1e-4 && fx <= 100.0, "monotone violation {x:?}->{fx} {y:?}->{fy}");
+        let y = [
+            (d0 + e0) as f32,
+            (d1 + e1) as f32,
+            ((d0 + e0) * f0) as f32,
+            ((d1 + e1) * f1) as f32,
+        ];
+        let (fx, fy) = (
+            predictor.predict(&x).unwrap()[0],
+            predictor.predict(&y).unwrap()[0],
+        );
+        assert!(
+            fy <= fx + 1e-4 && fx <= 100.0,
+            "monotone violation {x:?}->{fx} {y:?}->{fy}"
+        );
     }
 }
 
@@ -4287,14 +4370,29 @@ fn byc_certificate_gated_products() {
     let fx1 = "product 13 422\nproduct 14 480\n";
     let good = byc_derived_bake(&ok, &[0.0, -0.1], &[-1.0, -2.0], fx1);
     let cert = certify_monotone_bake(&zenpredict::Model::from_bytes(&good).unwrap(), 100.0);
-    assert_eq!(cert, Ok(MonotoneCertificate { ramps: 0, free_ramps: 0, free_amplitude: 0.0, max_pairs: 0 }));
+    assert_eq!(
+        cert,
+        Ok(MonotoneCertificate {
+            ramps: 0,
+            free_ramps: 0,
+            free_amplitude: 0.0,
+            max_pairs: 0
+        })
+    );
     // b = -1.1 makes the gain negative at f = 1.
     let mut bad = ok;
     bad[4] = -1.1;
     let refused = byc_derived_bake(&bad, &[0.0, -0.1], &[-1.0, -2.0], fx1);
-    assert!(certify_monotone_bake(&zenpredict::Model::from_bytes(&refused).unwrap(), 100.0).is_err());
+    assert!(
+        certify_monotone_bake(&zenpredict::Model::from_bytes(&refused).unwrap(), 100.0).is_err()
+    );
     // 423 is not a fragility slot ((423 - 372) % 29 != 21).
-    let wrong = byc_derived_bake(&ok, &[0.0, -0.1], &[-1.0, -2.0], "product 13 423\nproduct 14 480\n");
+    let wrong = byc_derived_bake(
+        &ok,
+        &[0.0, -0.1],
+        &[-1.0, -2.0],
+        "product 13 423\nproduct 14 480\n",
+    );
     assert!(certify_monotone_bake(&zenpredict::Model::from_bytes(&wrong).unwrap(), 100.0).is_err());
 }
 
@@ -4340,7 +4438,10 @@ fn byc_max_pairs_train_certify_and_stay_monotone() {
         let cert = certify_monotone_bake(&model, 100.0).expect("certificate");
         assert!(cert.free_amplitude == 0.0, "{cert:?}");
         let mut predictor = zenpredict::Predictor::new(&model);
-        assert_eq!(predictor.predict(&[0., 0.]).unwrap()[0].to_bits(), 100.0_f32.to_bits());
+        assert_eq!(
+            predictor.predict(&[0., 0.]).unwrap()[0].to_bits(),
+            100.0_f32.to_bits()
+        );
         let mut rng = 0x7777_1234_u64;
         let mut next = || {
             rng ^= rng << 13;
@@ -4351,8 +4452,14 @@ fn byc_max_pairs_train_certify_and_stay_monotone() {
         for _ in 0..3000 {
             let x = [2. * next(), 2. * next()];
             let y = [x[0] + next(), x[1] + next()];
-            let (fx, fy) = (predictor.predict(&x).unwrap()[0], predictor.predict(&y).unwrap()[0]);
-            assert!(fy <= fx + 1e-4 && fx <= 100., "monotone violation {x:?}->{fx} {y:?}->{fy}");
+            let (fx, fy) = (
+                predictor.predict(&x).unwrap()[0],
+                predictor.predict(&y).unwrap()[0],
+            );
+            assert!(
+                fy <= fx + 1e-4 && fx <= 100.,
+                "monotone violation {x:?}->{fx} {y:?}->{fy}"
+            );
         }
     }
 }
@@ -4364,28 +4471,68 @@ fn byc_certificate_max_pair() {
     // u = (1, 0) bias 0; v = (b - a) = (-1, 1) bias -0.5 => max(x0, x1 - 0.5); c = -10.
     let w1 = [1.0f64, -1.0, 0.0, 1.0];
     let ok = bake_two_layer_znpr_v3(
-        &[0.0, 0.0], &[1.0, 1.0], &w1, &[0.0, -0.5], &[-10.0, -10.0], &[100.0], 2, 2, 1,
-        WeightDtype::F32, None, None, Activation::Relu,
+        &[0.0, 0.0],
+        &[1.0, 1.0],
+        &w1,
+        &[0.0, -0.5],
+        &[-10.0, -10.0],
+        &[100.0],
+        2,
+        2,
+        1,
+        WeightDtype::F32,
+        None,
+        None,
+        Activation::Relu,
     );
     let model = zenpredict::Model::from_bytes(&ok).unwrap();
     assert_eq!(
         certify_monotone_bake(&model, 100.0),
-        Ok(MonotoneCertificate { ramps: 0, free_ramps: 0, free_amplitude: 0.0, max_pairs: 1 })
+        Ok(MonotoneCertificate {
+            ramps: 0,
+            free_ramps: 0,
+            free_amplitude: 0.0,
+            max_pairs: 1
+        })
     );
     let mut p = zenpredict::Predictor::new(&model);
-    for (x, want) in [([0.3f32, 0.2f32], 100.0 - 3.0), ([0.3, 1.5], 100.0 - 10.0), ([2.0, 2.0], 80.0)] {
+    for (x, want) in [
+        ([0.3f32, 0.2f32], 100.0 - 3.0),
+        ([0.3, 1.5], 100.0 - 10.0),
+        ([2.0, 2.0], 80.0),
+    ] {
         assert!((p.predict(&x).unwrap()[0] - want).abs() < 1e-4, "{x:?}");
     }
     let refuse = |w1: &[f64], b1: &[f64], w2: &[f64]| {
         let bytes = bake_two_layer_znpr_v3(
-            &[0.0, 0.0], &[1.0, 1.0], w1, b1, w2, &[100.0], 2, 2, 1, WeightDtype::F32, None, None,
+            &[0.0, 0.0],
+            &[1.0, 1.0],
+            w1,
+            b1,
+            w2,
+            &[100.0],
+            2,
+            2,
+            1,
+            WeightDtype::F32,
+            None,
+            None,
             Activation::Relu,
         );
         certify_monotone_bake(&zenpredict::Model::from_bytes(&bytes).unwrap(), 100.0).is_err()
     };
-    assert!(refuse(&w1, &[-0.1, -0.5], &[-10.0, -10.0]), "u must have bias 0");
-    assert!(refuse(&w1, &[0.0, -0.5], &[-10.0, -9.0]), "output weights must be tied");
-    assert!(refuse(&[1.0, -1.5, 0.0, 1.0], &[0.0, -0.5], &[-10.0, -10.0]), "a + (b - a) >= 0");
+    assert!(
+        refuse(&w1, &[-0.1, -0.5], &[-10.0, -10.0]),
+        "u must have bias 0"
+    );
+    assert!(
+        refuse(&w1, &[0.0, -0.5], &[-10.0, -9.0]),
+        "output weights must be tied"
+    );
+    assert!(
+        refuse(&[1.0, -1.5, 0.0, 1.0], &[0.0, -0.5], &[-10.0, -10.0]),
+        "a + (b - a) >= 0"
+    );
 }
 
 /// Negative control: B's recipe class (`--nonneg-distance`, signed W1) trains
@@ -4396,7 +4543,10 @@ fn byc_certificate_refuses_signed_first_layer() {
         .map(|i| vec![(i % 16) as f64 / 15., (i / 16) as f64 / 3.])
         .collect();
     let refs: Vec<&[f64]> = rows.iter().map(Vec::as_slice).collect();
-    let scores: Vec<f64> = rows.iter().map(|x| 100. - 30. * x[0] + 10. * x[1]).collect();
+    let scores: Vec<f64> = rows
+        .iter()
+        .map(|x| 100. - 30. * x[0] + 10. * x[1])
+        .collect();
     let hp = MlpHyperparams {
         nonneg_distance: true,
         n_hidden: 8,
