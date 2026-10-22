@@ -149,6 +149,16 @@ pub struct MlpHyperparams {
     pub free_ramps: usize,
     /// Cap on the free ramps' summed amplitude, in raw score units.
     pub free_budget: f64,
+    /// Requires `nonneg_thresholds` and `monotone_cbc`. The first
+    /// `2·max_pairs` hidden units form pairs `(u, v) = (2i, 2i+1)`: `u` has a
+    /// W1 row `a >= 0` and bias exactly 0, `v` a row `b - a` with `b >= 0`
+    /// (each input's `(a, b - a)` projected onto `{a >= 0, a + (b-a) >= 0}`) and
+    /// bias `-t <= 0`, and both share one output weight `c <= 0`. On
+    /// non-negative inputs `ReLU(a·x) = a·x`, so the pair contributes
+    /// `c·max(a·x, b·x - t)`: monotone, pinned at identity, and able to take a
+    /// maximum over two damage detectors instead of summing them (no double
+    /// counting of one artifact through redundant features). `0` = off.
+    pub max_pairs: usize,
     /// Content-gated monotonicity over `fx1` products. Each `(direct, product)`
     /// input-index pair carries `d` and `d·f` with `f ∈ (0, 1]` a reference
     /// fragility. With `monotone_cbc`, the product's W1 row is not clamped
@@ -1002,6 +1012,7 @@ impl Default for MlpHyperparams {
             monotone_ramps: 0,
             free_ramps: 0,
             free_budget: 0.0,
+            max_pairs: 0,
             monotone_product_pairs: Vec::new(),
             monotone_product_scales: Vec::new(),
             n_hidden: 32,
@@ -1431,6 +1442,14 @@ fn project_plain(
             ((w2[p] - w2[p + 1]) / 2.0).min(0.0)
         })
         .collect();
+    // Max pairs: keep each v row's sign through the per-unit clamp below, and
+    // tie the pair's output weight (mean, then <= 0).
+    let max_v_rows: Vec<Vec<f64>> = (0..hp.max_pairs)
+        .map(|i| w1.chunks_exact(n_hidden).map(|row| row[2 * i + 1]).collect())
+        .collect();
+    let max_w2: Vec<f64> = (0..hp.max_pairs)
+        .map(|i| (0.5 * (w2[2 * i] + w2[2 * i + 1])).min(0.0))
+        .collect();
     if hp.nonneg_thresholds && pin.is_some() {
         nonneg_project_thresholds(b1);
         nonneg_project_w2b2(w2, b2, pin);
@@ -1481,6 +1500,20 @@ fn project_plain(
     }
     if hp.free_ramps > 0 {
         project_free_budget(w2, b1, first_free, hp.free_ramps, hp.free_budget);
+    }
+    for (i, (v_row, &c)) in max_v_rows.iter().zip(&max_w2).enumerate() {
+        let (u, v) = (2 * i, 2 * i + 1);
+        for (row, &bv) in w1.chunks_exact_mut(n_hidden).zip(v_row) {
+            let (a, b) = project_gate(row[u], bv, 1.0, 1.0);
+            row[u] = a;
+            row[v] = b;
+        }
+        b1[u] = 0.0;
+        if b1[v] > 0.0 {
+            b1[v] = 0.0;
+        }
+        w2[u] = c;
+        w2[v] = c;
     }
 }
 
@@ -1583,6 +1616,8 @@ pub struct MonotoneCertificate {
     /// Certified bound: for `x' >= x` (every input), `raw(x') <= raw(x) + free_amplitude`.
     /// `0.0` means exactly non-increasing.
     pub free_amplitude: f64,
+    /// Live max pairs (`c·max(a·x, b·x - t)`, guarantee on non-negative inputs).
+    pub max_pairs: usize,
 }
 
 /// Checks, from the baked bytes alone, the structure that makes a one-hidden-
@@ -1675,7 +1710,7 @@ pub fn certify_monotone_bake(
             })
     };
     let mut used = vec![false; n_hidden];
-    let mut cert = MonotoneCertificate { ramps: 0, free_ramps: 0, free_amplitude: 0.0 };
+    let mut cert = MonotoneCertificate { ramps: 0, free_ramps: 0, free_amplitude: 0.0, max_pairs: 0 };
     for up in 0..n_hidden {
         if !(w2[up] > 0.0) {
             continue;
@@ -1701,8 +1736,32 @@ pub fn certify_monotone_bake(
             cert.ramps += 1;
         }
     }
-    if let Some(j) = (0..n_hidden).find(|&j| !used[j] && signed(j) && w2[j] != 0.0) {
-        return Err(format!("unit {j}: negative first-layer weight outside a ramp pair"));
+    // Max pairs: a signed unit v with w2 <= 0 is covered by an unused partner u
+    // with bias exactly 0, the bit-identical output weight, a non-negative
+    // column, and column(u) + column(v) >= 0: then c·(ReLU(a·x) + ReLU((b-a)·x - t))
+    // = c·max(a·x, b·x - t) on non-negative inputs.
+    let col_f = |j: usize| -> Vec<f64> { (0..n_in).map(|k| f64::from(w1[k * n_hidden + j])).collect() };
+    for v in 0..n_hidden {
+        if used[v] || !signed(v) || w2[v] == 0.0 {
+            continue;
+        }
+        let cv = col_f(v);
+        let u = (0..n_hidden).find(|&u| {
+            !used[u]
+                && u != v
+                && l0.biases[u] == 0.0
+                && w2[u].to_bits() == w2[v].to_bits()
+                && !signed(u)
+                && col_f(u).iter().zip(&cv).all(|(a, b)| *a >= 0.0 && a + b >= 0.0)
+        });
+        match u {
+            Some(u) => {
+                used[u] = true;
+                used[v] = true;
+                cert.max_pairs += 1;
+            }
+            None => return Err(format!("unit {v}: negative first-layer weight outside a ramp or max pair")),
+        }
     }
     Ok(cert)
 }

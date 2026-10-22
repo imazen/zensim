@@ -898,6 +898,11 @@ struct Args {
     #[arg(long, requires_all = ["derived_inputs", "monotone_cbc", "nonneg_distance"])]
     monotone_gated_products: bool,
 
+    /// With `--nonneg-thresholds --monotone-cbc`: the first `2*N` hidden units
+    /// form monotone max pairs `c·max(a·x, b·x - t)` (pooling instead of summing).
+    #[arg(long, default_value_t = 0, requires = "nonneg_thresholds")]
+    max_pairs: usize,
+
     /// STEER S: fixed tau1/8 C1 convex hinge; plain N only.
     #[arg(long, requires = "nonneg_distance", conflicts_with_all = ["steer_pairs", "pool_head", "hybrid_head", "per_sample_alpha_head", "skip_connection"])]
     smooth_hinge: bool,
@@ -3347,6 +3352,7 @@ fn main() {
         monotone_ramps: args.monotone_ramps,
         free_ramps: args.free_ramps,
         free_budget: args.free_budget,
+        max_pairs: args.max_pairs,
         monotone_product_pairs: Vec::new(),
         monotone_product_scales: Vec::new(),
         n_hidden: args.hidden,

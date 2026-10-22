@@ -3894,7 +3894,7 @@ fn byc_monotone_thresholds_identity_and_monotonicity() {
         );
         assert_eq!(
             certify_monotone_bake(&model, 100.0),
-            Ok(MonotoneCertificate { ramps: 0, free_ramps: 0, free_amplitude: 0.0 }),
+            Ok(MonotoneCertificate { ramps: 0, free_ramps: 0, free_amplitude: 0.0, max_pairs: 0 }),
             "certificate"
         );
         let mut predictor = zenpredict::Predictor::new(&model);
@@ -4117,7 +4117,7 @@ fn byc_certificate_free_amplitude_is_exact_and_tight() {
     );
     let model = zenpredict::Model::from_bytes(&bytes).unwrap();
     let cert = certify_monotone_bake(&model, 100.0).expect("certificate");
-    assert_eq!(cert, MonotoneCertificate { ramps: 0, free_ramps: 1, free_amplitude: 3.0 });
+    assert_eq!(cert, MonotoneCertificate { ramps: 0, free_ramps: 1, free_amplitude: 3.0, max_pairs: 0 });
     let mut predictor = zenpredict::Predictor::new(&model);
     let lo = predictor.predict(&[3.0, 0.0]).unwrap()[0];
     let hi = predictor.predict(&[3.0, 5.0]).unwrap()[0];
@@ -4287,7 +4287,7 @@ fn byc_certificate_gated_products() {
     let fx1 = "product 13 422\nproduct 14 480\n";
     let good = byc_derived_bake(&ok, &[0.0, -0.1], &[-1.0, -2.0], fx1);
     let cert = certify_monotone_bake(&zenpredict::Model::from_bytes(&good).unwrap(), 100.0);
-    assert_eq!(cert, Ok(MonotoneCertificate { ramps: 0, free_ramps: 0, free_amplitude: 0.0 }));
+    assert_eq!(cert, Ok(MonotoneCertificate { ramps: 0, free_ramps: 0, free_amplitude: 0.0, max_pairs: 0 }));
     // b = -1.1 makes the gain negative at f = 1.
     let mut bad = ok;
     bad[4] = -1.1;
@@ -4296,6 +4296,96 @@ fn byc_certificate_gated_products() {
     // 423 is not a fragility slot ((423 - 372) % 29 != 21).
     let wrong = byc_derived_bake(&ok, &[0.0, -0.1], &[-1.0, -2.0], "product 13 423\nproduct 14 480\n");
     assert!(certify_monotone_bake(&zenpredict::Model::from_bytes(&wrong).unwrap(), 100.0).is_err());
+}
+
+/// `--max-pairs`: trained on a target that is the max of two damage directions,
+/// the bake certifies (live max pairs or not), keeps the exact identity pin and
+/// is non-increasing along non-negative steps (up to f32 rounding of a pair's
+/// two terms).
+#[test]
+fn byc_max_pairs_train_certify_and_stay_monotone() {
+    let rows: Vec<Vec<f64>> = (0..256)
+        .map(|i| vec![(i % 16) as f64 / 15., (i / 16) as f64 / 15.])
+        .collect();
+    let refs: Vec<&[f64]> = rows.iter().map(Vec::as_slice).collect();
+    let scores: Vec<f64> = rows.iter().map(|x| 100. - 50. * x[0].max(x[1])).collect();
+    for dtype in [WeightDtype::F32, WeightDtype::F16] {
+        let hp = MlpHyperparams {
+            nonneg_distance: true,
+            monotone_cbc: true,
+            nonneg_thresholds: true,
+            max_pairs: 4,
+            n_hidden: 8,
+            n_epochs: 60,
+            pairs_per_epoch: 2048,
+            seed: 13,
+            out_dtype: dtype,
+            early_stop_patience: 0,
+            ..Default::default()
+        };
+        let mut groups = [TrainingGroup {
+            name: "invented".into(),
+            human_scores: &scores,
+            features: FeatureRows::Borrowed(&refs),
+            metric_sigmas: None,
+            train_weight: 1.,
+            validation_weight: 1.,
+            ref_ids: None,
+            loss_mode: GroupLossMode::Both,
+        }];
+        let bytes = train_mlp(&mut groups, 2, &hp, &mut Vec::new());
+        let model = zenpredict::Model::from_bytes(&bytes).unwrap();
+        // Whether a pair keeps a signed v row (a live max) is a training outcome,
+        // not a guarantee; the hand-built test below proves the max itself.
+        let cert = certify_monotone_bake(&model, 100.0).expect("certificate");
+        assert!(cert.free_amplitude == 0.0, "{cert:?}");
+        let mut predictor = zenpredict::Predictor::new(&model);
+        assert_eq!(predictor.predict(&[0., 0.]).unwrap()[0].to_bits(), 100.0_f32.to_bits());
+        let mut rng = 0x7777_1234_u64;
+        let mut next = || {
+            rng ^= rng << 13;
+            rng ^= rng >> 7;
+            rng ^= rng << 17;
+            (rng >> 11) as f32 / (1u64 << 53) as f32
+        };
+        for _ in 0..3000 {
+            let x = [2. * next(), 2. * next()];
+            let y = [x[0] + next(), x[1] + next()];
+            let (fx, fy) = (predictor.predict(&x).unwrap()[0], predictor.predict(&y).unwrap()[0]);
+            assert!(fy <= fx + 1e-4 && fx <= 100., "monotone violation {x:?}->{fx} {y:?}->{fy}");
+        }
+    }
+}
+
+/// A hand-built max pair computes `c·max(a·x, b·x - t)` and certifies; breaking
+/// the partner's bias, the tie or the cone refuses.
+#[test]
+fn byc_certificate_max_pair() {
+    // u = (1, 0) bias 0; v = (b - a) = (-1, 1) bias -0.5 => max(x0, x1 - 0.5); c = -10.
+    let w1 = [1.0f64, -1.0, 0.0, 1.0];
+    let ok = bake_two_layer_znpr_v3(
+        &[0.0, 0.0], &[1.0, 1.0], &w1, &[0.0, -0.5], &[-10.0, -10.0], &[100.0], 2, 2, 1,
+        WeightDtype::F32, None, None, Activation::Relu,
+    );
+    let model = zenpredict::Model::from_bytes(&ok).unwrap();
+    assert_eq!(
+        certify_monotone_bake(&model, 100.0),
+        Ok(MonotoneCertificate { ramps: 0, free_ramps: 0, free_amplitude: 0.0, max_pairs: 1 })
+    );
+    let mut p = zenpredict::Predictor::new(&model);
+    for (x, want) in [([0.3f32, 0.2f32], 100.0 - 3.0), ([0.3, 1.5], 100.0 - 10.0), ([2.0, 2.0], 80.0)] {
+        assert!((p.predict(&x).unwrap()[0] - want).abs() < 1e-4, "{x:?}");
+    }
+    let refuse = |w1: &[f64], b1: &[f64], w2: &[f64]| {
+        let bytes = bake_two_layer_znpr_v3(
+            &[0.0, 0.0], &[1.0, 1.0], w1, b1, w2, &[100.0], 2, 2, 1, WeightDtype::F32, None, None,
+            Activation::Relu,
+        );
+        certify_monotone_bake(&zenpredict::Model::from_bytes(&bytes).unwrap(), 100.0).is_err()
+    };
+    assert!(refuse(&w1, &[-0.1, -0.5], &[-10.0, -10.0]), "u must have bias 0");
+    assert!(refuse(&w1, &[0.0, -0.5], &[-10.0, -9.0]), "output weights must be tied");
+    assert!(refuse(&[1.0, -1.5, 0.0, 1.0], &[0.0, -0.5], &[-10.0, -10.0]), "a + (b - a) >= 0");
 }
 
 /// Negative control: B's recipe class (`--nonneg-distance`, signed W1) trains

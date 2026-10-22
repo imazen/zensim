@@ -34,6 +34,17 @@ pub fn validate_training_capabilities(
             "--nonneg-thresholds requires plain one-layer N without smooth hinge, heads or the K penalty"
         );
     }
+    if hyperparams.max_pairs > 0 {
+        assert!(
+            hyperparams.nonneg_thresholds
+                && hyperparams.monotone_cbc
+                && hyperparams.monotone_feature_pin.is_none()
+                && hyperparams.monotone_product_pairs.is_empty()
+                && 2 * (hyperparams.max_pairs + hyperparams.monotone_ramps + hyperparams.free_ramps)
+                    <= hyperparams.n_hidden,
+            "--max-pairs requires --nonneg-thresholds, --monotone-cbc on every input, no gated products, and room in --hidden"
+        );
+    }
     if !hyperparams.monotone_product_pairs.is_empty() {
         assert!(
             hyperparams.nonneg_distance

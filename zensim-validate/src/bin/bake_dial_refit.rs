@@ -1575,7 +1575,8 @@ fn cmd_certify_monotone(a: &CertifyMonotoneArgs) -> Result<bool, String> {
     };
     let line = match &verdict {
         Ok(c) => serde_json::json!({"certified": true, "ramps": c.ramps, "free_ramps": c.free_ramps,
-            "free_amplitude": c.free_amplitude, "monotone": c.free_amplitude == 0.0, "bake": a.bake}),
+            "free_amplitude": c.free_amplitude, "max_pairs": c.max_pairs,
+            "monotone": c.free_amplitude == 0.0, "bake": a.bake}),
         Err(e) => serde_json::json!({"certified": false, "reason": e, "bake": a.bake}),
     };
     println!("{line}");
