@@ -227,3 +227,24 @@ selection (CLAUDE.md, 2026-10-18 Known Bug); this is a diagnostic read only.
 | T same cell | −207.42 | −68.62 | yes |
 | R same cell | −171.78 | −46.56 | yes |
 | T full-data, packed f16 + spline | −163.72 | −60.27 | yes |
+
+### Label-free product gates: the full-data monotone model passes all of them
+
+Full-data T, seed 0, packed by the E33 output stage (`v2_confirm_fit.py --pack-production
+--e33-output-stage`, 776 s, peak RSS 0.99 GiB; `production-f16.bin` 21,215 B because only one
+hidden unit is live). `bake_dial_refit certify-monotone`: certified, monotone. Gates through
+`scripts/byconstruction/gates.py` (E33/E34 owners and binaries; outputs
+`/mnt/v/output/zensim/byconstruction-2026-10-22/gates/`), against E34's `base-c` seed 0:
+
+| Gate | Monotone T (full) | `base-c` s0 |
+|---|---|---|
+| C1 dial monotonicity, standard / ladder | **0.9970 / 0.9914** | 0.9954 / 0.9882 |
+| C2–C6 (both grids) | pass | pass |
+| G-DIAL (p5 ≤ 25, p95 ≥ 85, mono ≥ .93) | pass (p5 13.8 / −9.9, p95 97.5 / 95.2) | pass |
+| NEARID N1–N3 | pass, **140/144** monotone ladders | pass, 130/144 |
+| G-STEER (D12 exact gradients, 135 cases) | **135/135** | 130/135 |
+
+The model is effectively linear, which is E34 L's class (E34's L also cleared G-STEER), so the
+steering pass is expected, but it is now attached to a certified-monotone bake with a measured
+mixture-test record. The identity-tier step (`e33_gates.identity`) was not run; C5 from both
+verdicts passes.

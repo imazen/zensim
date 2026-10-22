@@ -95,7 +95,7 @@ def summary(a):
             p = root / f"verdict-s0-{cand}" / grid / "gaddr.json"
             if p.is_file():
                 c, contract, ship = checks(p)
-                r[grid] = {k: v for k, v in c.items() if k.startswith(("C", "G"))} | {"contract": contract}
+                r[grid] = {k: v for k, v in c.items() if k.startswith(("A", "C", "G"))} | {"contract": contract}
         steer_dir = (out / "steer135" / a.name) if label == a.name else (ev / "steer135" / "base-c-s0")
         p = steer_dir / "result.json"
         if p.is_file():
