@@ -82,6 +82,9 @@ FX1_DECLARATION = Path(__file__).resolve().parent / "e33_fx1_declaration.json"
 FX1_SHA256 = "a97a5fa63937ed8fade3c56fd7470765a031d1d309afc36e631f371a1796e648"
 FX2_DECLARATION = Path(__file__).resolve().parent / "color_noise_fx2_declaration.json"
 FX2_SHA256 = "a3802ddeeede6ec5c9e3d03efdd6cc5af683ab4ea2b0d1143c8e9183c5bd46e5"
+# By-construction exploration (benchmarks/byconstruction_2026-10-22.md): fx1 without the v2 ringing slots.
+FX1NR_DECLARATION = Path(__file__).resolve().parent / "byc_fx1nr_declaration.json"
+FX1NR_SHA256 = "923da70c2ccdfcdf2d34192a8b7f6679dd27d918b55ff1c7827e5da5234cb740"
 
 
 def fx1_declaration() -> dict:
@@ -95,6 +98,10 @@ def fx1_declaration() -> dict:
 def derived_declaration(token):
     """Pinned experiment declaration; existing fx1 bytes remain unchanged."""
     if token == 'fx1':return FX1_DECLARATION, FX1_SHA256, fx1_declaration()
+    if token == 'fx1nr':
+        data=FX1NR_DECLARATION.read_bytes()
+        if hashlib.sha256(data).hexdigest()!=FX1NR_SHA256:raise ValueError('fx1nr declaration changed')
+        return FX1NR_DECLARATION, FX1NR_SHA256, json.loads(data)
     if token != 'fx2':raise ValueError('unknown derived-input recipe: '+str(token))
     data=FX2_DECLARATION.read_bytes()
     if hashlib.sha256(data).hexdigest()!=FX2_SHA256:raise ValueError('fx2 declaration changed after registration')
@@ -269,7 +276,7 @@ def recipe_of(spec: str) -> dict:
             out.update(hdr_weight=4.0, hdr_mode={"hp": "rank", "ha": "withinref,both", "hb": "rank", "hc": "rank"}[tok[:2]], **({"hdr_consensus": tok} if tok[:2] in ("hb", "hc") else {}))
         elif tok == "sh1" and "smooth_hinge" not in out:
             out["smooth_hinge"] = True
-        elif tok in ("fx1", "fx2") and "derived_inputs" not in out:
+        elif tok in ("fx1", "fx2", "fx1nr") and "derived_inputs" not in out:
             out["derived_inputs"] = tok
         elif tok == "mono" and "mono_all" not in out:  # by-construction exploration: W1 >= 0 on every input
             out["mono_all"] = True

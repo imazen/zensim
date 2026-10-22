@@ -38,7 +38,7 @@ from v2_lodo_mlp import predict, read_curve  # noqa: E402
 
 
 def spec_of(tokens: str) -> str:
-    """B's C-family spec with the arm's tokens. `H<n>` replaces H128; other tokens are appended."""
+    """B's C-family spec (or `--base-spec`) with the arm's tokens. `H<n>` replaces H128; other tokens are appended."""
     toks = [t for t in tokens.split(":") if t]
     base = BASE_SPEC
     hidden = [t for t in toks if t.startswith("H")]
@@ -48,8 +48,11 @@ def spec_of(tokens: str) -> str:
     return base + "".join(f":{t}" for t in rest)
 
 
+LABEL = None
+
+
 def arm_name(tokens: str) -> str:
-    return tokens.replace(":", "-") or "control"
+    return LABEL or tokens.replace(":", "-") or "control"
 
 
 def run_cell(tokens: str, fold: str, seed: int) -> dict:
@@ -87,6 +90,11 @@ def run_cell(tokens: str, fold: str, seed: int) -> dict:
 
 
 def cmd_run(args) -> int:
+    global BASE_SPEC, COLS, LABEL
+    if args.base_spec:
+        BASE_SPEC, COLS, LABEL = args.base_spec, Path(args.cols), args.label
+        if not (args.cols and args.label):
+            raise ValueError("--base-spec needs --cols and --label")
     folds = args.folds.split(",")
     seeds = [int(s) for s in args.seeds.split(",")]
     cells = [(f, s) for s in seeds for f in folds]
@@ -307,6 +315,9 @@ def main() -> int:
     r.add_argument("--folds", default=",".join(FOLDS))
     r.add_argument("--seeds", default="0,1,2")
     r.add_argument("--jobs", type=int, default=12)
+    r.add_argument("--base-spec", help="replace B's spec, e.g. sel:<id>@h32:H128:cv16:cf98:fx1nr")
+    r.add_argument("--cols", help="comma-separated columns file for --base-spec")
+    r.add_argument("--label", help="arm directory name for --base-spec runs")
     s = sub.add_parser("score")
     s.add_argument("--arms", required=True)
     s.add_argument("--control", default="base-c")
