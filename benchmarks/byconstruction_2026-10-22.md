@@ -996,6 +996,10 @@ mean). E21 Δ is against `base-c` as everywhere in this record; mixture test as 
 | Ma | certified convex monotone max pairs (descriptor constrained) | 32 | −0.0172 (0.0053) | −0.017 / −0.039 / −0.019 / +0.007 | 0.934 (within source 0.958) | 2–5 (+6.3) |
 | Bga | B's signed recipe | 32 | −0.0031 (0.0049) | −0.006 / −0.005 / +0.002 / −0.003 | 0.949 (within source 0.968) | 52–211 (+62.6) |
 | Ta | certified convex monotone hinges (descriptor constrained) | 32 | −0.0221 (0.0045) | −0.026 / −0.043 / −0.029 / +0.009 | 0.932 | 1–3 (+4.4) |
+| **Ts1a** | as Tga, **no scale-0 input** (`fx1gs1`) | 32 | −0.0099 (0.0039) | −0.010 / −0.026 / −0.013 / +0.010 | 0.928 | 0–4 (+3.7) |
+
+Dropping every scale-0 input costs Tga 0.001 on E21 (inside one SE) and 0.004 on AIC public_train, for 21–25% fewer
+instructions per score before any engine change (see Compute): the finest scale can go.
 
 The signed class takes the AIC leg best (Bga: E21 at parity with `base-c`, AIC 0.949) and keeps B's inversions
 (blur + chroma noise); the monotone arms give up about 0.015 on AIC and 0.006–0.014 on E21 to stay inversion-free.
