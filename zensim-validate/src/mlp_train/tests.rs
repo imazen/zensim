@@ -4470,7 +4470,13 @@ fn byc_max_pairs_train_certify_and_stay_monotone() {
 #[test]
 fn byc_max_pairs_with_free_input_stay_monotone_in_damage() {
     let rows: Vec<Vec<f64>> = (0..512)
-        .map(|i| vec![(i % 8) as f64 / 7., (i / 8 % 8) as f64 / 7., (i / 64) as f64 / 7.])
+        .map(|i| {
+            vec![
+                (i % 8) as f64 / 7.,
+                (i / 8 % 8) as f64 / 7.,
+                (i / 64) as f64 / 7.,
+            ]
+        })
         .collect();
     let refs: Vec<&[f64]> = rows.iter().map(Vec::as_slice).collect();
     // Damage counts less when the descriptor says the change is global.
@@ -4510,7 +4516,11 @@ fn byc_max_pairs_with_free_input_stay_monotone_in_damage() {
     };
     let n_hidden = l0.out_dim;
     for i in 0..hp.max_pairs {
-        assert_eq!(w1[2 * n_hidden + 2 * i], 0.0, "pair {i}: the free input must not enter u");
+        assert_eq!(
+            w1[2 * n_hidden + 2 * i],
+            0.0,
+            "pair {i}: the free input must not enter u"
+        );
     }
     let mut predictor = zenpredict::Predictor::new(&model);
     assert_eq!(
@@ -4532,7 +4542,10 @@ fn byc_max_pairs_with_free_input_stay_monotone_in_damage() {
             predictor.predict(&x).unwrap()[0],
             predictor.predict(&y).unwrap()[0],
         );
-        assert!(fy <= fx + 1e-4, "monotone violation {x:?}->{fx} {y:?}->{fy}");
+        assert!(
+            fy <= fx + 1e-4,
+            "monotone violation {x:?}->{fx} {y:?}->{fy}"
+        );
     }
 }
 

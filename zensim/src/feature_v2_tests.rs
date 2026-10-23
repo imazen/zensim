@@ -6306,6 +6306,75 @@ pub(crate) mod tests {
         }
     }
 
+    /// A declared-ID plan that reads no slot at scale 0 (no v1-era slot, no v2-era work) skips the scale-0 strips
+    /// whole, and every slot it does read is bit-identical to the full plan's.
+    #[test]
+    fn declared_plan_skips_unread_scales_bit_identically() {
+        use crate::feature_plan::Plan;
+        use crate::feature_set_id::SlotSet;
+        let (w, h) = (160, 128);
+        let mut st = 0x9e37_79b9u32;
+        let mut rnd = move || {
+            st ^= st << 13;
+            st ^= st >> 17;
+            st ^= st << 5;
+            st
+        };
+        let src: Vec<[u8; 3]> = (0..w * h)
+            .map(|i| {
+                let (x, y) = (i % w, i / w);
+                [((x * 7 + y * 3) % 256) as u8, ((x * x + y) % 256) as u8, ((y * 5 + x / 3) % 256) as u8]
+            })
+            .collect();
+        let dst: Vec<[u8; 3]> = src
+            .iter()
+            .map(|p| p.map(|v| v.saturating_add((rnd() % 7) as u8)))
+            .collect();
+        let (sref, dref) = (RgbSlice::new(&src, w, h), RgbSlice::new(&dst, w, h));
+        // basic + peaks + v2: the Rev5 families, so the test holds at every revision.
+        let all: Vec<usize> = (0..228).chain(372..720).collect();
+        let coarse: Vec<usize> = all
+            .iter()
+            .copied()
+            .filter(|&id| crate::feature_defs::def_at(id, 4).is_some_and(|d| d.scale >= 1))
+            .collect();
+        let full = Plan::derive(&SlotSet::from_slots(all), 720).unwrap();
+        let narrow = Plan::derive(&SlotSet::from_slots(coarse.iter().copied()), 720).unwrap();
+        assert_eq!(narrow.compute.v1_scales, 0b1110);
+        assert_eq!(narrow.compute.v2_scales & 1, 0);
+        let stray: Vec<usize> = narrow
+            .compute
+            .populated_slots(4, 720)
+            .iter_slots()
+            .filter(|&id| crate::feature_defs::def_at(id, 4).is_none_or(|d| d.scale == 0))
+            .collect();
+        assert!(stray.is_empty(), "a skipped scale must not be reported as populated: {stray:?}");
+        let run = |plan: &Plan| {
+            SKIPPED_SCALES.with_borrow_mut(|v| *v = 0);
+            let f = foldapp_streaming_walk(
+                &sref,
+                &dref,
+                false,
+                plan.toggles(),
+                crate::feature_v2_stream::FrontEnd::Sdr,
+                &mut V2Scratch::new(),
+                FoldWalkExtras {
+                    compute: Some(plan.compute),
+                    ..FoldWalkExtras::default()
+                },
+            )
+            .into_features();
+            (f, SKIPPED_SCALES.with_borrow(|v| *v))
+        };
+        let (f_full, skipped_full) = run(&full);
+        let (f_narrow, skipped_narrow) = run(&narrow);
+        assert_eq!(skipped_full, 0);
+        assert_eq!(skipped_narrow, 0b0001, "scale 0 must be skipped whole");
+        for &id in &coarse {
+            assert_eq!(f_full[id].to_bits(), f_narrow[id].to_bits(), "f{id} moved when scale 0 was skipped");
+        }
+    }
+
     #[test]
     fn coarse_pools_execute_only_at_requested_resolutions() {
         use crate::feature_plan::Plan;

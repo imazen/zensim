@@ -14,6 +14,8 @@ None.
 
 ### Changed
 
+- Declared-ID plans skip every scale nothing reads (no v1-era read, no v2-era work): all walks honour it through `ComputeSet::scale_dead`, read slots stay bit-identical, and profile plans keep every v1 scale for their linear tails. A bake with no scale-0 read costs 41% (512²) and 46% (2048²) fewer instructions than B's read set at Rev5; B is unchanged ([record](benchmarks/byconstruction_2026-10-22.md), branch `explore/byconstruction`).
+
 - Complete the matched reconstructed-JND comparison with native Rust DVIFM 0.3, exact retained-score parity and frozen runtime provenance; preserve its AIC2026 training-exposure distinction ([results](benchmarks/jnd_reconstruction_b_2026-10-19.pointer.md)).
 
 - Bind explicitly selected reproduced Rust metric TSVs to the frozen reconstructed-JND read, preserving exact pixel paths, directions and input hashes; report absent DVIFM 0.3-rs distinctly ([results](benchmarks/jnd_reconstruction_b_2026-10-19.pointer.md)).

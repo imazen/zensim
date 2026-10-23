@@ -1120,7 +1120,17 @@ a profile of the scale-1+ bake at 2048² still spends 35% of samples in the basi
 `fused_blur_h_ssim`, `box_blur_v_copy`) and 10% in `memmove`, at full resolution. A per-scale basic gate is the next
 engine change if the E21 arms show scale 0 can go. Wall time was not measured (the box was running training).
 
-A first attempt (`ComputeSet::v1_scales` from the declared ids; the streaming walk skips a scale with no v1-era read
+**Landed (this branch):** `ComputeSet::v1_scales` from the declared ids (v1-era reads plus free-tranche reads, which the
+v1 fold produces), and one rule, `ComputeSet::scale_dead` (no v1-era read and no v2-era work at that scale), used by
+`at_scale`, `channel_active` and the streaming walk's strip skip, so every walk (scalar, cached-reference attribution,
+basic attribution, refinement) computes nothing there and they agree. Profile plans keep every v1 scale (a profile's
+linear tail reads the v1 prefix undeclared). `cargo test -p zensim --all-features`: 908 passed, 0 failed, 27 ignored;
+the new `declared_plan_skips_unread_scales_bit_identically` checks the skip and bit-identical read slots at the default
+revision and at Rev5. Final per-call instructions (Rev5-stamped timing bakes, one thread): fx1 94,977,354 / 1,362,595,463
+(512² / 2048², unchanged), fx1 without scale 0 55,651,205 / 734,904,178 (−41.4% / −46.1%); scores bit-identical to the
+build without the skip. Wall time not measured (training was running).
+
+The first attempt (`ComputeSet::v1_scales` from the declared ids; the streaming walk skips a scale with no v1-era read
 and no v2-era work) is bit-identical on every requested slot in its own test, at the default revision and at Rev5,
 and passes all 454 library tests. With all features on it fails 6 tests, all for one reason: the scalar walk skips
 the dead scale while the attribution, session and refinement walks still compute it, so their full feature vectors

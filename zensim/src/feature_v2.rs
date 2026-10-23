@@ -2737,6 +2737,8 @@ enum BandPoolWork {
 thread_local! {
     // Observe actual weighted-pool execution, not planner declarations.
     static POOL_TEST_WIDTHS: std::cell::RefCell<Option<Vec<usize>>> = const { std::cell::RefCell::new(None) };
+    // Scales whose strips the streaming walk skipped (declared plans reading nothing there).
+    static SKIPPED_SCALES: std::cell::RefCell<u8> = const { std::cell::RefCell::new(0) };
 }
 
 /// Band-local planes for the v1 pool replay (`V2NewFeatureToggles::v1_pools`):
@@ -8272,6 +8274,18 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
             ..toggles
         };
         crate::fold_timing::stop(__t_prod, crate::fold_timing::Phase::Producer, scale);
+        // A declared-ID plan that reads no v1-era slot and runs no v2-era work at this scale skips its strips whole
+        // (the producer has already carried the pyramid through them). Only the pre-Rev5 scale-0 side channel keeps
+        // them.
+        if compute.scale_dead(scale)
+            && !(scale == 0
+                && compute.formula_revision < FormulaRevision::Rev5
+                && mean_offset.is_some())
+        {
+            #[cfg(test)]
+            SKIPPED_SCALES.with_borrow_mut(|v| *v |= 1 << scale);
+            continue;
+        }
 
         #[cfg(feature = "threads")]
         if batch_limit > 0 {

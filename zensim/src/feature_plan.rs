@@ -275,6 +275,16 @@ impl Plan {
             } else {
                 ComputeSet::ALL_SCALES
             },
+            // Scales the v1 fold must run at: every v1-era read, plus every read of the free tranche (raw moments,
+            // class C), which the v1 fold's accumulators produce at their own scale.
+            v1_scales: {
+                let free = crate::feature_defs::family_slots(ComputeToken::Moments, ns)
+                    .union(&crate::feature_defs::family_slots(ComputeToken::ClassC, ns));
+                want.iter_slots()
+                    .filter(|&id| id < 372 || free.contains(id))
+                    .filter_map(|id| crate::feature_defs::def_at(id, ns))
+                    .fold(0, |mask, d| mask | (1 << d.scale))
+            },
             v2_scales: want
                 .iter_slots()
                 .filter_map(|id| {
@@ -441,6 +451,7 @@ impl Plan {
         // Channel selection is private plan data, separate from public family
         // toggles. Normalization preserves it only for supported families.
         compute.v1_full_scales = requested.v1_full_scales;
+        compute.v1_scales = requested.v1_scales;
         compute.v2_scales = requested.v2_scales;
         compute.omit_pjnd_fragility = requested.omit_pjnd_fragility;
         compute.full_res_xb = requested.full_res_xb || !compute.allows_full_res_y_subset();
@@ -559,6 +570,7 @@ impl Plan {
             sampling: None,
             v1_pools: pools,
             v1_full_scales: ComputeSet::ALL_SCALES,
+            v1_scales: ComputeSet::ALL_SCALES,
             v2_scales: ComputeSet::ALL_SCALES,
             v2_blocks: false,
             gradient: false,
@@ -745,6 +757,15 @@ impl Plan {
             } else {
                 ComputeSet::ALL_SCALES
             },
+            v1_scales: (if a.v1_basic || a.v1_pools != V1PoolsMode::Off {
+                a.v1_scales
+            } else {
+                0
+            }) | (if b.v1_basic || b.v1_pools != V1PoolsMode::Off {
+                b.v1_scales
+            } else {
+                0
+            }),
             v2_scales: (if a.v2_blocks { a.v2_scales } else { 0 })
                 | (if b.v2_blocks { b.v2_scales } else { 0 }),
             v2_blocks: a.v2_blocks || b.v2_blocks,

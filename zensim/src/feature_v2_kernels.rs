@@ -1277,6 +1277,11 @@ pub(crate) struct ComputeSet {
     /// Scales that run the shared masked/IW activity chain in Full mode.
     /// Public extraction retains all scales; declared-ID plans narrow this.
     pub v1_full_scales: u8,
+    /// Scales at which any v1-era slot (basic, peaks, masked, IW) is read.
+    /// Public extraction keeps all scales; declared-ID plans narrow it, and the
+    /// walk skips a scale's strips whole when neither this nor `v2_scales`
+    /// names it (the pyramid is still built through it).
+    pub v1_scales: u8,
     /// Actual v2-era work, including adjacent-scale gradient dependencies.
     pub v2_scales: u8,
     /// The v2-era blocks as a group (`f372..`): false for a `v1_only`
@@ -1376,8 +1381,21 @@ impl ComputeSet {
     /// Narrow kernels without changing layout or the within-scale arithmetic.
     pub(crate) fn at_scale(self, scale: usize) -> Self {
         let live = self.v2_scales & (1 << scale) != 0;
+        // A dead scale (see `scale_dead`) is skipped whole by the walk, so nothing (not even the v1 fold's free
+        // extras) is computed there. Every scale the walk still runs keeps its view unchanged.
+        let dead = self.scale_dead(scale);
         Self {
-            v1_pools: self.pools_at(scale),
+            v1_basic: self.v1_basic && !dead,
+            v1_pools: if dead {
+                V1PoolsMode::Off
+            } else {
+                self.pools_at(scale)
+            },
+            free_extras: if dead {
+                V1FreeExtras::Off
+            } else {
+                self.free_extras
+            },
             v2_blocks: self.v2_blocks && live,
             gradient: self.gradient && live,
             blockiness: self.blockiness && live,
@@ -1433,6 +1451,7 @@ impl ComputeSet {
             sampling: None,
             v1_pools: t.v1_pools,
             v1_full_scales: Self::ALL_SCALES,
+            v1_scales: Self::ALL_SCALES,
             v2_scales: Self::ALL_SCALES,
             v2_blocks,
             gradient: t.gradient_features && v2_blocks,
@@ -1670,9 +1689,10 @@ impl ComputeSet {
         layout_width: usize,
     ) -> crate::feature_set_id::SlotSet {
         use crate::feature_set_id::SlotSet;
-        if self.v2_scales != Self::ALL_SCALES {
+        if self.v2_scales != Self::ALL_SCALES || self.v1_scales != Self::ALL_SCALES {
             return SlotSet::from_slots((0..n_scales).flat_map(|scale| {
                 let local = Self {
+                    v1_scales: Self::ALL_SCALES,
                     v2_scales: Self::ALL_SCALES,
                     ..self.at_scale(scale)
                 };
@@ -1819,12 +1839,21 @@ impl ComputeSet {
 
     #[inline]
     pub(crate) fn channel_active(&self, scale: usize, channel: usize) -> bool {
-        channel == 1
-            || if scale == 0 {
-                self.full_res_xb
-            } else {
-                self.coarse_y_only_scales & (1 << scale) == 0
-            }
+        !self.scale_dead(scale)
+            && (channel == 1
+                || if scale == 0 {
+                    self.full_res_xb
+                } else {
+                    self.coarse_y_only_scales & (1 << scale) == 0
+                })
+    }
+
+    /// A scale at which nothing is read: no v1-era slot (`v1_scales`) and no v2-era work (`v2_blocks` at a
+    /// `v2_scales` bit). Every walk computes no channel there; the pyramid is still built through it. Only
+    /// declared-ID plans narrow `v1_scales`, so public extraction never has a dead scale.
+    pub(crate) fn scale_dead(&self, scale: usize) -> bool {
+        let bit = 1 << scale;
+        self.v1_scales & bit == 0 && !(self.v2_blocks && self.v2_scales & bit != 0)
     }
 
     /// The REV4 work order for one (scale, channel) phase-B call — the
@@ -1883,6 +1912,7 @@ impl ComputeSet {
             || self.local_only
             || self.sampling.is_some()
             || (self.v1_pools == V1PoolsMode::Full && self.v1_full_scales != Self::ALL_SCALES)
+            || self.v1_scales != Self::ALL_SCALES
         {
             return None;
         }
