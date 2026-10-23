@@ -64,17 +64,30 @@ def panel(pred: np.ndarray, p: pd.DataFrame) -> dict:
     return out
 
 
-def fx1(t: pd.DataFrame, globaff: bool):
-    """B's fx1 inputs: 410 direct damage features, 410 products with their pjnd_fragility factor; content slots."""
+def scale_of(i: int) -> int:
+    """Pyramid scale of a Rev5 slot (basic 13, peaks 6, masked 6, IW 6 per cell, then v2 29 per cell; 3 cells/scale)."""
+    for start, per in ((0, 13), (156, 6), (228, 6), (300, 6), (372, 29)):
+        if start <= i < start + 12 * per:
+            return (i - start) // per // 3
+    if i in GLOBAFF:
+        return (i - 1867) // 6
+    raise ValueError(i)
+
+
+def fx1(t: pd.DataFrame, globaff: bool, min_scale: int = 0):
+    """B's fx1 inputs: 410 direct damage features, 410 products with their pjnd_fragility factor; content slots.
+    `min_scale` keeps only slots measured at that pyramid scale or coarser (a cheaper extraction)."""
     d = json.loads(DECL.read_text())
-    direct = [i for i in d["direct"] if i not in GLOBAFF]
+    direct = [i for i in d["direct"] if i not in GLOBAFF and scale_of(i) >= min_scale]
+    d["products"] = [(i, f) for i, f in d["products"] if scale_of(i) >= min_scale]
     frag = sorted({f for _, f in d["products"]})
     cols = [t[f"f{i}"].to_numpy(np.float64) for i in direct]
     cols += [t[f"f{i}"].to_numpy(np.float64) * t[f"f{f}"].to_numpy(np.float64) for i, f in d["products"]]
     names = [f"f{i}" for i in direct] + [f"f{i}*f{f}" for i, f in d["products"]]
     if globaff:
-        cols += [t[f"f{i}"].to_numpy(np.float64) for i in GLOBAFF]
-        names += [f"g{i - 1867}" for i in GLOBAFF]
+        keep = [i for i in GLOBAFF if scale_of(i) >= min_scale]
+        cols += [t[f"f{i}"].to_numpy(np.float64) for i in keep]
+        names += [f"g{i - 1867}" for i in keep]
     content = [t[f"f{f}"].to_numpy(np.float64) for f in frag]
     return np.stack(cols, 1), names, np.stack(content, 1), [f"f{f}" for f in frag]
 
@@ -139,7 +152,7 @@ def peer_columns(p: pd.DataFrame, cols: list[str]) -> np.ndarray:
 
 
 def inputs(a, t: pd.DataFrame, p: pd.DataFrame):
-    X, names, C, _ = fx1(t, a.globaff)
+    X, names, C, _ = fx1(t, a.globaff, a.min_scale)
     if a.only_peers or a.no_fx1:
         X, names = X[:, :0], []
     for path in a.extra:  # extra damage-feature tables (key + columns), e.g. jnd_band_proto.py output
@@ -291,6 +304,7 @@ def add_input_args(c) -> None:
     c.add_argument("--folds", type=int, default=6)
     c.add_argument("--repeats", type=int, default=3)
     c.add_argument("--globaff", action="store_true")
+    c.add_argument("--min-scale", type=int, default=0, help="keep only fx1 slots at this pyramid scale or coarser")
     c.add_argument("--peer", action="append", default=[],
                    help="supplied peer column as an extra input (diagnostic); prefix '-' for higher-is-better metrics")
     c.add_argument("--only-peers", action="store_true")

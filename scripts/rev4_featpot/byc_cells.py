@@ -50,6 +50,16 @@ def spec_of(tokens: str) -> str:
 
 
 LABEL = None
+# AIC2026 TRAIN (benchmarks/byconstruction_2026-10-22.md, section "AIC2026 TRAIN"): with --aic-weight W each E21 cell also
+# fits the AIC2026 references outside one fold (pooled rank, research replay) and predicts that fold. Fold of cell
+# (E21 fold index i, seed s): (4 s + i) mod 6, so seeds 0-2 hold out every AIC fold twice.
+AIC = Path(os.environ.get("AIC_OUT", "/mnt/v/output/zensim/byconstruction-2026-10-22/aic2026train"))
+AIC_WEIGHT = None
+AIC_REPLAY = "byconstruction AIC2026 TRAIN research fit (owner goal 2026-10-23); reference-held-out folds; never ship"
+
+
+def aic_fold(fold: str, seed: int) -> int:
+    return (4 * seed + FOLDS.index(fold)) % 6
 
 
 def arm_name(tokens: str) -> str:
@@ -74,6 +84,13 @@ def predict_cell(bake: Path, table: Path, out: Path, spec: str):
     return pred
 
 
+def aic_predict(dest: Path, fold: str, seed: int, spec: str) -> dict:
+    k = aic_fold(fold, seed)
+    pred = predict_cell(dest / "refit/last.bin", AIC / "folds" / f"aic_k{k}_test.parquet", dest / f"pred_aic_k{k}.tsv", spec)
+    return {"aic_weight": AIC_WEIGHT, "aic_fold": k, "aic_rows": int(len(pred)),
+            "aic_pred_sha256": sha(dest / f"pred_aic_k{k}.tsv")}
+
+
 def run_cell(tokens: str, fold: str, seed: int) -> dict:
     dest = CELLS / arm_name(tokens) / f"without_{fold}_s{seed}"
     record = dest / "byc_record.json"
@@ -88,6 +105,10 @@ def run_cell(tokens: str, fold: str, seed: int) -> dict:
            "--columns", COLS.read_text().strip(), "--head", "N", "--heldout", fold, "--seed-index", str(seed),
            "--strict-admission", "--data-role-decision", str(ROOT / "human_role_decision.json"),
            "--dest", str(dest), "--train-only"]
+    if AIC_WEIGHT is not None:
+        k = aic_fold(fold, seed)
+        cmd += ["--research-extra-group", f"aic:{AIC}/folds/aic_k{k}_fit.parquet:{AIC_WEIGHT!r}:0:rank",
+                "--research-replay", AIC_REPLAY]
     t0 = time.time()
     proc = subprocess.run(cmd, env=env, capture_output=True, text=True)
     train_s = time.time() - t0
@@ -96,6 +117,7 @@ def run_cell(tokens: str, fold: str, seed: int) -> dict:
     pred = predict_cell(dest / "refit/last.bin", ROOT / "wide/main/real" / f"{fold}.parquet", dest / f"pred_{fold}.tsv",
                         spec_of(tokens))
     rec = {"tokens": tokens, "spec": spec_of(tokens), "fold": fold, "seed": seed, "train_seconds": round(train_s, 1),
+           **({} if AIC_WEIGHT is None else aic_predict(dest, fold, seed, spec_of(tokens))),
            "last_bin_sha256": sha(dest / "refit/last.bin"), "pred_sha256": sha(dest / f"pred_{fold}.tsv"),
            "rows": int(len(pred)), "curve": read_curve(dest / "train.log"),
            "bin_dir": os.environ["REV4_V2_BIN_DIR"],
@@ -110,7 +132,12 @@ def run_cell(tokens: str, fold: str, seed: int) -> dict:
 
 
 def cmd_run(args) -> int:
-    global BASE_SPEC, COLS, LABEL
+    global BASE_SPEC, COLS, LABEL, AIC_WEIGHT
+    if args.aic_weight is not None:
+        AIC_WEIGHT = args.aic_weight
+        if not args.label:
+            raise ValueError("--aic-weight needs --label (an AIC arm is a different arm)")
+        LABEL = args.label
     if args.base_spec:
         BASE_SPEC, COLS, LABEL = args.base_spec, Path(args.cols), args.label
         if not (args.cols and args.label):
@@ -338,6 +365,7 @@ def main() -> int:
     r.add_argument("--base-spec", help="replace B's spec, e.g. sel:<id>@h32:H128:cv16:cf98:fx1nr")
     r.add_argument("--cols", help="comma-separated columns file for --base-spec")
     r.add_argument("--label", help="arm directory name for --base-spec runs")
+    r.add_argument("--aic-weight", type=float, help="add the AIC2026 TRAIN leg (rotating held-out fold) at this weight")
     s = sub.add_parser("score")
     s.add_argument("--arms", required=True)
     s.add_argument("--control", default="base-c")

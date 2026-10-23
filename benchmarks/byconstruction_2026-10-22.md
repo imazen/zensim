@@ -930,6 +930,85 @@ energy 4e-6; that is why both numbers are inputs.)
 - Remaining gap: TID2013 −0.0236 and KonFiG −0.0175. Not tested: combining the descriptor with max pairs (the
   free-mask route refuses `mp`), gating products instead of sign-free inputs, and a served (streaming) version.
 
+### AIC2026 TRAIN: how far image features go toward SROCC 0.99 (2026-10-23)
+
+**Goal (owner, 2026-10-23):** convex, monotone scoring across every distortion type and dataset, and SROCC above
+0.99 on AIC2026 TRAIN, with less compute and without memorization or overfitting.
+
+**Population and role.** "AIC2026 TRAIN" is read as the supplied JND reconstruction: 5,768 PTC crops, 42 references
+(`JND_curve`, lower is better; quality SROCC uses −JND), the same population as the 2026-10-19 frozen-B read. All
+5,810 crop files on dev were SHA-256-equal to that admission before any use. The owner's goal names it TRAIN; this
+branch therefore fits on it, and **every AIC2026 number below is either a frozen model (no fit on AIC2026) or out of
+fold**: references are split into 6 folds (seed 1000), and each reference's rows are predicted by a model fitted
+without any row of that reference. In-sample fits are never reported. The 28 unlabelled references and every other
+protected population stay untouched. Exposure ledger: `docs/DATA_SPLITS.md`, entry of 2026-10-23.
+
+Tooling: `mixture_table.py build-pairs` (Rev5 vector + descriptor table; the table route reproduces all 5,768
+stored B scores bit for bit), `aic_train.py` (zero-shot, out-of-fold fits, `analyze`), `jnd_band_proto.py` (band
+feature prototypes), `aic_rust_cv.py` (the same folds through the Rust trainer). Data:
+`/mnt/v/output/zensim/byconstruction-2026-10-22/aic2026train/` on dev.
+
+**Zero-shot (no AIC2026 fit), global quality SROCC / mean within reference / mean within ladder:**
+
+| Model | Global | Within reference | Within ladder |
+|---|---|---|---|
+| B (`diff+frag-820`) | 0.9113 | 0.9672 | 0.9993 |
+| full-data T (convex monotone) | **0.9153** | 0.9625 | 0.9994 |
+| full-data M (certified monotone max pairs) | 0.9104 | 0.9605 | 0.9995 |
+
+The monotone models are at parity with B on these codec ladders, as on CID22-A. Every model orders each ladder
+almost perfectly; the whole problem is placing different codecs and contents on one JND scale.
+
+**Out-of-fold fits on B's fx1 inputs plus the descriptor (844 inputs), mean of 3 fold draws:**
+
+| Model | Guarantee | Global | Within reference |
+|---|---|---|---|
+| NNLS linear | monotone | 0.950 | 0.971 |
+| additive hinges (NNLS) | **convex** monotone | 0.962 | 0.973 |
+| additive hinges + ramps | monotone | 0.963 | 0.975 |
+| gradient boosting, monotone constraints | monotone | 0.965 | 0.975 |
+| gradient boosting | none | 0.969 | 0.977 |
+
+**The ceiling is information, not data or learner.**
+
+- Learning curve (monotone boosting): 21 training references 0.961, 28: 0.964, 35: 0.966, 41: 0.966. More references
+  like these do not help.
+- Target transforms (log, square root, rank) change nothing (0.962–0.967).
+- New feature families measured in Python (`jnd_band_proto.py`: masking-normalised Laplacian band errors at 7 scales,
+  tile-max/top-10% pooling, band-energy gain vs loss): the best single feature is luma scale-2 band-energy loss,
+  top-tile pooled, 0.932 (B's own best single input, `det_4th` luma scale 2, is 0.929; B itself 0.911). Alone the
+  families reach 0.955–0.960; added to fx1 they reach 0.966 (monotone) and 0.971 (unconstrained).
+- Each of 70+ supplied peer columns added to fx1 gains at most +0.005 (AIMOS, FSIM, PieAPP, butteraugli). **All 75
+  supplied peers together with fx1 reach 0.974 (monotone boosting) / 0.977 (unconstrained)**; the peers alone 0.967 /
+  0.974. (DVIFM columns excluded: their author constants were trained on AIC2026.)
+- No reference-content descriptor (mean luminance, chroma, flat-area fractions, band energies) correlates with the
+  per-source residual beyond |ρ| = 0.23 over 42 sources.
+
+**The labels support 0.99.** The supplied pointwise confidence intervals are honest: (pointwise − curve)/pointwise
+σ has SD 1.13. The curve's own σ is 0.073 JND, about the pointwise σ over √7, as a 7-point fit should be.
+Resampling the curve labels from their intervals, independently or shared along each ladder, gives SROCC 0.998. So
+the label noise is about 0.07 JND, while the best out-of-fold error is about 0.33 JND (RMSE).
+
+**Where the error is** (monotone boosting, `aic_train.py analyze`):
+
+| Oracle (applied to out-of-fold predictions) | Global SROCC |
+|---|---|
+| none | 0.9655 |
+| remove the mean residual of each codec | 0.9672 |
+| remove the mean residual of each source | 0.9723 |
+| remove the mean residual of each (source, codec) ladder | 0.9834 |
+| perfect shape within each ladder, ladder offsets kept | 0.9678 |
+
+98% of discordant pairs are cross-source, and 62% are pairs whose labels differ by less than 0.25 JND (discordant
+34% of the time). SROCC 0.99 needs discordance to fall from 8.2% to about 3.5%: the prediction error has to approach
+the label noise. The largest single errors are ladders on a few contents: JPEG / JPEG 2000 / JPEG XL on a white
+product shot (S55, up to 1.3 JND too lenient: block quantisation of faint shading in a flat background), most codecs
+on a saturated fish on bokeh (S45), and JPEG / JPEG AI on S70 (too harsh).
+
+**Compute.** Dropping every scale-0 slot (three quarters of the pixels) leaves the monotone linear and convex
+additive models unchanged on AIC2026 (0.950 → 0.950, 0.962 → 0.962); monotone boosting loses 0.006. Whether the
+synthetic-distortion sets need scale 0 is untested here.
+
 ## Summary (all arms, E21 screen, seeds 0–2, Δ vs `base-c`)
 
 | Arm | Guarantee | E21 Δ (SE) | Mixture inversions / cell (max rise) |

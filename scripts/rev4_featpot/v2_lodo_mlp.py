@@ -323,7 +323,8 @@ def train_and_select(groups: list, init_seed: int, sample_seed: int, width: int,
                      dest: Path, recipe: dict | None = None, *, strict_admission: bool = False,
                      data_role_decision: Path | None = None,
                   upiq_label_disposition: Path | None = None,
-                     subjective_authority: tuple | None = None) -> tuple[Path, dict[int, float], dict]:
+                     subjective_authority: tuple | None = None,
+                     research_extra: tuple[list[str], str] | None = None) -> tuple[Path, dict[int, float], dict]:
     """Train one cell and return (selected bake, dev curve, selection record) under EPOCH_RULE.
 
     best_dev: the trainer's own best-validation bake (refit/best.bin); the recorded epoch is the argmax of the log's
@@ -351,6 +352,16 @@ def train_and_select(groups: list, init_seed: int, sample_seed: int, width: int,
                         strict_admission=strict_admission, data_role_decision=data_role_decision,
                         upiq_label_disposition=upiq_label_disposition,
                         subjective_authority=subjective_authority)
+    if research_extra is not None:
+        # By-construction research (benchmarks/byconstruction_2026-10-22.md): extra trainer groups the strict route does
+        # not admit (AIC2026 TRAIN). The registered groups above passed their strict checks; the trainer runs in replay
+        # mode, which records that the fit cannot qualify a model.
+        extra, reason = research_extra
+        if not extra or not reason or subjective_authority is not None or upiq_label_disposition is not None:
+            raise ValueError("research extra groups need a replay reason and no E31/subjective leg")
+        at = cmd.index("--target-column")
+        cmd[at:at] = [x for g in extra for x in ("--group", g)]
+        cmd += ["--historical-replay", reason]
     (dest / "refit").mkdir(exist_ok=True)
     ckpt = dest / "ckpt"
     if EPOCH_RULE == "last":
@@ -453,6 +464,9 @@ def main() -> None:
     ap.add_argument("--steer-lambda", type=float, default=0.0, help="E34 K residual weight")
     ap.add_argument("--monotone-cbc", action="store_true", help="E34 L: project plain N H1 inputs nonnegative")
     ap.add_argument("--local-smoke-budget", help="explicit non-installable local smoke epochs:pairs")
+    ap.add_argument("--research-extra-group", action="append", default=[],
+                    help="by-construction research only: extra trainer group NAME:PATH:TW:VW:FLAGS (needs --research-replay)")
+    ap.add_argument("--research-replay", help="replay reason recorded by the trainer for a research-extra fit")
     from e36_training import add_args
     add_args(ap)
     args = ap.parse_args()
@@ -608,10 +622,16 @@ def main() -> None:
             from v2_common import derived_declaration
             read = sorted(set(keep) | {b for _, b in derived_declaration(recipe["derived_inputs"])[2]["products"]})
         refuse_nonfinite_kept([g[1] for g in groups], read)  # Rev5 tables mark absent slots NaN; a kept one is refused here
+        if bool(args.research_extra_group) != bool(args.research_replay):
+            raise ValueError("--research-extra-group and --research-replay go together")
+        if args.research_extra_group and not (args.strict_admission and args.train_only):
+            raise ValueError("research extra groups ride on the strict training-only route")
         bake, curve, selection = train_and_select(groups, init_seed, sample_seed, width, keep_file, args.head, dest, recipe,
                                                   strict_admission=args.strict_admission,
                                                   data_role_decision=args.data_role_decision,
-                                                  upiq_label_disposition=args.upiq_label_disposition)
+                                                  upiq_label_disposition=args.upiq_label_disposition,
+                                                  research_extra=(args.research_extra_group, args.research_replay)
+                                                  if args.research_extra_group else None)
     finally:
         for tmp in (curated, curated_extra):
             if tmp is not None:
@@ -624,10 +644,12 @@ def main() -> None:
     if args.train_only:
         schema = ("e31-native-hdr-research-training-cell-v1" if native_recipe else
                   "e29-research-training-cell-v1" if hdr_record and "hdr_consensus" in recipe else
+                  "byc-research-replay-training-cell-v1" if args.research_extra_group else
                   "rev5-qualified-training-cell-v1" if args.strict_admission else "historical-training-only-v1")
         (dest / "result.json").write_text(json.dumps({"schema": schema,
             "hdr_leg": hdr_record,
-            "training_only": True, "execution_contract": "local-smoke" if args.local_smoke_budget else "registered-fit", "selection": selection, "heldout": args.heldout, "epochs": EPOCHS, "pairs_per_epoch": PAIRS_PER_EPOCH,
+            "training_only": True, "execution_contract": "local-smoke" if args.local_smoke_budget else "registered-fit", "selection": selection,
+            "research_extra_groups": args.research_extra_group or None, "research_replay": args.research_replay, "heldout": args.heldout, "epochs": EPOCHS, "pairs_per_epoch": PAIRS_PER_EPOCH,
             "seed_index": args.seed_index, "width": width, "kept_features": len(keep),
             "wide_receipt_sha256": sha(receipt_path), "frozen_sha256": frozen_sha if args.strict_admission else None,
             "human_sources": role_decision["sources"] if args.strict_admission else None,
