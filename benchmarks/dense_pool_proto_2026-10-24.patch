@@ -1,0 +1,100 @@
+diff --git a/zensim/src/feature_v2_oracle.rs b/zensim/src/feature_v2_oracle.rs
+index aa79c4d7a3..31afc190f2 100644
+--- a/zensim/src/feature_v2_oracle.rs
++++ b/zensim/src/feature_v2_oracle.rs
+@@ -1560,6 +1560,16 @@
+     let ssq = &ssq[..height * width];
+     let s12 = &s12[..height * width];
+     let activity = &activity[..height * width];
++    // PROTOTYPE (measurement only): "f32" = f32 virtual lanes per row,
++    // "ilv" = row buffer + per-pool register accumulation (same per-lane order).
++    const PROTO: &str = match option_env!("ZENSIM_PROTO_POOL") {
++        Some(s) => s,
++        None => "",
++    };
++    let proto_f32 = stable && PROTO.as_bytes() == b"f32";
++    let proto_ilv = stable && PROTO.as_bytes() == b"ilv";
++    const ILV_K: usize = 16;
++    let mut rowbuf = [[0.0f32; 8]; 29 * ILV_K];
+     let mut b0 = 0usize;
+     while b0 < height {
+         let b1 = (b0 + ERA2_BAND_ROWS).min(height);
+@@ -1574,6 +1584,7 @@
+             // the former v3-only dispatch worked around). The tail slices
+             // give `dense_elem_canon` the same typed pool refs — zero cost.
+             let mut pools = [P::zero(); 29];
++            let mut pools32 = [[0.0f32; 16]; 29];
+             let mut local = [0.0f64; 16];
+             let full = width / 8;
+             let srow = &src[row..row + full * 8];
+@@ -1635,10 +1646,49 @@
+                     kd[1].to_array(),
+                     kd[2].to_array(),
+                 ];
+-                for j in 0..29 {
+-                    let a: [f64; 8] = std::array::from_fn(|l| bufs[j][l] as f64);
+-                    let lanes = pools[j].chunk8(i & (P::LANES - 1));
+-                    (f64x8::load_t(token, lanes) + f64x8::from_array_t(token, a)).store(lanes);
++                if proto_f32 {
++                    let off = i & 15;
++                    for j in 0..29 {
++                        let lanes: &mut [f32; 8] =
++                            (&mut pools32[j][off..off + 8]).try_into().unwrap();
++                        (f32x8::load_t(token, lanes) + f32x8::load_t(token, &bufs[j]))
++                            .store(lanes);
++                    }
++                } else if proto_ilv {
++                    let t = c % ILV_K;
++                    for j in 0..29 {
++                        rowbuf[j * ILV_K + t] = bufs[j];
++                    }
++                    if t + 1 == ILV_K || c + 1 == full {
++                        // Chunk c0 = c - t is even (ILV_K even), so chunk
++                        // parity is t parity: even -> lanes 0..8, odd -> 8..16.
++                        let cnt = t + 1;
++                        for j in 0..29 {
++                            let blk = &rowbuf[j * ILV_K..j * ILV_K + cnt];
++                            let mut lo = f64x8::load_t(token, pools[j].chunk8(0));
++                            let mut hi = f64x8::load_t(token, pools[j].chunk8(8));
++                            let mut pairs = blk.chunks_exact(2);
++                            for p in &mut pairs {
++                                let a: [f64; 8] = std::array::from_fn(|l| p[0][l] as f64);
++                                let b: [f64; 8] = std::array::from_fn(|l| p[1][l] as f64);
++                                lo = lo + f64x8::from_array_t(token, a);
++                                hi = hi + f64x8::from_array_t(token, b);
++                            }
++                            if let [last] = pairs.remainder() {
++                                let a: [f64; 8] = std::array::from_fn(|l| last[l] as f64);
++                                lo = lo + f64x8::from_array_t(token, a);
++                            }
++                            lo.store(pools[j].chunk8(0));
++                            hi.store(pools[j].chunk8(8));
++                        }
++                    }
++                } else {
++                    for j in 0..29 {
++                        let a: [f64; 8] = std::array::from_fn(|l| bufs[j][l] as f64);
++                        let lanes = pools[j].chunk8(i & (P::LANES - 1));
++                        (f64x8::load_t(token, lanes) + f64x8::from_array_t(token, a))
++                            .store(lanes);
++                    }
+                 }
+                 if stable {
+                     let off = i & 15;
+@@ -1661,6 +1711,16 @@
+                     );
+                 }
+             }
++            if proto_f32 {
++                for j in 0..29 {
++                    for off in [0usize, 8] {
++                        let lanes = pools[j].chunk8(off);
++                        for k in 0..8 {
++                            lanes[k] += pools32[j][off + k] as f64;
++                        }
++                    }
++                }
++            }
+             // Scalar tail — the canonical element step verbatim.
+             {
+                 let (r, rest) = pools.split_at_mut(13);
