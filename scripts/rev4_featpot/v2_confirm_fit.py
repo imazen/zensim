@@ -130,8 +130,8 @@ def main() -> None:
     coverage_record, curated_extra = None, None
     if "coverage_weight" in recipe:  # design log E15/E17: the coverage leg exactly as v2_lodo_mlp builds it (label-free ordinal pool)
         import v2_teacher
-        if max(keep) >= v2_teacher.ORDINAL_WIDTH:
-            raise ValueError(f"{core_spec}: the coverage pool has no f{v2_teacher.ORDINAL_WIDTH}+ (NaN); refusing this keep list")
+        from v2_lodo_mlp import admit_coverage_keep
+        admit_coverage_keep(core_spec, keep, args.strict_admission)
         cpath, coverage_record = v2_teacher.coverage_leg(recipe["coverage_mask"], Path(os.environ.get("TMPDIR") or dest),
                                                        admitted_root=V2 if args.strict_admission else None)
         curated_extra = cpath

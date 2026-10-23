@@ -73,6 +73,22 @@ def predict(bake: Path, table: Path, out: Path, *, research_palette_cached=False
     return pred
 
 
+def admit_coverage_keep(core_spec: str, keep: list[int], strict_admission: bool) -> None:
+    """The coverage pool carries ids below the ordinal width; a keep list reaching past it needs a pool that declares
+    those ids: the by-construction derived pool (ring_root.py globaff declares its research columns) or the E32
+    palette extension. Shared by the LODO cell and the full-data fit (v2_confirm_fit.py)."""
+    import v2_teacher
+    if max(keep) < v2_teacher.ORDINAL_WIDTH:
+        return
+    if not strict_admission:
+        raise ValueError(f"{core_spec}: the coverage pool has no f{v2_teacher.ORDINAL_WIDTH}+ (NaN); refusing this keep list")
+    pool_decl = json.loads((V2 / "e15" / f"{Path(v2_teacher.POOL_NAME).name}.manifest.json").read_text())
+    extra = {k for k in keep if k >= v2_teacher.ORDINAL_WIDTH}
+    if not ("byc_derived_from" in pool_decl and extra <= set(pool_decl.get("byc_globaff_ids", []))):
+        from e32_palette import coverage_extension
+        coverage_extension(V2 / "e15" / Path(v2_teacher.POOL_NAME).name, keep)
+
+
 def strict_group_input_roots(groups: list) -> tuple[Path, ...]:
     from v2_common import table_input_roots
     roots = []
@@ -576,15 +592,7 @@ def main() -> None:
     coverage_record = None
     if "coverage_weight" in recipe and recipe.get("ssim2_recipe") != "s2m":  # design log E15: chosen families of the ordinal coverage pool, rank-only within ladders
         import v2_teacher
-        if max(keep) >= v2_teacher.ORDINAL_WIDTH:
-            if not args.strict_admission:
-                raise ValueError(f"{core_spec}: the coverage pool has no f{v2_teacher.ORDINAL_WIDTH}+ (NaN); refusing this keep list")
-            pool_decl = json.loads((V2 / "e15" / f"{Path(v2_teacher.POOL_NAME).name}.manifest.json").read_text())
-            extra = {k for k in keep if k >= v2_teacher.ORDINAL_WIDTH}
-            if not ("byc_derived_from" in pool_decl and extra <= set(pool_decl.get("byc_globaff_ids", []))):
-                # By-construction research columns (ring_root.py globaff) are declared by the derived pool itself.
-                from e32_palette import coverage_extension
-                coverage_extension(V2 / "e15" / Path(v2_teacher.POOL_NAME).name, keep)
+        admit_coverage_keep(core_spec, keep, args.strict_admission)
         cpath, coverage_record = v2_teacher.coverage_leg(recipe["coverage_mask"], Path(os.environ.get("TMPDIR") or dest),
                                                        admitted_root=V2 if args.strict_admission else None)
         curated_extra = cpath
