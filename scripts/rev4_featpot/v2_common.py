@@ -85,6 +85,9 @@ FX2_SHA256 = "a3802ddeeede6ec5c9e3d03efdd6cc5af683ab4ea2b0d1143c8e9183c5bd46e5"
 # By-construction exploration (benchmarks/byconstruction_2026-10-22.md): fx1 without the v2 ringing slots.
 FX1NR_DECLARATION = Path(__file__).resolve().parent / "byc_fx1nr_declaration.json"
 FX1NR_SHA256 = "923da70c2ccdfcdf2d34192a8b7f6679dd27d918b55ff1c7827e5da5234cb740"
+# By-construction exploration: fx1 plus the byc_globaff global affine-change descriptor (research ids f1867-f1890).
+FX1G_DECLARATION = Path(__file__).resolve().parent / "byc_fx1g_declaration.json"
+FX1G_SHA256 = "408a175b3d185c538c07fb9d66f24dd42871fb14b8e79ec9ee453d5503f69d8d"
 
 
 def fx1_declaration() -> dict:
@@ -102,6 +105,10 @@ def derived_declaration(token):
         data=FX1NR_DECLARATION.read_bytes()
         if hashlib.sha256(data).hexdigest()!=FX1NR_SHA256:raise ValueError('fx1nr declaration changed')
         return FX1NR_DECLARATION, FX1NR_SHA256, json.loads(data)
+    if token == 'fx1g':
+        data=FX1G_DECLARATION.read_bytes()
+        if hashlib.sha256(data).hexdigest()!=FX1G_SHA256:raise ValueError('fx1g declaration changed')
+        return FX1G_DECLARATION, FX1G_SHA256, json.loads(data)
     if token != 'fx2':raise ValueError('unknown derived-input recipe: '+str(token))
     data=FX2_DECLARATION.read_bytes()
     if hashlib.sha256(data).hexdigest()!=FX2_SHA256:raise ValueError('fx2 declaration changed after registration')
@@ -276,7 +283,7 @@ def recipe_of(spec: str) -> dict:
             out.update(hdr_weight=4.0, hdr_mode={"hp": "rank", "ha": "withinref,both", "hb": "rank", "hc": "rank"}[tok[:2]], **({"hdr_consensus": tok} if tok[:2] in ("hb", "hc") else {}))
         elif tok == "sh1" and "smooth_hinge" not in out:
             out["smooth_hinge"] = True
-        elif tok in ("fx1", "fx2", "fx1nr") and "derived_inputs" not in out:
+        elif tok in ("fx1", "fx2", "fx1nr", "fx1g") and "derived_inputs" not in out:
             out["derived_inputs"] = tok
         elif tok == "mono" and "mono_all" not in out:  # by-construction exploration: W1 >= 0 on every input
             out["mono_all"] = True
@@ -292,6 +299,8 @@ def recipe_of(spec: str) -> dict:
             out["gated_products"] = True
         elif tok == "freering" and "free_mask" not in out:  # partial monotone: v2 ringing inputs sign-free
             out["free_mask"] = "free_ringing"
+        elif tok == "freeglob" and "free_mask" not in out:  # partial monotone: byc_globaff descriptor inputs sign-free
+            out["free_mask"] = "free_globaff"
         elif tok == "dropring" and "free_mask" not in out:  # exactly monotone, v2 ringing inputs dropped
             out.update(free_mask="free_ringing", drop_masked=True)
         elif tok == "dropglobal" and "free_mask" not in out:  # exactly monotone, probe-flagged global-sensitive families dropped

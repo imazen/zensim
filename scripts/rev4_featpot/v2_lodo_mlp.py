@@ -146,7 +146,7 @@ def train_command(groups: list, init_seed: int, sample_seed: int, width: int, ke
     if "hdr_consensus" in recipe:
         from e29_consensus import trainer_options
         cmd += trainer_options(groups, recipe["hdr_consensus"])
-    if recipe.get("derived_inputs") in ("fx1", "fx2", "fx1nr"):
+    if recipe.get("derived_inputs") in ("fx1", "fx2", "fx1nr", "fx1g"):
         from v2_common import derived_declaration
         declaration_path, _, decl = derived_declaration(recipe["derived_inputs"])
         if [int(x) for x in keep_file.read_text().split()] != decl["direct"]:
@@ -210,6 +210,9 @@ def e34_options(args, recipe):
     return options(args,recipe)
 
 
+BYC_DERIVED_FSIDS = {"basic+peaks+v2@w1825/rev5_localwin_ringhpm#36c3f3af"}
+
+
 def strict_training_groups(groups: list, data_role_decision: Path | None = None,
                   upiq_label_disposition: Path | None = None,
                   subjective_authority: tuple | None = None) -> list[dict]:
@@ -266,7 +269,10 @@ def strict_training_groups(groups: list, data_role_decision: Path | None = None,
             if ((train_w > 0 and projection["role"].endswith("development"))
                     or (train_w == 0 and val_w > 0 and projection["role"].endswith("fit"))):
                 raise ValueError("E32 fit/development role disagrees with group weights")
-        if ((not palette and d.get("feature_set_id") != "basic+peaks+v2@w1825/rev5_localwin#36c3f3af")
+        # By-construction exploration: a derived root (scripts/byconstruction/ring_root.py) re-extracts named columns
+        # under a measurement arm and declares its own era; every other measured column was checked bit for bit.
+        derived = "byc_derived_from" in d and d.get("feature_set_id") in BYC_DERIVED_FSIDS
+        if ((not palette and not derived and d.get("feature_set_id") != "basic+peaks+v2@w1825/rev5_localwin#36c3f3af")
                 or d.get("formula_revision") != 5 or not d.get("decoder_era")
                 or not d.get("table_sha256") or not d.get("row_selection_sha256")):
             raise ValueError(f"{name}: strict admission requires bound Rev5 table provenance")
@@ -593,7 +599,7 @@ def main() -> None:
         if args.strict_admission:
             strict_training_groups(groups, args.data_role_decision, args.upiq_label_disposition)
         read = keep
-        if recipe.get("derived_inputs") in ("fx1", "fx2", "fx1nr"):
+        if recipe.get("derived_inputs") in ("fx1", "fx2", "fx1nr", "fx1g"):
             from v2_common import derived_declaration
             read = sorted(set(keep) | {b for _, b in derived_declaration(recipe["derived_inputs"])[2]["products"]})
         refuse_nonfinite_kept([g[1] for g in groups], read)  # Rev5 tables mark absent slots NaN; a kept one is refused here

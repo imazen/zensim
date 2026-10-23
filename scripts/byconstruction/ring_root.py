@@ -9,6 +9,9 @@ what proves each row joined to the right pixels and that the form moved nothing 
 
   pool   --bin EXTRACTOR --out DIR             extract the E15 coverage-pool selection (44,000 pairs) under hpm
   build  --bank DIR --pool DIR --out ROOT      write the derived root and re-pin its receipt and freeze
+  globaff-pairs --bank DIR --pool DIR --out DIR   one pairs TSV per bank set (row_id = bank row) and the pool's
+  globaff --root ROOT --bank DIR --sidecars DIR --out ROOT2
+                                               widen a derived root with the byc_globaff descriptor at f1867-f1890
 
 The HDR legs (`hdr_hb4`, `hdr_hc4`, leg `hdr_consensus`) are not re-extracted and are left out of the derived root.
 """
@@ -257,6 +260,128 @@ def cmd_build(a) -> int:
     return 0
 
 
+GLOBAFF_IDS = list(range(1867, 1891))
+GLOBAFF_WIDTH = GLOBAFF_IDS[-1] + 1
+
+
+def cmd_globaff_pairs(a) -> int:
+    """Pairs TSVs for byc_globaff: each bank set's rows in bank order, and the coverage-pool selection."""
+    bank, out = Path(a.bank), Path(a.out)
+    out.mkdir(parents=True, exist_ok=False)
+    for d in sorted(p for p in (bank / "_work").iterdir() if p.is_dir()):
+        chunks = sorted(d.glob("pairs_*.tsv"))
+        lines = [chunks[0].read_text().splitlines()[0]]
+        for c in chunks:
+            lines += c.read_text().splitlines()[1:]
+        (out / f"{d.name}.tsv").write_text("\n".join(lines) + "\n")
+        log(f"{d.name}: {len(lines) - 1} pairs")
+    shutil.copyfile(Path(a.pool) / "pairs.tsv", out / "pool.tsv")
+    return 0
+
+
+def read_sidecar(path: Path) -> np.ndarray:
+    tab = pacsv.read_csv(path)
+    rid = tab.column("row_id").to_numpy()
+    if not np.array_equal(np.sort(rid), np.arange(len(rid))):
+        raise ValueError(f"{path}: row ids are not 0..n-1")
+    X = np.stack([tab.column(f"g{i}").to_numpy() for i in range(len(GLOBAFF_IDS))], axis=1)
+    out = np.empty_like(X)
+    out[rid] = X
+    return out.astype(np.float32)
+
+
+def widen(table: pa.Table, values: np.ndarray, what: str) -> pa.Table:
+    """Append NaN up to f1866, then the descriptor at f1867-f1890."""
+    width = sum(1 for c in table.column_names if c.startswith("f") and c[1:].isdigit())
+    if width != GLOBAFF_IDS[0] - 14 or not np.isfinite(values[:, 0::2]).all():
+        raise ValueError(f"{what}: width {width} or nonfinite share values")
+    nan = pa.array(np.full(table.num_rows, np.nan, np.float32))
+    for i in range(width, GLOBAFF_IDS[0]):
+        table = table.append_column(f"f{i}", nan)
+    for j, i in enumerate(GLOBAFF_IDS):
+        table = table.append_column(f"f{i}", pa.array(np.ascontiguousarray(values[:, j])))
+    return table
+
+
+def cmd_globaff(a) -> int:
+    root, bank, side, out = Path(a.root), Path(a.bank), Path(a.sidecars), Path(a.out)
+    if out.exists():
+        raise ValueError(f"{out} exists")
+    shutil.copytree(root, out)
+    real = out / "wide/main/real"
+    cache = {}
+    record = {"source_root": str(root), "source_frozen_sha256": sha(root / "wide/frozen.json"), "ids": GLOBAFF_IDS,
+              "sidecars": {}, "tables": {}}
+    for t in sorted(real.glob("*.parquet")):
+        if t.name.endswith(".keys.parquet"):
+            continue
+        keys = pq.read_table(real / f"{t.stem}.keys.parquet", columns=["pair_key", "member_set"])
+        members, pks = keys.column("member_set").to_pylist(), keys.column("pair_key").to_pylist()
+        vals = np.empty((keys.num_rows, len(GLOBAFF_IDS)), np.float32)
+        for m in sorted(set(members)):
+            if m not in cache:
+                order = pq.read_table(bank / m / "features.parquet", columns=["pair_key"]).column("pair_key").to_pylist()
+                cache[m] = ({k: i for i, k in enumerate(order)}, read_sidecar(side / f"{m}.csv"))
+                record["sidecars"][m] = sha(side / f"{m}.csv")
+            index, X = cache[m]
+            sel = [r for r, mm in enumerate(members) if mm == m]
+            vals[sel] = X[[index[pks[r]] for r in sel]]
+        write(widen(pq.read_table(t), vals, t.stem), t)
+        record["tables"][t.name] = sha(t)
+    # Coverage pool: the same subsequence alignment `build` checked bit for bit.
+    import pandas as pd
+    sel = pd.read_parquet(POOL_SOURCE / "selection.parquet")
+    pkeys = pd.read_parquet(out / "e15/coverage_pool.keys.parquet")
+    fields = ["source_filename", "type", "severity_level", "severity", "sign"]
+    want = list(pkeys[fields].astype(str).itertuples(index=False, name=None))
+    take, j = [], 0
+    for i, row in enumerate(sel[fields].astype(str).itertuples(index=False, name=None)):
+        if j < len(want) and row == want[j]:
+            take.append(i)
+            j += 1
+    if j != len(want):
+        raise ValueError("coverage pool alignment failed")
+    pool = out / "e15/coverage_pool.parquet"
+    write(widen(pq.read_table(pool), read_sidecar(side / "pool.csv")[take], "coverage_pool"), pool)
+    record["sidecars"]["pool"] = sha(side / "pool.csv")
+    record["tables"]["e15/coverage_pool.parquet"] = sha(pool)
+
+    note = "; byc_globaff global affine-change descriptor at f1867-f1890 (share, explained per scale x channel)"
+    for name in list(record["tables"]):
+        path = out / name if name.startswith("e15/") else real / name
+        mp = Path(f"{path}.manifest.json")
+        m = json.loads(mp.read_text())
+        m["byc_globaff_derived_from"] = {"table_sha256": m.get("table_sha256"), "manifest_sha256": sha(mp)}
+        m["table_sha256"] = sha(path)
+        if "source_table_sha256" in m:
+            m["source_table_sha256"] = m["table_sha256"]
+        m["byc_globaff_ids"] = GLOBAFF_IDS
+        m["composite"] = m.get("composite", "") + note
+        m["immutable_input_roots"] = [*m.get("immutable_input_roots", []), str(root.resolve()), str(side.resolve())]
+        mp.write_text(json.dumps(m, indent=1) + "\n")
+    receipt = json.loads((real / "receipt.json").read_text())
+    for leg in receipt["legs"].values():
+        for part in leg.values():
+            if isinstance(part, dict) and "rel" in part:
+                q = out / part["rel"]
+                part["sha256"] = sha(q)
+                part["manifest_sha256"] = sha(Path(f"{q}.manifest.json"))
+    receipt["width"] = GLOBAFF_WIDTH
+    receipt["byc_globaff"] = record
+    view = dict(receipt["admission_view"])
+    view["immutable_input_roots"] = [*view["immutable_input_roots"], str(root.resolve()), str(side.resolve())]
+    receipt["admission_view"] = view
+    (real / "receipt.json").write_text(json.dumps(receipt, indent=1) + "\n")
+    frozen = json.loads((out / "wide/frozen.json").read_text())
+    frozen["admission_view"] = view
+    frozen["wide_receipts"] = {"main/real": sha(real / "receipt.json")}
+    frozen["auxiliary_files"] = {rel: sha(out / rel) for rel in frozen["auxiliary_files"]}
+    frozen["byc_globaff"] = record
+    (out / "wide/frozen.json").write_text(json.dumps(frozen, indent=1) + "\n")
+    log(f"globaff root written: {out}")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -270,6 +395,17 @@ def main() -> int:
     b.add_argument("--pool", required=True)
     b.add_argument("--out", required=True)
     b.set_defaults(fn=cmd_build)
+    g = sub.add_parser("globaff-pairs")
+    g.add_argument("--bank", required=True)
+    g.add_argument("--pool", required=True)
+    g.add_argument("--out", required=True)
+    g.set_defaults(fn=cmd_globaff_pairs)
+    w = sub.add_parser("globaff")
+    w.add_argument("--root", required=True)
+    w.add_argument("--bank", required=True)
+    w.add_argument("--sidecars", required=True)
+    w.add_argument("--out", required=True)
+    w.set_defaults(fn=cmd_globaff)
     a = ap.parse_args()
     return a.fn(a)
 

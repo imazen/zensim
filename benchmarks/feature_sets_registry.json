@@ -375,6 +375,13 @@
    "formula_revision": 3,
    "sampling": "v2:xyb:robidouxsharp:1,2,3,5",
    "note": "Direct original XYB planes; scale_selective_944_2026-09-13.md"
+  },
+  "rev5_localwin_ringhpm": {
+   "build_commit": "980fde3f",
+   "root": "/mnt/v/output/zensim/byconstruction-2026-10-22/ringhpm/root",
+   "label": "By-construction exploration: Rev5 local-window bank with ringing under ZENSIM_RING_FORM=hpm",
+   "formula_revision": 5,
+   "note": "Research only (branch explore/byconstruction). The 12 v2 ringing slots measure the error after removing each image's SSIM local mean (RingForm::HighPassMu); every other measured slot is bit-identical to rev5_localwin (checked per table by scripts/byconstruction/ring_root.py). benchmarks/byconstruction_2026-10-22.md"
   }
  },
  "sets": {
@@ -1045,6 +1052,18 @@
    "slot_selection": "by_v2fy_420",
    "evidence": "benchmarks/shippath7_REGISTRATION.md",
    "note": "Features-only projection of the pinned Rev5 bank onto the existing by_v2fy consumed IDs; all other slots NaN. Rust owner checks the hash."
+  },
+  "basic+peaks+v2@w1825/rev5_localwin_ringhpm": {
+   "compute": "basic+peaks+v2",
+   "layout": 1825,
+   "era": "rev5_localwin_ringhpm",
+   "slots": "0-227,372-719",
+   "slots_hash8": "36c3f3af",
+   "n_slots": 576,
+   "role": "producer",
+   "kind": "set",
+   "legacy_name": "Rev5 basic+peaks+v2 measured subset, ringing hpm (by-construction exploration)",
+   "evidence": "scripts/byconstruction/ring_root.py; benchmarks/byconstruction_2026-10-22.md"
   }
  },
  "roots": {

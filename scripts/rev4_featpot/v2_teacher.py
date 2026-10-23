@@ -317,6 +317,13 @@ def coverage_leg(mask: int, scratch: Path, *, admitted_root: Path | None = None)
             raise ValueError("E32 coverage must preserve the exact registered inherited pool")
         admit_keys(pool, declaration, pq.read_table(keys))
         pool_sha = declaration["table_sha256"]
+    elif "byc_derived_from" in declaration:
+        # By-construction exploration (benchmarks/byconstruction_2026-10-22.md): the registered pool with named columns
+        # re-extracted (scripts/byconstruction/ring_root.py, which checked every other measured column bit for bit).
+        # Same rows and keys; the strict root's freeze pins this declaration, which pins the table.
+        if admitted_root is None or declaration["byc_derived_from"]["table_sha256"] != pool_sha:
+            raise ValueError("by-construction coverage must derive from the registered pool under strict admission")
+        pool_sha = declaration["table_sha256"]
     for path, want in ((pool, pool_sha), (keys, POOL_KEYS_SHA)):
         got = hashlib.sha256(path.read_bytes()).hexdigest()
         if got != want:

@@ -290,6 +290,11 @@ required-features = ["sdr944-extract"]
 name = "extract_features_372col"
 required-features = ["training", "zen-decode"]
 
+# By-construction exploration: global affine-change descriptor sidecar (research only).
+[[example]]
+name = "byc_globaff"
+required-features = ["zen-decode"]
+
 [[example]]
 name = "m3_fixture_gen"
 required-features = ["m3-fixtures"]
