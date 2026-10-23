@@ -1037,8 +1037,21 @@ product shot (S55, up to 1.3 JND too lenient: block quantisation of faint shadin
 on a saturated fish on bokeh (S45), and JPEG / JPEG AI on S70 (too harsh).
 
 **Compute.** Dropping every scale-0 slot (three quarters of the pixels) leaves the monotone linear and convex
-additive models unchanged on AIC2026 (0.950 → 0.950, 0.962 → 0.962); monotone boosting loses 0.006. Whether the
-synthetic-distortion sets need scale 0 is untested here.
+additive models unchanged on the 42-source pool (0.950 → 0.950, 0.962 → 0.962); monotone boosting loses 0.006. B's
+own selection reads only 41 scale-0 slots of its 410 direct inputs (`fx1gs1` = fx1g without them: 387 direct, 369
+products). Exact per-call user-space instructions of `BakeScorer::compute` (`perf stat`, slope between two iteration
+counts so setup cancels, one thread, the `byc_score_timing` synthetic pair, two 1-epoch timing-only bakes over B's fx1
+read set and over fx1 without scale 0):
+
+| Size | fx1 read set | fx1 without scale 0 | Change |
+|---|---|---|---|
+| 512² | 95,488,070 | 75,092,745 | −21.4% |
+| 2048² | 1,459,946,055 | 1,100,277,015 | −24.6% |
+
+Less than the pixel share because the planner gates v2 per scale (`v2_scales`) but the v1 basic family as one switch:
+a profile of the scale-1+ bake at 2048² still spends 35% of samples in the basic SSIM blurs (`fused_vblur_ssim`,
+`fused_blur_h_ssim`, `box_blur_v_copy`) and 10% in `memmove`, at full resolution. A per-scale basic gate is the next
+engine change if the E21 arms show scale 0 can go. Wall time was not measured (the box was running training).
 
 ## Summary (all arms, E21 screen, seeds 0–2, Δ vs `base-c`)
 

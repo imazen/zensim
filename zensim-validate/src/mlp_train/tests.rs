@@ -4464,6 +4464,78 @@ fn byc_max_pairs_train_certify_and_stay_monotone() {
     }
 }
 
+/// `--max-pairs` with `--monotone-feature-mask`: a sign-free third input (a global-change descriptor) enters only the
+/// pairs' v rows, so the bake stays pinned at identity and non-increasing in the two masked-monotone inputs for every
+/// value of the free one, while the free input may raise or lower the score.
+#[test]
+fn byc_max_pairs_with_free_input_stay_monotone_in_damage() {
+    let rows: Vec<Vec<f64>> = (0..512)
+        .map(|i| vec![(i % 8) as f64 / 7., (i / 8 % 8) as f64 / 7., (i / 64) as f64 / 7.])
+        .collect();
+    let refs: Vec<&[f64]> = rows.iter().map(Vec::as_slice).collect();
+    // Damage counts less when the descriptor says the change is global.
+    let scores: Vec<f64> = rows
+        .iter()
+        .map(|x| 100. - 50. * x[0].max(x[1]) * (1. - 0.6 * x[2]))
+        .collect();
+    let hp = MlpHyperparams {
+        nonneg_distance: true,
+        monotone_cbc: true,
+        nonneg_thresholds: true,
+        max_pairs: 4,
+        monotone_feature_pin: Some(vec![true, true, false]),
+        n_hidden: 12,
+        n_epochs: 60,
+        pairs_per_epoch: 2048,
+        seed: 29,
+        out_dtype: WeightDtype::F32,
+        early_stop_patience: 0,
+        ..Default::default()
+    };
+    let mut groups = [TrainingGroup {
+        name: "invented".into(),
+        human_scores: &scores,
+        features: FeatureRows::Borrowed(&refs),
+        metric_sigmas: None,
+        train_weight: 1.,
+        validation_weight: 1.,
+        ref_ids: None,
+        loss_mode: GroupLossMode::Both,
+    }];
+    let bytes = train_mlp(&mut groups, 3, &hp, &mut Vec::new());
+    let model = zenpredict::Model::from_bytes(&bytes).unwrap();
+    let l0 = model.layer(0);
+    let zenpredict::WeightStorage::F32(w1) = &l0.weights else {
+        panic!("f32 bake expected")
+    };
+    let n_hidden = l0.out_dim;
+    for i in 0..hp.max_pairs {
+        assert_eq!(w1[2 * n_hidden + 2 * i], 0.0, "pair {i}: the free input must not enter u");
+    }
+    let mut predictor = zenpredict::Predictor::new(&model);
+    assert_eq!(
+        predictor.predict(&[0., 0., 0.]).unwrap()[0].to_bits(),
+        100.0_f32.to_bits()
+    );
+    let mut rng = 0x1357_9bdf_u64;
+    let mut next = || {
+        rng ^= rng << 13;
+        rng ^= rng >> 7;
+        rng ^= rng << 17;
+        (rng >> 11) as f32 / (1u64 << 53) as f32
+    };
+    for _ in 0..3000 {
+        let d = next();
+        let x = [2. * next(), 2. * next(), d];
+        let y = [x[0] + next(), x[1] + next(), d];
+        let (fx, fy) = (
+            predictor.predict(&x).unwrap()[0],
+            predictor.predict(&y).unwrap()[0],
+        );
+        assert!(fy <= fx + 1e-4, "monotone violation {x:?}->{fx} {y:?}->{fy}");
+    }
+}
+
 /// A hand-built max pair computes `c·max(a·x, b·x - t)` and certifies; breaking
 /// the partner's bias, the tie or the cone refuses.
 #[test]

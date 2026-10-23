@@ -115,6 +115,51 @@ def features_v3(rb, db):
     return out
 
 
+def spectral_residual(y):
+    """Spectral-residual saliency (Hou & Zhang 2007) of a plane: computed at 64 px on the long side, nearest-upsampled."""
+    h, w = y.shape
+    f = max(1, max(h, w) // 64)
+    small = y[: h // f * f, : w // f * f].reshape(h // f, f, w // f, f).mean((1, 3))
+    F = np.fft.fft2(small)
+    logamp = np.log(np.abs(F) + 1e-9)
+    avg = box(logamp, 1)
+    sal = np.abs(np.fft.ifft2(np.exp(logamp - avg + 1j * np.angle(F)))) ** 2
+    sal = box(box(sal, 2), 2)
+    big = np.repeat(np.repeat(sal, f, 0), f, 1)
+    out = np.full((h, w), big.mean())
+    out[: big.shape[0], : big.shape[1]] = big
+    return out / out.mean()
+
+
+def features_v4(ref_planes, rb, db):
+    """Attention-weighted pooling of the luma band error at scales 0-3: centre bias, spectral-residual saliency of the
+    reference, and display brightness (the reference's own Y), each as a weighted p2 and p4 mean; unweighted p4 too."""
+    out = {}
+    y0 = ref_planes["Y"]
+    sal0 = spectral_residual(y0)
+    for s in range(4):
+        e = np.abs(db["Y"][s] - rb["Y"][s])
+        h, w = e.shape
+        f = 2 ** s
+        yy, xx = np.mgrid[0:h, 0:w]
+        cy, cx, sg = (h - 1) / 2, (w - 1) / 2, 0.25 * min(h, w)
+        centre = np.exp(-(((yy - cy) ** 2 + (xx - cx) ** 2) / (2 * sg * sg)))
+        sal = sal0[: h * f : f, : w * f : f][:h, :w]
+        lum = np.maximum(down_n(y0, s)[:h, :w], 0.0)
+        out[f"Y{s}p4"] = float(np.mean(e ** 4) ** 0.25)
+        for name, wt in (("ctr", centre), ("sal", sal), ("lum", lum)):
+            wt = wt / wt.mean()
+            out[f"Y{s}{name}p2"] = float(np.sqrt(np.mean(wt * e * e)))
+            out[f"Y{s}{name}p4"] = float(np.mean(wt * e ** 4) ** 0.25)
+    return out
+
+
+def down_n(p, n):
+    for _ in range(n):
+        p = down(p)
+    return p
+
+
 def features(args):
     ref_path, dist_path = args
     if ref_path not in _REF:
@@ -124,6 +169,8 @@ def features(args):
     db = {c: bands(v) for c, v in xyb(dist_path).items()}
     if FAMILY == "v3":
         return features_v3(rb, db)
+    if FAMILY == "v4":
+        return features_v4(xyb(ref_path), rb, db)
     out = {}
     for c in "XYB":
         for s in range(S):
@@ -152,7 +199,7 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--jobs", type=int, default=16)
     ap.add_argument("--tiles", type=int, default=0)
-    ap.add_argument("--family", default="v1", choices=("v1", "v3"))
+    ap.add_argument("--family", default="v1", choices=("v1", "v3", "v4"))
     a = ap.parse_args()
     global TILES
     TILES = a.tiles

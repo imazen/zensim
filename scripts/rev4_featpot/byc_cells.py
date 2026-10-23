@@ -6,8 +6,9 @@ by a held-out prediction through `v2_lodo_mlp.predict` (dense bake + `bake_dial_
 pairs every arm with E34's stored `base-c` predictions for the same fold and seed index (E34 `panel-input.json`), which
 this harness reproduced bit for bit (kadid seed 0, 7,869 rows).
 
-  run    --arm TOKENS --folds kadid,tid2013,konfig,cid22_a25 --seeds 0,1,2 --jobs N
+  run    --arm TOKENS --folds kadid,tid2013,konfig,cid22_a25 --seeds 0,1,2 --jobs N [--aic-weight W --label L]
   score  --arms NAME[,NAME...] [--seeds 0,1,2]
+  aicscore --arms NAME[,NAME...]   (AIC2026 TRAIN out-of-fold panel of --aic-weight arms)
 
 Point estimates only: the E21 statistic (mean over the four D1 sources of signed SROCC, arm minus paired control,
 averaged over seeds) with its seed-unit SE. Registered intervals and tests belong to the `panel e34` owner.
@@ -336,6 +337,43 @@ def cmd_bytype(args) -> int:
 BEST = Path(os.environ.get("BYC_BEST", str(Path.home() / "tmp/byc/best")))
 
 
+def cmd_aicscore(args) -> int:
+    """AIC2026 TRAIN out-of-fold panel of arms run with --aic-weight: each source fold is predicted by the cell(s) that
+    held it out (mean raw prediction when two cells did); pooled global SROCC, mean within-fold SROCC, within source."""
+    import numpy as np
+    import pandas as pd
+    sys.path.insert(0, str(HERE.parent / "byconstruction"))
+    from aic_train import panel
+    pairs = pd.read_csv(AIC / "pairs_train.tsv", sep="\t")
+    out = {}
+    for arm in args.arms.split(","):
+        by_fold = {}
+        for rec_path in sorted((CELLS / arm).glob("without_*_s*/byc_record.json")):
+            rec = json.loads(rec_path.read_text())
+            if "aic_fold" not in rec:
+                raise ValueError(f"{rec_path}: not an AIC arm")
+            pr = pd.read_csv(rec_path.parent / f"pred_aic_k{rec['aic_fold']}.tsv", sep="\t").pred.to_numpy(np.float64)
+            by_fold.setdefault(rec["aic_fold"], []).append(pr)
+        if sorted(by_fold) != list(range(AIC_NFOLDS)):
+            raise ValueError(f"{arm}: AIC folds covered {sorted(by_fold)}")
+        pred = pd.Series(np.nan, index=pairs.key.astype(str))
+        within = []
+        for k, preds in by_fold.items():
+            keys = pd.read_parquet(AIC / f"aic_k{k}_test.parquet", columns=["key"]).key.astype(str).to_numpy()
+            mean = np.mean(preds, axis=0)
+            pred.loc[keys] = mean
+            within.append(srocc(mean, -pairs.set_index("key").loc[keys].jnd.to_numpy()))
+        res = panel(pred.to_numpy(), pairs)
+        res["mean_within_fold"] = float(np.mean(within))
+        res["cells_per_fold"] = {int(k): len(v) for k, v in sorted(by_fold.items())}
+        out[arm] = res
+        print(f"{arm:12s} AIC OOF global {res['global']:.4f}  mean within-fold {res['mean_within_fold']:.4f}  "
+              f"within-source {res['within_ref_mean']:.4f}  within-ladder {res['within_ladder_mean']:.4f}", flush=True)
+    if args.out:
+        Path(args.out).write_text(json.dumps(out, indent=1) + "\n")
+    return 0
+
+
 def cmd_predict_best(args) -> int:
     """Held-out predictions from each cell's `refit/best.bin` (the trainer's best dev-geomean3 epoch: the harness's
     `best_dev` rule) for an arm, or for E34's stored control cells with `--arm base-c`."""
@@ -368,6 +406,9 @@ def main() -> int:
     r.add_argument("--cols", help="comma-separated columns file for --base-spec")
     r.add_argument("--label", help="arm directory name for --base-spec runs")
     r.add_argument("--aic-weight", type=float, help="add the AIC2026 TRAIN leg (rotating held-out fold) at this weight")
+    q = sub.add_parser("aicscore")
+    q.add_argument("--arms", required=True)
+    q.add_argument("--out")
     s = sub.add_parser("score")
     s.add_argument("--arms", required=True)
     s.add_argument("--control", default="base-c")
@@ -389,7 +430,7 @@ def main() -> int:
     pb.add_argument("--seeds", default="0,1,2")
     args = ap.parse_args()
     return {"run": cmd_run, "score": cmd_score, "curves": cmd_curves, "pairclass": cmd_pairclass,
-            "bytype": cmd_bytype, "predict-best": cmd_predict_best}[args.cmd](args)
+            "bytype": cmd_bytype, "predict-best": cmd_predict_best, "aicscore": cmd_aicscore}[args.cmd](args)
 
 
 if __name__ == "__main__":

@@ -1505,9 +1505,18 @@ fn project_plain(
     if hp.free_ramps > 0 {
         project_free_budget(w2, b1, first_free, hp.free_ramps, hp.free_budget);
     }
+    // A sign-free input under `--monotone-feature-mask` enters only the v row: u keeps `a·x >= 0`, so the pair is
+    // still `c·max(a·x, b·x + f·x_free - t)` (non-increasing in every masked-monotone input, convex in all of them).
+    let free = hp.monotone_feature_pin.as_deref();
+    let strict = hp.monotone_strict && !hp.monotone_pin_during_training;
     for (i, (v_row, &c)) in max_v_rows.iter().zip(&max_w2).enumerate() {
         let (u, v) = (2 * i, 2 * i + 1);
-        for (row, &bv) in w1.chunks_exact_mut(n_hidden).zip(v_row) {
+        for (k, (row, &bv)) in w1.chunks_exact_mut(n_hidden).zip(v_row).enumerate() {
+            if free.is_some_and(|pin| !pin[k]) {
+                row[u] = 0.0;
+                row[v] = if strict { 0.0 } else { bv };
+                continue;
+            }
             let (a, b) = project_gate(row[u], bv, 1.0, 1.0);
             row[u] = a;
             row[v] = b;
