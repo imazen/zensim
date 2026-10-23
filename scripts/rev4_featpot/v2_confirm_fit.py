@@ -64,6 +64,9 @@ def main() -> None:
     ap.add_argument("--steer-lambda", type=float, default=0.0, help="E34 K residual weight")
     ap.add_argument("--monotone-cbc", action="store_true", help="E34 L: project plain N H1 inputs nonnegative")
     ap.add_argument("--local-smoke-budget", help="explicit non-installable local smoke epochs:pairs")
+    ap.add_argument("--research-extra-group", action="append", default=[],
+                    help="by-construction research only: extra trainer group NAME:PATH:TW:VW:FLAGS (needs --research-replay)")
+    ap.add_argument("--research-replay", help="replay reason recorded by the trainer for a research-extra fit")
     from e36_training import add_args
     add_args(ap)
     args = ap.parse_args()
@@ -150,9 +153,16 @@ def main() -> None:
             from v2_common import derived_declaration
             read = sorted(set(keep) | {b for _, b in derived_declaration(recipe["derived_inputs"])[2]["products"]})
         refuse_nonfinite_kept([g[1] for g in groups], read)  # Rev5 tables mark absent slots NaN
+        if bool(args.research_extra_group) != bool(args.research_replay):
+            raise ValueError("--research-extra-group and --research-replay go together")
+        if args.research_extra_group and not (args.strict_admission and args.train_only) or (
+                args.research_extra_group and args.pack_production):
+            raise ValueError("research extra groups ride on the strict training-only route, unpacked")
         bake, curve, selection = train_and_select(groups, init_seed, sample_seed, width, keep_file, args.head, dest, recipe,
                                                   strict_admission=args.strict_admission,
-                                                  data_role_decision=args.data_role_decision)
+                                                  data_role_decision=args.data_role_decision,
+                                                  research_extra=(args.research_extra_group, args.research_replay)
+                                                  if args.research_extra_group else None)
     finally:
         if curated_extra is not None:
             curated_extra.unlink(missing_ok=True)
@@ -180,7 +190,9 @@ def main() -> None:
                     "selected_bake_sha256": sha(bake), "pack_log_tail": tail, "error": str(refusal)}) + "\n")
                 print("E33 output-stage refusal: " + " | ".join(tail[-3:]), flush=True)
                 raise SystemExit(3)
-        (dest / "result.json").write_text(json.dumps({"schema": "rev5-qualified-training-cell-v1" if args.strict_admission else "historical-training-only-v1",
+        (dest / "result.json").write_text(json.dumps({"schema": "byc-research-replay-training-cell-v1" if args.research_extra_group else
+            "rev5-qualified-training-cell-v1" if args.strict_admission else "historical-training-only-v1",
+            "research_extra_groups": args.research_extra_group or None, "research_replay": args.research_replay,
             "training_only": True, "execution_contract": "local-smoke" if args.local_smoke_budget else "registered-fit", "selection": selection, "epochs": EPOCHS, "pairs_per_epoch": PAIRS_PER_EPOCH,
             "seed_index": args.seed_index, "width": width, "kept_features": len(keep),
             "wide_receipt_sha256": sha(receipt_path), "frozen_sha256": frozen_sha if args.strict_admission else None,
