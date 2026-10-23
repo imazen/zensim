@@ -999,7 +999,7 @@ mean). E21 Δ is against `base-c` as everywhere in this record; mixture test as 
 The signed class takes the AIC leg best (Bga: E21 at parity with `base-c`, AIC 0.949) and keeps B's inversions
 (blur + chroma noise); the monotone arms give up about 0.015 on AIC and 0.006–0.014 on E21 to stay inversion-free.
 
-**Candidate rule, written 2026-10-23 21:45Z before the results of Ta, Ts1a, Mgfa and Tga128.** One combined arm becomes
+**Candidate rule, committed (04743622) before the results of Ta, Ts1a, Mgfa and Tga128.** One combined arm becomes
 the frozen candidate: among arms with at most 10 mixture inversions per cell and E21 Δ ≥ −0.010 against `base-c`, the
 highest AIC public_train out-of-fold SROCC; ties (within 0.002) go to the better E21 Δ. Its full-data fit
 (`aic_full.sh`, seed 0) is then read once on public_test and once in sample on public_train. No other model is read on
