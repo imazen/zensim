@@ -993,6 +993,27 @@ mean). E21 Δ is against `base-c` as everywhere in this record; mixture test as 
 | Tghpm (no AIC leg) | monotone in damage inputs, descriptor sign-free | — | −0.0101 (0.0024) | −0.007 / −0.024 / −0.018 / +0.007 | — | 2–7 (+7.1) |
 | **Tga** | same | 32 | **−0.0089 (0.0038)** | −0.012 / −0.023 / −0.011 / +0.010 | **0.932** (within source 0.958) | **1–4 (+4.1)**, dithering only |
 
+| Ma | certified convex monotone max pairs (descriptor constrained) | 32 | −0.0172 (0.0053) | −0.017 / −0.039 / −0.019 / +0.007 | 0.934 (within source 0.958) | 2–5 (+6.3) |
+
+Tghpm's 12 cells (no AIC leg) score 0.907 on `public_train` zero-shot (range 0.904–0.909, as B's 0.909): the AIC leg
+is worth +0.025 out of fold. Per codec, Tga beats B on 13 of 14 codecs out of fold (JPEG XL modular 0.801 → 0.833,
+JPEG 2000 0.890 → 0.932, WebP 0.908 → 0.950; VVC 0.978 → 0.967), and it is more even than the AIC-only T, which
+loses VVC (0.908), PNG and HEVC: the E21 legs act against fitting the five common codecs.
+
+**Mohammadi 2025 panel per dataset and split** (`aic_panel.py`, native `panel --batch`; JSON
+`aic2026train/panel_mohammadi.json`): for each E21 set, out of sample = the LODO cells trained without it (seeds 0–2,
+mean), in sample = a seed-0 cell trained with it. In-sample minus out-of-sample SROCC, B's recipe (`base-c`): TID2013
+0.940 vs 0.901, KonFiG 0.875 vs 0.817, CID22-A 0.881 vs 0.880; Tga: TID2013 0.890 vs 0.879, KonFiG 0.819 vs 0.807, CID22-A
+0.892 vs 0.890. The monotone models gain less from seeing a dataset than B's recipe does. AIC2026 public_train, T: in
+sample 0.974 / out of fold 0.953 (PLCC 0.964 / 0.933, Z-RMSE 0.265 / 0.359).
+
+**AIC2026 test data used (counted from the commands run, 2026-10-23).** Before the split was found, the 14 public_test
+sources were inside the 42-source pool with the overlay labels: 1 frozen-model read, 10 descriptive label reads, 32 Python
+source-fold runs and 4 Rust trainer runs that fitted and scored them. After the split was found, the official public_test
+labels were read for frozen B once (SROCC 0.9255, with the reconstruction-agreement check), once more for the panel on the
+same predictions, and once for per-source label statistics that were then left off the dashboard. No fit, model choice
+or candidate read used them.
+
 **42-source pool (`JND_curve` overlay; the first phase).**
 
 **Zero-shot (no AIC2026 fit), global quality SROCC / mean within reference / mean within ladder:**
@@ -1053,7 +1074,8 @@ product shot (S55, up to 1.3 JND too lenient: block quantisation of faint shadin
 on a saturated fish on bokeh (S45), and JPEG / JPEG AI on S70 (too harsh).
 
 **Compute.** Dropping every scale-0 slot (three quarters of the pixels) leaves the monotone linear and convex
-additive models unchanged on the 42-source pool (0.950 → 0.950, 0.962 → 0.962); monotone boosting loses 0.006. B's
+additive models unchanged on the 42-source pool (0.950 → 0.950, 0.962 → 0.962); monotone boosting loses 0.006. On
+`public_train` (7 folds × 3): NNLS 0.9344 → 0.9350, convex additive 0.9389 → 0.9373, monotone boosting 0.9529 → 0.9505. B's
 own selection reads only 41 scale-0 slots of its 410 direct inputs (`fx1gs1` = fx1g without them: 387 direct, 369
 products). Exact per-call user-space instructions of `BakeScorer::compute` (`perf stat`, slope between two iteration
 counts so setup cancels, one thread, the `byc_score_timing` synthetic pair, two 1-epoch timing-only bakes over B's fx1
