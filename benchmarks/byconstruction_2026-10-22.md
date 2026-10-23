@@ -994,6 +994,10 @@ mean). E21 Δ is against `base-c` as everywhere in this record; mixture test as 
 | **Tga** | same | 32 | **−0.0089 (0.0038)** | −0.012 / −0.023 / −0.011 / +0.010 | **0.932** (within source 0.958) | **1–4 (+4.1)**, dithering only |
 
 | Ma | certified convex monotone max pairs (descriptor constrained) | 32 | −0.0172 (0.0053) | −0.017 / −0.039 / −0.019 / +0.007 | 0.934 (within source 0.958) | 2–5 (+6.3) |
+| Bga | B's signed recipe | 32 | −0.0031 (0.0049) | −0.006 / −0.005 / +0.002 / −0.003 | 0.949 (within source 0.968) | 52–211 (+62.6) |
+
+The signed class takes the AIC leg best (Bga: E21 at parity with `base-c`, AIC 0.949) and keeps B's inversions
+(blur + chroma noise); the monotone arms give up about 0.015 on AIC and 0.006–0.014 on E21 to stay inversion-free.
 
 Tghpm's 12 cells (no AIC leg) score 0.907 on `public_train` zero-shot (range 0.904–0.909, as B's 0.909): the AIC leg
 is worth +0.025 out of fold. Per codec, Tga beats B on 13 of 14 codecs out of fold (JPEG XL modular 0.801 → 0.833,

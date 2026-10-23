@@ -40,8 +40,13 @@ E34_CELLS = Path("/var/tmp/rev4-featpot/e34-controlc-results/cells/sel:3b7bd5ebe
 ROOTS = {"raw": Path("/mnt/v/output/zensim/v40r4-2026-10-08/v2e29"),
          "hpm": Path("/mnt/v/output/zensim/byconstruction-2026-10-22/ringhpm/root"),
          "g": Path("/mnt/v/output/zensim/byconstruction-2026-10-22/ringhpm/root_globaff")}
-ARM_ROOT = {"base-c": "raw", "Thpm": "hpm", "Mhpm": "hpm", "Tghpm": "g", "Tga": "g", "Ma": "g", "Bga": "g", "Ta": "g",
-            "Mgfa": "g", "Tga128": "g", "Ts1a": "g"}
+
+
+def arm_root(arm: str, spec: str) -> str:
+    """The training root of an arm's cells: B's control is the raw root; fx1g/fx1gs1 arms the hpm + descriptor root."""
+    if arm == "base-c":
+        return "raw"
+    return "g" if research_decl(spec) is not None else "hpm"
 FOLDS = ("kadid", "tid2013", "konfig", "cid22_a25")
 POP = {"kadid": "KADID TRAIN+SELECT", "tid2013": "TID2013 (train-only by ruling)", "konfig": "KonFiG TRAIN+VAL",
        "cid22_a25": "CID22-A, 25 references"}
@@ -89,7 +94,7 @@ def e21_jobs(arms: list[str]):
             if not bake.is_file():
                 continue
             spec = "" if arm == "base-c" else json.loads((cell / "byc_record.json").read_text())["spec"]
-            table = ROOTS[ARM_ROOT[arm]] / "wide/main/real" / f"{fold}.parquet"
+            table = ROOTS[arm_root(arm, spec)] / "wide/main/real" / f"{fold}.parquet"
             x = predict(bake, table, spec)
             jobs.append((f"{fold}|{arm}|in|0", x, y))
             meta.append(dict(dataset=fold, model=arm, sample=f"in sample (cell without {other}, seed 0)", seed=0))
