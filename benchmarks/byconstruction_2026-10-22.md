@@ -792,25 +792,40 @@ Checks:
   slots (600 safesyn rows across jpg/webp/avif/jxl, 600 cid22_a25 rows). Under `hpm`, every one of the
   eight training/assessment sets differs from the stored bank in exactly the 12 ringing slots.
 
-**Cost.** Whole-walk timing between two builds is dominated by code placement. With the same instructions,
-the dense kernel ran 9.8% (512²) and 10.7% (2048²) slower in the `hpm` build than in the old one. Its
-machine code is identical (1,991 instructions, 0x3255 bytes, same alignment within 64 bytes); L1
-instruction-cache misses rose from 84.5M to 148.7M over 22 walks, while branch mispredicts (19.8M/19.9M)
-and op-cache misses (356M/355M) did not move. So parity is measured on the phase the change touches,
-with the walk's own phase timer (`ZENSIM_FOLD_TIMING`, `scripts/byconstruction/phase_timing.py`, min over
-8 interleaved process starts, 1 thread, B's served bake):
+**Cost, and a 9% speedup found on the way.** All timings: `byc_score_timing` (B's served bake, deterministic
+textured pair), paired rounds with alternating order, pinned core(s), dev (Zen 5); raw rounds in
+`benchmarks/byconstruction_timing_2026-10-23/`.
 
-| Phase | Size | Old binary (raw) | New binary, raw | New binary, `hpm` |
+1. The first form (`hp4`, 4-neighbour mean, `08930023`) added about eight vector operations per 8 pixels: +0.97%
+   at 512² and +0.55% at 2048² single-thread against the old binary (folding three divisions into one saved nothing).
+2. The `hpm` form measured +3.0% (512²) and +3.5% (2048²) against the old code, and that was robust: five lld
+   link-order shuffles (`--shuffle-sections`, SD 0.1–0.2 points), uniform function alignment 2^5–2^7, and
+   environment padding all left it in place. The phase timer (`ZENSIM_FOLD_TIMING`) put all of it in the dense
+   kernel (+10–14%), whose machine code is byte-identical; exact counts showed the same instructions (−0.3%), +4.5%
+   cycles and +40% op-cache misses. Bisection on the source found the trigger: passing the `mu` planes to the
+   gradient call at all (a literal `None` there was at parity across shuffles), even though the dense kernel runs
+   first and reads the same data.
+3. Mechanism: `Lanes16F64` (`[f64; 16]`, 8-byte aligned) holds the dense kernel's accumulators, which it adds in
+   64-byte chunks every few pixels; where the array falls relative to a cache line depends on the caller's frame.
+   `#[repr(align(64))]` on `Lanes16F64` and `LanesF64` (`ec764cd7`; values unchanged, scores bit-identical, full
+   suite passes) made the **old** code 9.32% faster at 2048² (CI −9.63..−8.98) and removed the sensitivity.
+
+Final measurement at `ec764cd7`, five lld link-order shuffles per comparison (`scripts/byconstruction/final_shuffle.sh`,
+mean paired Δ, SD over seeds), single thread unless noted:
+
+| Comparison | 2048² | 512² | 64² (seed 1) | 2048², 8 threads (seed 1) |
 |---|---|---|---|---|
-| `v2:gradient` (changed) | 512² | 0.315 ms | 0.315 ms | **0.294 ms (−6.7%)** |
-| `v2:gradient` (changed) | 2048² | 3.902 ms | 3.904 ms | **3.668 ms (−6.0%)** |
-| `v2:dense` (unchanged code) | 512² | 1.153 ms | 1.266 ms | 1.266 ms |
-| `v2:dense` (unchanged code) | 2048² | 17.583 ms | 19.436 ms | 19.455 ms |
-| whole walk | 2048² | 42.909 ms | 44.880 ms | 44.592 ms |
+| shipped code → corrected, `hpm` | **−8.45% (0.38)** | **−7.45% (0.10)** | −1.40% (CI −1.49..−1.28) | −6.49% (CI −6.85..−4.90) |
+| shipped code → corrected, `raw` | −8.85% (0.21) | | | |
+| aligned old code → corrected, `hpm` (the ring form's own cost) | +0.49% (0.21) | +0.57% (0.19) | +1.05% (CI +0.75..+1.23) | +0.07% (CI −0.34..+1.69) |
 
-Retired instructions in the gradient phase (sampled per symbol, same binary, 22 walks at 2048²) are 5.6%
-higher under `hpm` (two vector instructions per 8 pixels; about +0.6% of the walk's instructions). Its time
-is lower in this build, which may partly be placement. Raw files: `benchmarks/byconstruction_timing_2026-10-23/`.
+So the corrected scorer is faster than the shipped one at every measured size and thread count, because of the
+alignment fix; the ring form by itself costs about 0.5% (1% at 64²), positive on every shuffle seed. Single host,
+one synthetic content type, x86 v4x dispatch only.
+
+Lesson for timing this code: whole-walk comparisons between two builds can move 3–10% with nothing changed in the
+kernel that moves. Use several `--shuffle-sections` seeds, exact `perf stat` counts and the phase timer before
+crediting or blaming a change. Uniform function alignment does not randomize placement (relative order is kept).
 
 **Training root.** `scripts/byconstruction/ring_bank.sh` re-extracted every set of the v40r4 `v2e29` root
 (kadid train/select, tid2013, konfig train/val, cid22_a25, cid22_train, safesyn; 1,037 s on 24 threads,
@@ -956,3 +971,13 @@ inversions): its sign freedom finds that discount in other features and forgives
 with it. The high-pass ringing fix costs under 1% single-threaded. Closing the remaining gap by construction needs a feature
 change: damage measured on the affine-residual difference plus explicit global-change terms
 (the SSIM luminance/contrast/structure decomposition applied to this bank).
+
+**Update 2026-10-23.** Ringing is corrected (`ZENSIM_RING_FORM=hpm`, research arm; raw stays the default and every
+stored value is unchanged) and retrained. The correction does not change any model's E21 beyond noise (Bhpm −0.0002,
+Mhpm −0.0158, Thpm −0.0221), and it does not remove B's inversion: that comes from sign freedom. The next feature, a
+global affine-change descriptor that noise cannot drive, gives the monotone class a safe way to discount global
+changes: Tghpm reaches −0.0101 with 2–7 mixture inversions per cell (dithering only), the best E21 of any arm that
+keeps inversions bounded. It is a research sidecar today; serving it needs the descriptor in the streaming walk (five
+additive sums per channel, see "Can the fixes stream?"). Timing the correction found a 9% speedup for the shipped
+scorer (64-byte-aligned lane accumulators), so the corrected scorer is 7–8.5% faster than the shipped one; the ring
+form itself costs about 0.5%.
