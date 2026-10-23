@@ -935,6 +935,11 @@ energy 4e-6; that is why both numbers are inputs.)
 **Goal (owner, 2026-10-23):** convex, monotone scoring across every distortion type and dataset, and SROCC above
 0.99 on AIC2026 TRAIN, with less compute and without memorization or overfitting.
 
+**Owner decisions later the same day.** (1) The SROCC 0.99 target is dropped; the rest of the goal stands. (2) Scale 0
+is mandatory: no candidate drops the finest scale, so Ts1a and the `fx1gs1` read set are out, and the 41–46% instruction
+saving measured below applies to no candidate. (3) Smoothness counts as much as inversions: scores should follow human
+ratings on a smooth curve, judged by error statistics as well as rank ("Smoothness" below).
+
 **Population.** AIC2026 TRAIN is WG1's `public_train` split (document m112107, preliminary public-split JND
 reconstruction, CSV SHA-256 `bd5ea3c5…`, tower IQA library `jpeg-aic2026`): **3,920 PTC crops of 28 sources**,
 label `JND_score` (lower is better; quality SROCC uses −JND). `public_test` is the other 1,848 crops of 14 sources;
@@ -1003,6 +1008,12 @@ mean). E21 Δ is against `base-c` as everywhere in this record; mixture test as 
 **Candidate by the committed rule: Tga.** Eligible (at most 10 inversions per cell, E21 Δ ≥ −0.010): Tga (AIC 0.932) and
 Ts1a (0.928). Tga128 has the best monotone AIC (0.935) and the fewest inversions, but its E21 Δ −0.0107 misses the bar by
 0.0007, so it is not picked; it stays the closest alternative. Max pairs (Ma, Mgfa) cost E21 here without an AIC gain.
+
+**Correction (2026-10-23): who set this rule.** Its thresholds (at most 10 mixture inversions per cell, E21 Δ ≥ −0.010)
+were written in this session and committed (04743622) before the last four arms reported; the owner did not approve
+them. The registered E21 bar is E33's point form ("Decision rules" above: mean Δ ≥ −0.002 and every dataset Δ ≥ −0.005).
+No arm in this record meets it, signed or monotone (Bga: mean −0.0031, KADID −0.006). Tga is the session's best balance
+of rank, inversions and AIC, not a qualified candidate; Ts1a is out (scale 0 is mandatory).
 
 Dropping every scale-0 input costs Tga 0.001 on E21 (inside one SE) and 0.004 on AIC public_train, for 21–25% fewer
 instructions per score before any engine change (see Compute). On these development numbers the finest scale costs
@@ -1175,6 +1186,86 @@ the dead scale while the attribution, session and refinement walks still compute
 Profile plans needed every v1 scale kept (a profile's linear tail reads the v1 prefix undeclared). Not landed: every
 walk must honour the skip first. Patch (261 lines, SHA-256 `0e3195eb…`):
 `/mnt/v/output/zensim/byconstruction-2026-10-22/aic2026train/v1_scale_skip_attempt_2026-10-23.patch` on dev.
+
+### Smoothness: error around a smooth curve (2026-10-23)
+
+Owner, 2026-10-23: "I also really care about smoothness, ie error stats rather than just inversions; I want a smooth
+curve against human ratings." Statistics on every row, nothing dropped or sampled (`aic_panel.py --geo`):
+
+- **Z-RMSE** (native panel): RMS error around the panel's own 4-parameter logistic fit, in SDs of the labels.
+- **Error p99 / max**: absolute error around the same fitted curve (Rust `--emit-rescaled`, now `zen_stats.logistic_fit`),
+  as a share of the label span (p1–p99), and the share farther than 4 robust SDs.
+- **Rank geometry** (zenstats `scatter::diagnose`): on the rank map, `out4` (share outside the ±4 robust-SD envelope),
+  `p99d` and `maxd` (p99 and max residual over the span). It counts ordering errors only.
+
+E21, out of sample (cells trained without the dataset, seeds 0–2 mean), Z-RMSE / error p99:
+
+| Model | KADID | TID2013 | KonFiG | CID22-A | Mean Z-RMSE | Mean error p99 | Mean rank out4 |
+|---|---|---|---|---|---|---|---|
+| `base-c` (B's recipe) | **0.454** / 0.372 | **0.423** / 0.270 | 0.567 / 0.555 | 0.488 / 0.377 | **0.483** | 0.394 | 1.05% |
+| Tga | 0.480 / 0.384 | 0.442 / 0.278 | 0.581 / 0.559 | 0.475 / 0.348 | 0.494 | **0.392** | 1.00% |
+| Tga128 | 0.485 / 0.391 | 0.453 / 0.283 | 0.582 / 0.554 | **0.467** / **0.343** | 0.497 | 0.393 | 0.97% |
+| Tghpm (no AIC leg) | 0.469 / 0.383 | 0.441 / 0.274 | 0.589 / 0.564 | 0.479 / 0.358 | 0.495 | 0.395 | 1.14% |
+| Bga (signed + AIC) | 0.465 / 0.395 | 0.433 / 0.281 | **0.566** / **0.535** | 0.488 / 0.362 | 0.488 | 0.393 | **0.88%** |
+| Ma (certified max pairs) | 0.488 / 0.389 | 0.468 / 0.282 | 0.599 / 0.608 | 0.477 / 0.359 | 0.508 | 0.410 | 1.15% |
+| Ta (certified hinges) | 0.504 / 0.395 | 0.465 / 0.289 | 0.610 / 0.621 | 0.474 / 0.360 | 0.513 | 0.416 | 1.28% |
+| Mgfa | 0.488 / 0.392 | 0.449 / 0.275 | 0.610 / 0.627 | 0.480 / 0.357 | 0.507 | 0.413 | 1.12% |
+| DVIFM 0.3 (zero-shot) | 0.623 / 0.494 | 0.571 / 0.378 | 0.666 / 0.613 | 0.554 / 0.500 | 0.604 | 0.496 | 2.09% |
+
+- B's recipe is the smoothest on KADID and TID2013. The monotone arms are 0.011–0.030 worse in mean Z-RMSE (Tga 0.494
+  against 0.483) with the same p99 tails (0.392 against 0.394). On CID22-A every monotone arm is smoother than B's
+  recipe (Tga128 0.467 against 0.488).
+- The max-pair and certified-hinge arms (Ma, Mgfa, Ta) are the least smooth of our models: 0.03–0.05 above B's
+  recipe in Z-RMSE on KADID and KonFiG, and their p99 tails grow most on KonFiG (Ta 0.621 against 0.555).
+- No training term asks for a smooth curve against people. The human groups (`human`, `coverage`, `aic`) train with
+  `loss=Rank`; only the SafeSyn and CID22 teacher legs use `Both` (rank plus regression to their SSIMULACRA2-derived
+  targets). Smoothness against human ratings is whatever the rank fit leaves.
+
+AIC2026 public_train (T, Tga, Tga128 and Bga out of fold; the rest fixed models):
+
+| Model | Z-RMSE | Error p99 | Error max | Rank out4 | Rank p99 | Rank max |
+|---|---|---|---|---|---|---|
+| B (zero-shot) | 0.459 | 0.378 | 0.640 | 1.94% | 0.388 | 0.630 |
+| T (AIC only) | **0.359** | **0.292** | 0.716 | 3.49% | **0.297** | 0.771 |
+| Tga | 0.410 | 0.379 | 0.562 | 3.57% | 0.379 | 0.592 |
+| Tga128 | 0.392 | 0.327 | 0.523 | 2.55% | 0.322 | 0.592 |
+| Bga | 0.371 | 0.356 | 0.614 | 2.70% | 0.369 | 0.605 |
+| butteraugli 3-norm | 0.453 | 0.379 | 0.909 | 4.03% | 0.380 | 0.771 |
+| DVIFM 0.3 (constants fitted on AIC2026) | 0.364 | 0.327 | **0.479** | 2.73% | 0.333 | 0.771 |
+
+The dashboard's scatter tab plots every model on one JND scale three ways (the logistic fit, the zenstats rank map, and
+raw output with mean and SD matched), with these statistics beside each plot.
+
+### DVIFM 0.3 on the E21 sets and the mixture test (2026-10-23)
+
+Owner request: "eval dvifm 0.3 on kadid and other distortion//corrputions". Scorer: the frozen runtime of the
+2026-10-20 AIC2026 run (dvifmish `31c4e256`, preset `port-lap-v0.3`, float path, binary SHA-256 `4827663c…`), which
+`dvifm_e21.py` checks before scoring. The author trained its constants on AIC2026 (compression only), so the E21 sets
+and the mixture set are unseen by it; nothing is fitted or calibrated. Pairs are the E21 fold tables' keys joined to
+the promoted feature bank's paths: 13,817 rows, 13,814 unique pairs, in E34 panel-input order (reference names and
+labels equal row for row). 13,814 pairs took 4.5 s on 16 threads and the 1,344 mixture images 0.1 s (run-heavy peak RSS
+0.16 GiB). Outputs on dev: `/mnt/v/output/zensim/byconstruction-2026-10-22/dvifm03/` (`rows.parquet` `0603444e…`,
+`pairs.tsv` `b043e1bd…`, `dvifm.tsv` `dee17427…`) and `mixture/scores_DVIFM03.json` (quality = −JND).
+
+| Dataset | DVIFM 0.3 (zero-shot) | `base-c` (out of sample) | Tga (out of sample) |
+|---|---|---|---|
+| KADID TRAIN+SELECT | 0.787 (Z-RMSE 0.623) | 0.891 (0.454) | 0.879 (0.480) |
+| TID2013 | 0.788 (0.571) | 0.901 (0.423) | 0.879 (0.442) |
+| KonFiG TRAIN+VAL | 0.733 (0.666) | 0.817 (0.567) | 0.807 (0.581) |
+| CID22-A | 0.831 (0.554) | 0.880 (0.488) | 0.890 (0.475) |
+
+- **Within a type it is close; across types its scale is off** (`aic_panel.py --per-type`, SROCC within each type).
+  KADID: at least 0.90 on 11 of 25 types, within 0.02 of `base-c` or better on 19, above both `base-c` and Tga on 9.
+  TID2013: at least 0.90 on 11 of 24, within 0.02 or better on 12, above both on 4. KonFiG: above both on 3 of 7.
+  CID22-A: above both on 1 of 8 codecs.
+- Weakest types: KADID color saturation 1 0.476, non-eccentricity patch 0.495, color block 0.553, pixelate 0.598, mean
+  shift 0.628; TID2013 contrast change 0.444, local block-wise distortion 0.519, mean shift 0.683, color saturation
+  0.712; KonFiG color diffusion 0.519. Best relative to ours: KADID contrast change 0.751 (`base-c` 0.462, Tga 0.636) and
+  color diffusion 0.900 (`base-c` 0.845).
+- **Mixture test:** 31 of 1,152 steps raise its score (26 blur then luma noise, at most 0.53 JND; 4 posterize then chroma
+  noise σ8; 1 blur then chroma noise σ8). B: 148; Tga: 1–4 per cell.
+- **Smoothness:** the largest Z-RMSE of any model on every E21 set; on AIC2026 public_train, which it was fitted on, the
+  smoothest fixed model (Z-RMSE 0.364).
 
 ## Summary (all arms, E21 screen, seeds 0–2, Δ vs `base-c`)
 

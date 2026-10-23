@@ -2448,5 +2448,13 @@ source-held-out folds; every reported AIC2026 number is a frozen model's score o
   secret holdout.
 - **Not changed:** the main-line role of AIC2026 (§3d), the strict route's AIC-family refusal
   (`v2_human_role.py`) and the protected-population guards. Main-line adoption needs the owner's explicit decision.
+- **Later the same day (owner-requested evaluation, no fit):** DVIFM 0.3 (frozen dvifmish `port-lap-v0.3` runtime) was
+  scored once on the four E21 populations (KADID TRAIN+SELECT 7,869, TID2013 3,000, KonFiG TRAIN+VAL 756, CID22-A(25)
+  2,192; one more model label on these already-exposed populations) and on the label-free mixture images. Smoothness
+  statistics (logistic-fit error tails, zenstats geometry) and per-distortion-type panels were computed on the stored
+  E21 and public_train predictions of the existing arms. No AIC2026 public_test label was loaded: its frozen-B panel
+  row is a stored copy (`panel_public_test_frozen.json`), and the dashboard builder loads only the key, source and
+  codec columns of its pairs list.
 
-Record: `benchmarks/byconstruction_2026-10-22.md`, section "AIC2026 TRAIN".
+Record: `benchmarks/byconstruction_2026-10-22.md`, sections "AIC2026 TRAIN", "Smoothness" and "DVIFM 0.3 on the E21
+sets".
