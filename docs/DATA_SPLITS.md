@@ -2441,7 +2441,9 @@ source-held-out folds; every reported AIC2026 number is a frozen model's score o
 - **Before the split was found**, the same day, the owner-supplied `JND_curve` overlay (CSV `5bdbf540…`) of all 42
   labelled sources was fitted under 6 source folds. That includes the 14 `public_test` sources, so `public_test`
   informed this study's design choices; it is read only to assess frozen candidates and is not a clean test for them.
-- **Frozen reads:** B, full-data T and full-data M, each once, without fit.
+- **Frozen reads:** B, full-data T and full-data M, each once, without fit. On the official public_test labels: frozen B
+  once, and the candidate chosen by the committed rule (Tga, full-data fit, bake `2664b4c7…`) once. Both are
+  development numbers, not clean tests (public_test sources were inside the first phase's fits).
 - **Untouched:** the 28 unlabelled AIC2026 sources, AIC-3, AIC-4, SDR25, CID22 gold, KonJND JPEG, CSIQ and every
   secret holdout.
 - **Not changed:** the main-line role of AIC2026 (§3d), the strict route's AIC-family refusal

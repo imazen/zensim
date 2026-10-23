@@ -1005,7 +1005,8 @@ Ts1a (0.928). Tga128 has the best monotone AIC (0.935) and the fewest inversions
 0.0007, so it is not picked; it stays the closest alternative. Max pairs (Ma, Mgfa) cost E21 here without an AIC gain.
 
 Dropping every scale-0 input costs Tga 0.001 on E21 (inside one SE) and 0.004 on AIC public_train, for 21–25% fewer
-instructions per score before any engine change (see Compute): the finest scale can go.
+instructions per score before any engine change (see Compute). On these development numbers the finest scale costs
+little; that is not yet a clean result (see "Clean evaluation status").
 
 The signed class takes the AIC leg best (Bga: E21 at parity with `base-c`, AIC 0.949) and keeps B's inversions
 (blur + chroma noise); the monotone arms give up about 0.015 on AIC and 0.006–0.014 on E21 to stay inversion-free.
@@ -1015,6 +1016,23 @@ the frozen candidate: among arms with at most 10 mixture inversions per cell and
 highest AIC public_train out-of-fold SROCC; ties (within 0.002) go to the better E21 Δ. Its full-data fit
 (`aic_full.sh`, seed 0) is then read once on public_test and once in sample on public_train. No other model is read on
 public_test.
+
+**Candidate reads (development numbers, not clean).** Tga fitted once on every E21 TRAIN leg plus all of
+public_train (`aic_full.sh`, seed 0, trainer `58a4d100`, bake SHA-256 `2664b4c7…`): public_test 0.9365 (PLCC 0.921,
+KROCC 0.788, OR 0, PWRC 0.991, Z-RMSE 0.389; B on the same rows 0.9255), public_train in sample 0.9411 against 0.932 out
+of fold; mixture test 3 of 1,152 steps raise the score, at most +1.95 (posterize then light noise). The public_test
+number is **not** evidence of generalization: its 14 sources were inside the first phase's fits (overlay labels).
+
+**Clean evaluation status (2026-10-23).**
+- *Clean:* the 28 unlabelled AIC2026 sources (no labels exist yet); every protected holdout not named in DATA_SPLITS'
+  2026-10-23 ledger (AIC-3, the AIC-4 sample, CID22-B, KonJND JPEG, CSIQ, KonFiG test, secret holdouts).
+- *Exposed, development only:* AIC2026 public_test (fitted under the overlay labels in the first phase; read once for
+  frozen B and once for this candidate) and public_train (all selection in this study used it).
+- *Not evidence for a claim:* any AIC2026 number in this section beyond "how a model ranks the labels it was developed
+  against". Out-of-fold numbers are clean of fitting but not of selection: the arms, inputs and model classes were chosen
+  by looking at the same sources, so the chosen arm's score is optimistic by an unknown amount. E21 is likewise an
+  exposed TRAIN-population statistic (see the top of this record).
+- A clean claim needs one frozen candidate read once on data no step has touched, under a rule written first.
 
 Tghpm's 12 cells (no AIC leg) score 0.907 on `public_train` zero-shot (range 0.904–0.909, as B's 0.909): the AIC leg
 is worth +0.025 out of fold. Per codec, Tga beats B on 13 of 14 codecs out of fold (JPEG XL modular 0.801 → 0.833,

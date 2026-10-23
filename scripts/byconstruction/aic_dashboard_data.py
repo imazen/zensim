@@ -77,8 +77,11 @@ EXPOSURE = [
     ("After the split was found", "Official labels (JND_score), public_test sources",
      "Six-statistic panel on the same frozen-B predictions (the dashboard)", 1, "score only"),
     ("After the split was found", "Official labels (JND_score), public_test sources",
-     "Fits, model choices or candidate reads", 0, "none"),
+     "The candidate (Tga, full-data fit, chosen by the rule committed in 04743622) scored once", 1, "score only"),
+    ("After the split was found", "Official labels (JND_score), public_test sources",
+     "Fits or model choices", 0, "none"),
 ]
+CANDIDATE = O / "full" / "Tga"
 
 
 def slug(s: str, n: int = 60) -> str:
@@ -154,6 +157,9 @@ def main() -> int:
     add("headline", id="labels", label="Two WG1-derived reconstructions agree",
         value=float(spearmanr(curve.loc[keys], y_tr.loc[keys]).correlation))
     add("headline", id="target", label="Goal", value=0.99)
+    cand = json.loads((CANDIDATE / "panel.json").read_text()) if (CANDIDATE / "panel.json").is_file() else None
+    if cand:
+        add("headline", id="cand_test", label="Candidate Tga on public_test (the one read)", value=cand["public_test"]["srocc_signed"])
 
     zs = json.loads((O / "zeroshot_train_wg1.json").read_text())["models"]
     for name, lab, g in (("B", "B (diff+frag-820)", "pin only"), ("Tfull", "full-data T (old data, no AIC)", "convex monotone"),
@@ -194,6 +200,13 @@ def main() -> int:
     tz = [pd.read_csv(f, sep="\t").pred.to_numpy() for f in sorted(glob.glob(str(LOGS / "zs_tghpm/*.tsv")))]
     add("overfit", id="tghpm_zero", model="Tghpm cells, no AIC leg (zero-shot mean)", in_sample=None,
         out_of_fold=float(np.mean([spearmanr(p, -y_tr.loc[order]).correlation for p in tz])))
+    if cand:
+        add("overfit", id="tga_candidate", model="Tga candidate (full data)", in_sample=cand["train_all"]["srocc_signed"],
+            out_of_fold=aicscore["Tga"]["global"], public_test=cand["public_test"]["srocc_signed"])
+        mixc = run_json([sys.executable, str(HERE / "mixture_test.py"), "report", "--out", MIX], env).get("TgaFULL_candidate")
+        if mixc:
+            add("candidate", id="mixture", label="Mixture inversions (of steps)", value=mixc["inversions"], of=mixc["n"],
+                max_rise=mixc["max_rise"])
     for k, refs in ((2, 21), (3, 28), (6, 35), (14, 39), (42, 41)):
         j = json.loads((LOGS / f"lc_{k}.json").read_text())["models"]
         add("learning", id=f"n{refs}", train_sources=refs, hgbmono=j["hgbmono"]["global_mean"], nnls=j["nnls"]["global_mean"])
@@ -309,6 +322,13 @@ def main() -> int:
             model=models.get(x["model"], x["model"]), sample=x["sample"],
             kind="out" if x["sample"].startswith(("out", "zero")) else "in", n=x["n"], seeds=x["seeds"],
             srocc=x["srocc_signed"], plcc=x["plcc"], krocc=x["krocc"], **{"or": x["or"]}, pwrc=x["pwrc"], z_rmse=x["z_rmse"])
+    if cand:
+        for key, ds, sample in (("public_test", "AIC2026 public_test", "candidate, full-data fit: the one candidate read"),
+                                ("train_all", "AIC2026 public_train", "candidate, full-data fit: in sample")):
+            x = cand[key]
+            add("panel", id=slug(ds + " candidate " + key), dataset=ds, model="Tga candidate (full data)", sample=sample,
+                kind="out" if key == "public_test" else "in", n=int(x["n"]), seeds=1, srocc=x["srocc_signed"], plcc=x["plcc"],
+                krocc=x["krocc"], **{"or": x["or"]}, pwrc=x["pwrc"], z_rmse=x["z_rmse"])
     for i, (ph, labels, what, runs, use) in enumerate(EXPOSURE):
         add("exposure", id=f"e{i}", phase=ph, labels=labels, what=what, runs=runs, use=use)
 
