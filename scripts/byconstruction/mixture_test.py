@@ -18,6 +18,7 @@ import argparse
 import concurrent.futures as cf
 import hashlib
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -150,6 +151,7 @@ def cmd_score(a):
         with cf.ThreadPoolExecutor(a.jobs) as pool:
             scores = dict(pool.map(one, images))
         dest.write_text(json.dumps({"bake": path, "post": a.post,
+                                    "ring_form": os.environ.get("ZENSIM_RING_FORM", "raw"),
                                     "bake_sha256": hashlib.sha256(Path(path).read_bytes()).hexdigest(),
                                     "scores": scores}, indent=1) + "\n")
         print(f"{name}: {len(scores)} images scored")

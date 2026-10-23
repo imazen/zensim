@@ -22,7 +22,8 @@ import sys
 import time
 from pathlib import Path
 
-ROOT = Path("/mnt/v/output/zensim/v40r4-2026-10-08/v2e29")
+# BYC_ROOT selects a derived root (e.g. the hp4 ringing root from scripts/byconstruction/ring_root.py).
+ROOT = Path(os.environ.get("BYC_ROOT", "/mnt/v/output/zensim/v40r4-2026-10-08/v2e29"))
 BASE_SPEC = "sel:3b7bd5ebe929@h32:H128:cv16:cf98:fx1"
 E34_PANEL = Path("/mnt/v/output/zensim/e34-launch-2026-10-15/evaluation/panel-input.json")
 FOLDS = ("kadid", "tid2013", "konfig", "cid22_a25")
