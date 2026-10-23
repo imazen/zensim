@@ -2554,10 +2554,10 @@ mod featcanon_contract_tests {
                     let (bv_lo, bv_hi) = (0.03f32, 0.21f32);
 
                     macro_rules! run_one {
-                        ($want:ident, $got:ident, $B:literal, $V:literal, $K:literal) => {{
+                        ($want:ident, $got:ident, $B:literal, $V:literal, $K:literal, $R:literal) => {{
                             let ($want, want_hooks) = run_gradient::<$B, $V, $K>(
                                 |s, d, a, ad, w, h, lo, hi, r4| {
-                                    gradient_block_kernel_canon::<LanesF64, $B, $V, $K>(
+                                    gradient_block_kernel_canon::<LanesF64, $B, $V, $K, $R>(
                                         s,
                                         d,
                                         a,
@@ -2585,7 +2585,7 @@ mod featcanon_contract_tests {
                             );
                             let ($got, got_hooks) = run_gradient::<$B, $V, $K>(
                                 |s, d, a, ad, w, h, lo, hi, r4| {
-                                    $f::<$B, $V, $K>($tok, s, d, a, ad, w, h, lo, hi, r4)
+                                    $f::<$B, $V, $K, $R>($tok, s, d, a, ad, w, h, lo, hi, r4)
                                 },
                                 &src_h,
                                 &dst_h,
@@ -2603,11 +2603,12 @@ mod featcanon_contract_tests {
                             assert_eq!(
                                 grad_bits(&$got),
                                 grad_bits(&$want),
-                                "{}: accum differs (B={} V={} K={} w={w} h={h} r4={r4_kind})",
+                                "{}: accum differs (B={} V={} K={} R={} w={w} h={h} r4={r4_kind})",
                                 $name,
                                 $B,
                                 $V,
-                                $K
+                                $K,
+                                $R
                             );
                             match (got_hooks, want_hooks) {
                                 (Some((gr, gb)), Some((wr, wb))) => {
@@ -2635,14 +2636,38 @@ mod featcanon_contract_tests {
                                 // Const-generic combos cannot be runtime
                                 // booleans — dispatch on the 8 tuples.
                                 match (b, v, k) {
-                                    (false, false, false) => run_one!(w0, g0, false, false, false),
-                                    (false, false, true) => run_one!(w1, g1, false, false, true),
-                                    (false, true, false) => run_one!(w2, g2, false, true, false),
-                                    (false, true, true) => run_one!(w3, g3, false, true, true),
-                                    (true, false, false) => run_one!(w4, g4, true, false, false),
-                                    (true, false, true) => run_one!(w5, g5, true, false, true),
-                                    (true, true, false) => run_one!(w6, g6, true, true, false),
-                                    (true, true, true) => run_one!(w7, g7, true, true, true),
+                                    (false, false, false) => {
+                                        run_one!(w0, g0, false, false, false, false);
+                                        run_one!(w0, g0, false, false, false, true)
+                                    }
+                                    (false, false, true) => {
+                                        run_one!(w1, g1, false, false, true, false);
+                                        run_one!(w1, g1, false, false, true, true)
+                                    }
+                                    (false, true, false) => {
+                                        run_one!(w2, g2, false, true, false, false);
+                                        run_one!(w2, g2, false, true, false, true)
+                                    }
+                                    (false, true, true) => {
+                                        run_one!(w3, g3, false, true, true, false);
+                                        run_one!(w3, g3, false, true, true, true)
+                                    }
+                                    (true, false, false) => {
+                                        run_one!(w4, g4, true, false, false, false);
+                                        run_one!(w4, g4, true, false, false, true)
+                                    }
+                                    (true, false, true) => {
+                                        run_one!(w5, g5, true, false, true, false);
+                                        run_one!(w5, g5, true, false, true, true)
+                                    }
+                                    (true, true, false) => {
+                                        run_one!(w6, g6, true, true, false, false);
+                                        run_one!(w6, g6, true, true, false, true)
+                                    }
+                                    (true, true, true) => {
+                                        run_one!(w7, g7, true, true, true, false);
+                                        run_one!(w7, g7, true, true, true, true)
+                                    }
                                 }
                             }
                         }
@@ -2653,7 +2678,7 @@ mod featcanon_contract_tests {
 
         #[test]
         fn gradient_canon64_vec_matches_scalar_on_every_compiled_tier() {
-            fn go_scalar<const B: bool, const V: bool, const K: bool>(
+            fn go_scalar<const B: bool, const V: bool, const K: bool, const R: bool>(
                 _t: archmage::ScalarToken,
                 s: &[f32],
                 d: &[f32],
@@ -2665,7 +2690,7 @@ mod featcanon_contract_tests {
                 hi: f32,
                 r4: Option<Rev4Grad<'_>>,
             ) -> GradientAccum {
-                gradient_block_kernel_canon64_vec_scalar::<crate::featcanon::LanesF64, B, V, K>(
+                gradient_block_kernel_canon64_vec_scalar::<crate::featcanon::LanesF64, B, V, K, R>(
                     _t,
                     s,
                     d,
@@ -2680,7 +2705,7 @@ mod featcanon_contract_tests {
                 )
             }
             #[cfg(target_arch = "x86_64")]
-            fn go_v3<const B: bool, const V: bool, const K: bool>(
+            fn go_v3<const B: bool, const V: bool, const K: bool, const R: bool>(
                 t: archmage::X64V3Token,
                 s: &[f32],
                 d: &[f32],
@@ -2692,7 +2717,7 @@ mod featcanon_contract_tests {
                 hi: f32,
                 r4: Option<Rev4Grad<'_>>,
             ) -> GradientAccum {
-                gradient_block_kernel_canon64_vec_v3::<crate::featcanon::LanesF64, B, V, K>(
+                gradient_block_kernel_canon64_vec_v3::<crate::featcanon::LanesF64, B, V, K, R>(
                     t,
                     s,
                     d,
@@ -2707,7 +2732,7 @@ mod featcanon_contract_tests {
                 )
             }
             #[cfg(all(target_arch = "x86_64", feature = "avx512"))]
-            fn go_v4<const B: bool, const V: bool, const K: bool>(
+            fn go_v4<const B: bool, const V: bool, const K: bool, const R: bool>(
                 t: archmage::X64V4Token,
                 s: &[f32],
                 d: &[f32],
@@ -2719,7 +2744,7 @@ mod featcanon_contract_tests {
                 hi: f32,
                 r4: Option<Rev4Grad<'_>>,
             ) -> GradientAccum {
-                gradient_block_kernel_canon64_vec_v4::<crate::featcanon::LanesF64, B, V, K>(
+                gradient_block_kernel_canon64_vec_v4::<crate::featcanon::LanesF64, B, V, K, R>(
                     t,
                     s,
                     d,
@@ -2734,7 +2759,7 @@ mod featcanon_contract_tests {
                 )
             }
             #[cfg(all(target_arch = "x86_64", feature = "avx512"))]
-            fn go_v4x<const B: bool, const V: bool, const K: bool>(
+            fn go_v4x<const B: bool, const V: bool, const K: bool, const R: bool>(
                 t: archmage::X64V4xToken,
                 s: &[f32],
                 d: &[f32],
@@ -2746,7 +2771,7 @@ mod featcanon_contract_tests {
                 hi: f32,
                 r4: Option<Rev4Grad<'_>>,
             ) -> GradientAccum {
-                gradient_block_kernel_canon64_vec_v4x::<crate::featcanon::LanesF64, B, V, K>(
+                gradient_block_kernel_canon64_vec_v4x::<crate::featcanon::LanesF64, B, V, K, R>(
                     t,
                     s,
                     d,

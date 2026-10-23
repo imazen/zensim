@@ -616,6 +616,12 @@ impl Extraction {
                 .collect::<Vec<_>>()
                 .join(", ")
         ));
+        // The ringing measurement arm (`ZENSIM_RING_FORM`), so a table made
+        // under the high-pass arm can never pass for a shipped-form table.
+        s.push_str(&format!(
+            "  \"ring_form\": \"{}\",\n",
+            crate::feature_v2::active_ring_form().as_str()
+        ));
         s.push_str("  \"features\": [\n");
         for (i, p) in self.provenance.iter().enumerate() {
             s.push_str(&format!(

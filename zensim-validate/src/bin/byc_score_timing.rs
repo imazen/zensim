@@ -3,8 +3,8 @@
 //! Exploration record: `benchmarks/byconstruction_2026-10-22.md`. Builds a deterministic
 //! textured reference of the requested size and a distorted copy (small noise), warms up, then
 //! times `BakeScorer::compute` and prints one JSON line: median and quartiles in milliseconds,
-//! plus the score bits (to confirm both builds score the same pair). Two builds of this binary
-//! (with and without `--cfg byc_hp_ring`) are alternated by the caller in paired rounds.
+//! plus the score bits (to confirm both arms score the same pair). The caller alternates two arms
+//! in paired rounds (two builds, or one build under two `ZENSIM_RING_FORM` values).
 //!
 //! Usage: byc_score_timing --bake PATH --size N [--iters 30] [--warmup 5]
 use std::time::Instant;
@@ -80,10 +80,10 @@ fn main() {
     ms.sort_by(f64::total_cmp);
     let q = |p: f64| ms[((ms.len() - 1) as f64 * p).round() as usize];
     println!(
-        "{{\"size\":{size},\"iters\":{iters},\"median_ms\":{:.4},\"p25_ms\":{:.4},\"p75_ms\":{:.4},\"score\":{score:.6},\"hp_ring\":{}}}",
+        "{{\"size\":{size},\"iters\":{iters},\"median_ms\":{:.4},\"p25_ms\":{:.4},\"p75_ms\":{:.4},\"score\":{score:.6},\"ring_form\":\"{}\"}}",
         q(0.5),
         q(0.25),
         q(0.75),
-        cfg!(byc_hp_ring)
+        std::env::var("ZENSIM_RING_FORM").unwrap_or_else(|_| "raw".into())
     );
 }

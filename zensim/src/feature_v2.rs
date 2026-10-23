@@ -207,6 +207,275 @@ pub const C_RING_EDGE: f64 = 0.02;
 /// the ringing product (keeps ringing bounded regardless of input dynamic
 /// range, same D6-style rationale as `C_ACTIVITY`).
 pub const C_RING_ERR: f64 = 0.05;
+
+/// Which per-pixel error the ringing family measures.
+///
+/// A measurement arm selected per process by `ZENSIM_RING_FORM`, modelled on
+/// `ZENSIM_HF_GAIN` ([`crate::hf_gain_form::active_gain_form`]): no shipping
+/// path sets it, and every stored table and bake is [`Self::Raw`].
+///
+/// imazen/zensim#72 (`benchmarks/byconstruction_2026-10-22.md`): [`Self::Raw`]
+/// saturates `|src − dst|`, which a global offset, contrast or saturation
+/// change makes uniformly large off edges. Measured on 24 references, a
+/// +8 luma shift was ringing's largest response, 2.4× a visible σ1.2 blur.
+/// [`Self::HighPass4`] removes the error's own 4-neighbour mean first, so a
+/// constant offset or a linear ramp contributes nothing (up to rounding),
+/// while noise and oscillation next to edges still do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum RingForm {
+    /// `sat(|e|, C_RING_ERR) · sat(act, C_ACTIVITY) · (1 − sat(|∇src|, C_RING_EDGE))`,
+    /// `e = src − dst`. The shipped form.
+    #[default]
+    Raw,
+    /// The same product on `e − mean4(e)`, the error minus the mean of its
+    /// four neighbours' errors, written with one division (see [`ring_hp4_64`]).
+    HighPass4,
+}
+
+impl RingForm {
+    /// The `ZENSIM_RING_FORM` spelling. Both values have the same byte length
+    /// on purpose (see [`crate::ssim_form::active_revision`]).
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Raw => "raw",
+            Self::HighPass4 => "hp4",
+        }
+    }
+}
+
+/// **The ring form for this process**, read once.
+///
+/// `ZENSIM_RING_FORM=hp4` selects [`RingForm::HighPass4`]; unset or `raw`
+/// keeps [`RingForm::Raw`]. Any other value panics, so a typo can never
+/// measure the wrong arm silently.
+pub(crate) fn active_ring_form() -> RingForm {
+    use std::sync::OnceLock;
+    static FORM: OnceLock<RingForm> = OnceLock::new();
+    *FORM.get_or_init(|| match std::env::var("ZENSIM_RING_FORM").as_deref() {
+        Err(_) | Ok("raw") => RingForm::Raw,
+        Ok("hp4") => RingForm::HighPass4,
+        Ok(other) => panic!("ZENSIM_RING_FORM={other:?}: expected \"raw\" or \"hp4\""),
+    })
+}
+
+/// [`RingForm::HighPass4`]'s per-pixel ringing term in f64.
+///
+/// `sat(|h|, C_RING_ERR) · sat(act, C_ACTIVITY) · (1 − sat(gsrc, C_RING_EDGE))`
+/// with `h = (s − d) − ((Σ src neighbours − Σ dst neighbours) / 4)`. Since
+/// `1 − g/(g + c) = c/(g + c)`, the product is one quotient:
+/// `|h|·act·C_RING_EDGE / ((|h| + C_RING_ERR)·(act + C_ACTIVITY)·(gsrc + C_RING_EDGE))`.
+/// One division instead of the raw form's three pays for the neighbour sums.
+/// [`ring_hp4_32`] and the kernels' `ring_hp4_v` use this exact op order.
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+pub(crate) fn ring_hp4_64(
+    s: f64,
+    dd: f64,
+    sxl: f64,
+    sxr: f64,
+    syu: f64,
+    syd: f64,
+    dxl: f64,
+    dxr: f64,
+    dyu: f64,
+    dyd: f64,
+    act: f64,
+    gsrc: f64,
+) -> f64 {
+    let ns = (sxl + sxr) + (syu + syd);
+    let nd = (dxl + dxr) + (dyu + dyd);
+    let h = ((s - dd) - (ns - nd) * 0.25).abs();
+    let a = act.max(0.0);
+    (h * a * C_RING_EDGE) / ((h + C_RING_ERR) * (a + C_ACTIVITY) * (gsrc + C_RING_EDGE))
+}
+
+/// The f32 sibling of [`ring_hp4_64`], same op order.
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+pub(crate) fn ring_hp4_32(
+    s: f32,
+    dd: f32,
+    sxl: f32,
+    sxr: f32,
+    syu: f32,
+    syd: f32,
+    dxl: f32,
+    dxr: f32,
+    dyu: f32,
+    dyd: f32,
+    act: f32,
+    gsrc: f32,
+) -> f32 {
+    let ns = (sxl + sxr) + (syu + syd);
+    let nd = (dxl + dxr) + (dyu + dyd);
+    let h = ((s - dd) - (ns - nd) * 0.25f32).abs();
+    let a = act.max(0.0);
+    (h * a * C_RING_EDGE as f32)
+        / ((h + C_RING_ERR as f32) * (a + C_ACTIVITY as f32) * (gsrc + C_RING_EDGE as f32))
+}
+
+#[cfg(test)]
+mod ring_form_tests {
+    use super::*;
+
+    /// Deterministic xorshift values in `[lo, hi)`.
+    struct Draw(u64);
+    impl Draw {
+        fn next(&mut self, lo: f64, hi: f64) -> f64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            lo + (hi - lo) * ((self.0 >> 11) as f64 / (1u64 << 53) as f64)
+        }
+    }
+
+    /// The definition, written independently: three saturations on the
+    /// high-pass error, as in the raw form.
+    #[allow(clippy::too_many_arguments)]
+    fn reference(s: f64, d: f64, sn: [f64; 4], dn: [f64; 4], act: f64, gsrc: f64) -> f64 {
+        let e = |a: f64, b: f64| a - b;
+        let mean4 = (0..4).map(|k| e(sn[k], dn[k])).sum::<f64>() / 4.0;
+        let h = (e(s, d) - mean4).abs();
+        saturate(h, C_RING_ERR) * saturate(act, C_ACTIVITY) * (1.0 - saturate(gsrc, C_RING_EDGE))
+    }
+
+    #[test]
+    fn one_division_form_equals_the_three_saturation_definition() {
+        let mut r = Draw(0x5249_4e47_4850_3401);
+        for _ in 0..20_000 {
+            let s = r.next(0.0, 1.0);
+            let d = r.next(0.0, 1.0);
+            let sn = [0; 4].map(|_| r.next(0.0, 1.0));
+            let dn = [0; 4].map(|_| r.next(0.0, 1.0));
+            let act = r.next(-0.01, 0.5);
+            let g = r.next(0.0, 0.3);
+            let want = reference(s, d, sn, dn, act, g);
+            let got = ring_hp4_64(
+                s, d, sn[0], sn[1], sn[2], sn[3], dn[0], dn[1], dn[2], dn[3], act, g,
+            );
+            assert!(
+                (got - want).abs() <= 1e-12 * want + 1e-15,
+                "{got} vs {want}"
+            );
+            let f = |v: f64| v as f32;
+            let got32 = ring_hp4_32(
+                f(s),
+                f(d),
+                f(sn[0]),
+                f(sn[1]),
+                f(sn[2]),
+                f(sn[3]),
+                f(dn[0]),
+                f(dn[1]),
+                f(dn[2]),
+                f(dn[3]),
+                f(act),
+                f(g),
+            );
+            // f32 inputs and f32 arithmetic; the high-pass error cancels, so
+            // compare against the reference evaluated on the f32 inputs.
+            let want32 = reference(
+                f(s) as f64,
+                f(d) as f64,
+                sn.map(|v| f(v) as f64),
+                dn.map(|v| f(v) as f64),
+                f(act) as f64,
+                f(g) as f64,
+            );
+            assert!(
+                (got32 as f64 - want32).abs() <= 1e-5 * want32 + 1e-5,
+                "{got32} vs {want32}"
+            );
+        }
+    }
+
+    #[test]
+    fn offset_and_linear_ramp_do_not_register_but_noise_does() {
+        let mut r = Draw(0x5249_4e47_4850_3402);
+        let (mut raw_sum, mut hp_sum, mut noise_sum) = (0.0, 0.0, 0.0);
+        for _ in 0..5_000 {
+            // Source pixel and its four neighbours (left, right, up, down).
+            let s = r.next(0.1, 0.9);
+            let sn = [0; 4].map(|_| r.next(0.1, 0.9));
+            let act = r.next(0.0, 0.5);
+            let g = r.next(0.0, 0.05);
+            // Offset k plus a linear ramp a·x + b·y: the four neighbours'
+            // errors average to the centre's.
+            let (k, a, b) = (r.next(-0.1, 0.1), r.next(-0.02, 0.02), r.next(-0.02, 0.02));
+            let d = s + k;
+            let dn = [sn[0] + k - a, sn[1] + k + a, sn[2] + k - b, sn[3] + k + b];
+            let raw = saturate((s - d).abs(), C_RING_ERR)
+                * saturate(act, C_ACTIVITY)
+                * (1.0 - saturate(g, C_RING_EDGE));
+            raw_sum += raw;
+            hp_sum += ring_hp4_64(
+                s, d, sn[0], sn[1], sn[2], sn[3], dn[0], dn[1], dn[2], dn[3], act, g,
+            );
+            // Independent noise on the centre pixel.
+            let dz = s + r.next(-0.05, 0.05);
+            noise_sum += ring_hp4_64(
+                s, dz, sn[0], sn[1], sn[2], sn[3], sn[0], sn[1], sn[2], sn[3], act, g,
+            );
+        }
+        assert!(raw_sum > 100.0, "raw form must fire on offsets: {raw_sum}");
+        assert!(
+            hp_sum < 1e-9 * raw_sum,
+            "high-pass form fired on offset+ramp: {hp_sum} vs raw {raw_sum}"
+        );
+        assert!(
+            noise_sum > 0.1 * raw_sum,
+            "high-pass form must fire on noise: {noise_sum} vs {raw_sum}"
+        );
+    }
+
+    #[test]
+    fn canonical_kernel_ignores_a_global_offset_under_hp4() {
+        let (w, h) = (37usize, 11usize);
+        let mut r = Draw(0x5249_4e47_4850_3403);
+        let src_h: Vec<f32> = (0..(h + 2) * w).map(|_| r.next(0.2, 0.8) as f32).collect();
+        let act: Vec<f32> = (0..w * h).map(|_| r.next(0.0, 0.5) as f32).collect();
+        let dst_h: Vec<f32> = src_h.iter().map(|v| v + 0.03).collect();
+        let run =
+            |hp: bool| {
+                let m = crate::featcanon::Mode::Canon64;
+                if hp {
+                    gradient_block_kernel_canon::<
+                        crate::featcanon::Lanes16F64,
+                        false,
+                        false,
+                        false,
+                        true,
+                    >(&src_h, &dst_h, &act, &[], w, h, 0.0, 0.0, None, m)
+                } else {
+                    gradient_block_kernel_canon::<
+                        crate::featcanon::Lanes16F64,
+                        false,
+                        false,
+                        false,
+                        false,
+                    >(&src_h, &dst_h, &act, &[], w, h, 0.0, 0.0, None, m)
+                }
+            };
+        let (raw, hp) = (run(false), run(true));
+        assert!(raw.sum_ringing > 1.0, "{}", raw.sum_ringing);
+        assert!(
+            hp.sum_ringing < 1e-4 * raw.sum_ringing,
+            "{} vs {}",
+            hp.sum_ringing,
+            raw.sum_ringing
+        );
+        // Only ringing moves: every other gradient-family pool is the same bits.
+        for (a, b) in [
+            (raw.sum_gms, hp.sum_gms),
+            (raw.sum_gms2, hp.sum_gms2),
+            (raw.sum_banding, hp.sum_banding),
+            (raw.sum_grad_src, hp.sum_grad_src),
+            (raw.sum_grad_dst, hp.sum_grad_dst),
+        ] {
+            assert_eq!(a.to_bits(), b.to_bits());
+        }
+    }
+}
 /// Saturating half-point for "distorted now has a noticeable edge here"
 /// in the banding approximation.
 pub const C_BAND_DST: f64 = 0.01;
@@ -3850,6 +4119,7 @@ pub(crate) fn compute_v2_diffmap_channel_scale(
     // the v2 SSIM signal must read it as such. Hoisted once per call;
     // loop-invariant, so every call site below unswitches on it.
     let direct = crate::ssim_form::active_revision() >= crate::feature_defs::FormulaRevision::Rev3;
+    let ring_hp = active_ring_form() == RingForm::HighPass4;
     let n = width * height;
     assert_eq!(src.len(), n, "src plane length must be width*height");
     assert_eq!(dst.len(), n, "dst plane length must be width*height");
@@ -4059,10 +4329,28 @@ pub(crate) fn compute_v2_diffmap_channel_scale(
 
                 acc += weights[idx::GMS] * (1.0 - bounded_sim(grad_src_mag, grad_dst_mag, C_GMS));
 
-                let err_b = saturate(raw_abs_err, C_RING_ERR);
-                let act_b = saturate(act, C_ACTIVITY);
-                let edge_r = saturate(grad_src_mag, C_RING_EDGE);
-                acc += weights[idx::RINGING] * (err_b * act_b * (1.0 - edge_r));
+                acc += weights[idx::RINGING]
+                    * if ring_hp {
+                        ring_hp4_64(
+                            s,
+                            dd,
+                            sxl,
+                            sxr,
+                            syu,
+                            syd,
+                            dxl,
+                            dxr,
+                            dyu,
+                            dyd,
+                            act,
+                            grad_src_mag,
+                        )
+                    } else {
+                        let err_b = saturate(raw_abs_err, C_RING_ERR);
+                        let act_b = saturate(act, C_ACTIVITY);
+                        let edge_r = saturate(grad_src_mag, C_RING_EDGE);
+                        err_b * act_b * (1.0 - edge_r)
+                    };
 
                 let edge_excess = bounded_excess(grad_dst_mag, grad_src_mag, C_BAND_DST);
                 let src_smooth_b = 1.0 - saturate(grad_src_mag, C_BAND_SRC);
@@ -10064,6 +10352,7 @@ fn attr_pass_b_rows(
     // the v2 SSIM signal must read it as such. Hoisted once per call;
     // loop-invariant, so every call site below unswitches on it.
     let direct = crate::ssim_form::active_revision() >= crate::feature_defs::FormulaRevision::Rev3;
+    let ring_hp = active_ring_form() == RingForm::HighPass4;
     let out_off = y0 * width;
     let cross_on = cross.is_some();
     for y in y0..y1 {
@@ -10252,10 +10541,15 @@ fn attr_pass_b_rows(
                     let s = src[i] as f64;
                     let dd = dst[i] as f64;
                     let act = planes.act[i] as f64;
-                    let err_b = saturate((s - dd).abs(), C_RING_ERR);
-                    let act_b = saturate(act, C_ACTIVITY);
-                    let edge_r = saturate(gmag_s, C_RING_EDGE);
-                    acc += co.c_ringing * (err_b * act_b * (1.0 - edge_r));
+                    acc += co.c_ringing
+                        * if ring_hp {
+                            ring_hp4_64(s, dd, sxl, sxr, syu, syd, dxl, dxr, dyu, dyd, act, gmag_s)
+                        } else {
+                            let err_b = saturate((s - dd).abs(), C_RING_ERR);
+                            let act_b = saturate(act, C_ACTIVITY);
+                            let edge_r = saturate(gmag_s, C_RING_EDGE);
+                            err_b * act_b * (1.0 - edge_r)
+                        };
                 }
                 if co.c_banding != 0.0 {
                     let edge_excess = bounded_excess(gmag_d, gmag_s, C_BAND_DST);
@@ -11017,10 +11311,17 @@ fn attr_pass_b_grad_px(
     let mut acc = co.c_gms * g;
     acc += (co.gg_lin + co.gg_quad * g) * g;
     if co.c_ringing != 0.0 {
-        let err_b = sat((s_c - d_c).abs(), CRE);
-        let act_b = sat(act_i, CA);
-        let edge_r = sat(gmag_s, CRG);
-        acc += co.c_ringing * (err_b * act_b * (1.0 - edge_r));
+        acc += co.c_ringing
+            * if active_ring_form() == RingForm::HighPass4 {
+                ring_hp4_32(
+                    s_c, d_c, sxl, sxr, syu, syd, dxl, dxr, dyu, dyd, act_i, gmag_s,
+                )
+            } else {
+                let err_b = sat((s_c - d_c).abs(), CRE);
+                let act_b = sat(act_i, CA);
+                let edge_r = sat(gmag_s, CRG);
+                err_b * act_b * (1.0 - edge_r)
+            };
     }
     if co.c_banding != 0.0 {
         let edge_excess = (gmag_d - gmag_s).max(0.0) / (gmag_d + gmag_s + CBD);
@@ -11067,6 +11368,7 @@ fn attr_pass_b_grad_kernel_generic<T: F32x8Backend + Copy>(
 ) {
     let need_bandvis = co.c_bv_gain != 0.0 || co.c_bv_loss != 0.0;
     let has_ringing = co.c_ringing != 0.0;
+    let ring_hp = active_ring_form() == RingForm::HighPass4;
     let has_banding = co.c_banding != 0.0;
     let zero = V8::<T>::zero_t(token);
     let one = V8::<T>::splat_t(token, 1.0);
@@ -11158,10 +11460,29 @@ fn attr_pass_b_grad_kernel_generic<T: F32x8Backend + Copy>(
             let mut acc = sp(co.c_gms) * g;
             acc += (sp(co.gg_lin) + sp(co.gg_quad) * g) * g;
             if has_ringing {
-                let err_b = sat_v((s_c - d_c).abs(), c_ring_err);
-                let act_b = sat_v(ldo!(act_p, i), c_activity);
-                let edge_r = sat_v(gmag_s, c_ring_edge);
-                acc += sp(co.c_ringing) * (err_b * act_b * (one - edge_r));
+                acc += sp(co.c_ringing)
+                    * if ring_hp {
+                        ring_hp4_v(
+                            token,
+                            s_c,
+                            d_c,
+                            sxl,
+                            sxr,
+                            syu,
+                            syd,
+                            dxl,
+                            dxr,
+                            dyu,
+                            dyd,
+                            ldo!(act_p, i),
+                            gmag_s,
+                        )
+                    } else {
+                        let err_b = sat_v((s_c - d_c).abs(), c_ring_err);
+                        let act_b = sat_v(ldo!(act_p, i), c_activity);
+                        let edge_r = sat_v(gmag_s, c_ring_edge);
+                        err_b * act_b * (one - edge_r)
+                    };
             }
             if has_banding {
                 let edge_excess = bounded_excess_v(token, gmag_d, gmag_s, c_band_dst);
