@@ -210,7 +210,8 @@ def e34_options(args, recipe):
     return options(args,recipe)
 
 
-BYC_DERIVED_FSIDS = {"basic+peaks+v2@w1825/rev5_localwin_ringhpm#36c3f3af"}
+BYC_DERIVED_FSIDS = {"basic+peaks+v2@w1825/rev5_localwin_ringhpm#36c3f3af",
+                     "basic+peaks+v2@w1891/rev5_localwin_ringhpm_globaff#d56ad477"}
 
 
 def strict_training_groups(groups: list, data_role_decision: Path | None = None,
@@ -565,8 +566,12 @@ def main() -> None:
         if max(keep) >= v2_teacher.ORDINAL_WIDTH:
             if not args.strict_admission:
                 raise ValueError(f"{core_spec}: the coverage pool has no f{v2_teacher.ORDINAL_WIDTH}+ (NaN); refusing this keep list")
-            from e32_palette import coverage_extension
-            coverage_extension(V2 / "e15" / Path(v2_teacher.POOL_NAME).name, keep)
+            pool_decl = json.loads((V2 / "e15" / f"{Path(v2_teacher.POOL_NAME).name}.manifest.json").read_text())
+            extra = {k for k in keep if k >= v2_teacher.ORDINAL_WIDTH}
+            if not ("byc_derived_from" in pool_decl and extra <= set(pool_decl.get("byc_globaff_ids", []))):
+                # By-construction research columns (ring_root.py globaff) are declared by the derived pool itself.
+                from e32_palette import coverage_extension
+                coverage_extension(V2 / "e15" / Path(v2_teacher.POOL_NAME).name, keep)
         cpath, coverage_record = v2_teacher.coverage_leg(recipe["coverage_mask"], Path(os.environ.get("TMPDIR") or dest),
                                                        admitted_root=V2 if args.strict_admission else None)
         curated_extra = cpath

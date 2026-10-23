@@ -382,6 +382,13 @@
    "label": "By-construction exploration: Rev5 local-window bank with ringing under ZENSIM_RING_FORM=hpm",
    "formula_revision": 5,
    "note": "Research only (branch explore/byconstruction). The 12 v2 ringing slots measure the error after removing each image's SSIM local mean (RingForm::HighPassMu); every other measured slot is bit-identical to rev5_localwin (checked per table by scripts/byconstruction/ring_root.py). benchmarks/byconstruction_2026-10-22.md"
+  },
+  "rev5_localwin_ringhpm_globaff": {
+   "build_commit": "b8e0c678",
+   "root": "/mnt/v/output/zensim/byconstruction-2026-10-22/ringhpm/root_globaff",
+   "label": "By-construction exploration: rev5_localwin_ringhpm plus the byc_globaff descriptor at f1867-f1890",
+   "formula_revision": 5,
+   "note": "Research only (branch explore/byconstruction). f1867-f1890 are the byc_globaff sidecar (zensim-bench/examples/byc_globaff.rs: global affine fit share and explained mean squared error per scale x XYB channel), not a registered zensim family; zensim cannot compute them at serving time. benchmarks/byconstruction_2026-10-22.md"
   }
  },
  "sets": {
@@ -1064,6 +1071,18 @@
    "kind": "set",
    "legacy_name": "Rev5 basic+peaks+v2 measured subset, ringing hpm (by-construction exploration)",
    "evidence": "scripts/byconstruction/ring_root.py; benchmarks/byconstruction_2026-10-22.md"
+  },
+  "basic+peaks+v2@w1891/rev5_localwin_ringhpm_globaff": {
+   "compute": "basic+peaks+v2",
+   "layout": 1891,
+   "era": "rev5_localwin_ringhpm_globaff",
+   "slots": "0-227,372-719,1867-1890",
+   "slots_hash8": "d56ad477",
+   "n_slots": 600,
+   "role": "producer",
+   "kind": "set",
+   "legacy_name": "Rev5 basic+peaks+v2 measured subset, ringing hpm, plus byc_globaff (by-construction exploration)",
+   "evidence": "zensim-validate/src/bin/byc_fsid.rs (hash); scripts/byconstruction/ring_root.py globaff; benchmarks/byconstruction_2026-10-22.md"
   }
  },
  "roots": {

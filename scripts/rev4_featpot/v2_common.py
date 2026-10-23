@@ -87,7 +87,7 @@ FX1NR_DECLARATION = Path(__file__).resolve().parent / "byc_fx1nr_declaration.jso
 FX1NR_SHA256 = "923da70c2ccdfcdf2d34192a8b7f6679dd27d918b55ff1c7827e5da5234cb740"
 # By-construction exploration: fx1 plus the byc_globaff global affine-change descriptor (research ids f1867-f1890).
 FX1G_DECLARATION = Path(__file__).resolve().parent / "byc_fx1g_declaration.json"
-FX1G_SHA256 = "408a175b3d185c538c07fb9d66f24dd42871fb14b8e79ec9ee453d5503f69d8d"
+FX1G_SHA256 = "2fa7a8c8a908406e101b705d061cb41cfb6f36a31afd815f8ef1d3529fd2d2a0"
 
 
 def fx1_declaration() -> dict:

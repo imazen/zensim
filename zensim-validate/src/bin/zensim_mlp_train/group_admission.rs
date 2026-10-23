@@ -12,7 +12,10 @@ const BASE: &str = "basic+peaks+v2@w1825/rev5_localwin#36c3f3af";
 /// By-construction exploration (`benchmarks/byconstruction_2026-10-22.md`): derived roots that re-extract named
 /// columns under a measurement arm (`scripts/byconstruction/ring_root.py`). Admitted only on a declaration that
 /// records `byc_derived_from`; the registry entry carries the same 576 slots.
-const BYC_DERIVED: &[&str] = &["basic+peaks+v2@w1825/rev5_localwin_ringhpm#36c3f3af"];
+const BYC_DERIVED: &[&str] = &[
+    "basic+peaks+v2@w1825/rev5_localwin_ringhpm#36c3f3af",
+    "basic+peaks+v2@w1891/rev5_localwin_ringhpm_globaff#d56ad477",
+];
 
 pub(super) fn safe(path: &Path) -> Result<(), String> {
     for p in [
@@ -494,15 +497,42 @@ pub(super) fn preflight(
             feature_set::table_feature_set_ref(&g.1)?.ok_or("feature identity required")?;
         let palette = d.get("research_palette").is_some();
         let ids = selected.ok_or("strict groups require explicit feature IDs")?;
+        // By-construction exploration: a derived root widened with research columns that are not in the
+        // registry (`ring_root.py globaff`, the byc_globaff descriptor). Only the listed ids may sit outside
+        // the registered slots, and the declared width must end exactly after them.
+        let research: Vec<usize> = match d.get("byc_globaff_ids") {
+            Some(v) if d.get("byc_derived_from").is_some() => {
+                serde_json::from_value(v.clone()).map_err(|e| e.to_string())?
+            }
+            _ => Vec::new(),
+        };
+        let core: Vec<usize> = ids
+            .iter()
+            .copied()
+            .filter(|id| !research.contains(id))
+            .collect();
+        let width_ok = if research.is_empty() {
+            args.max_features <= 1853
+        } else {
+            research
+                .last()
+                .is_some_and(|last| args.max_features == last + 1)
+        };
         if !identity
             .slots
             .covers(&zensim::feature_set_id::SlotSet::from_slots(
-                ids.iter().copied(),
+                core.iter().copied(),
             ))
-            || identity.layout != Some(if palette { 1867 } else { 1825 })
+            || identity.layout
+                != Some(if palette {
+                    1867
+                } else if let Some(last) = research.last() {
+                    last + 1
+                } else {
+                    1825
+                })
             || (palette && args.max_features != 1867)
-            || (!palette
-                && (args.max_features > 1853 || ids.iter().any(|id| *id >= args.max_features)))
+            || (!palette && (!width_ok || ids.iter().any(|id| *id >= args.max_features)))
         {
             return Err("feature IDs/layout disagree with declaration".into());
         }

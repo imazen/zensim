@@ -262,6 +262,8 @@ def cmd_build(a) -> int:
 
 GLOBAFF_IDS = list(range(1867, 1891))
 GLOBAFF_WIDTH = GLOBAFF_IDS[-1] + 1
+# `byc_fsid basic+peaks+v2 1891 rev5_localwin_ringhpm_globaff 0-227,372-719,1867-1890` (hash from zensim::feature_set_id).
+GLOBAFF_FSID = "basic+peaks+v2@w1891/rev5_localwin_ringhpm_globaff#d56ad477"
 
 
 def cmd_globaff_pairs(a) -> int:
@@ -356,6 +358,8 @@ def cmd_globaff(a) -> int:
         if "source_table_sha256" in m:
             m["source_table_sha256"] = m["table_sha256"]
         m["byc_globaff_ids"] = GLOBAFF_IDS
+        m["feature_set_id"] = GLOBAFF_FSID
+        m["source_bank_feature_set_id"] = GLOBAFF_FSID
         m["composite"] = m.get("composite", "") + note
         m["immutable_input_roots"] = [*m.get("immutable_input_roots", []), str(root.resolve()), str(side.resolve())]
         mp.write_text(json.dumps(m, indent=1) + "\n")
@@ -367,6 +371,7 @@ def cmd_globaff(a) -> int:
                 part["sha256"] = sha(q)
                 part["manifest_sha256"] = sha(Path(f"{q}.manifest.json"))
     receipt["width"] = GLOBAFF_WIDTH
+    receipt["feature_set_id"] = GLOBAFF_FSID
     receipt["byc_globaff"] = record
     view = dict(receipt["admission_view"])
     view["immutable_input_roots"] = [*view["immutable_input_roots"], str(root.resolve()), str(side.resolve())]
