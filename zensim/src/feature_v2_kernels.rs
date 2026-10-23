@@ -146,37 +146,6 @@ fn saturate_v<T: F32x8Backend + Copy>(token: T, x: V8<T>, c: V8<T>) -> V8<T> {
     x / (x + c)
 }
 
-/// Vectorized [`ring_hp4_32`] — the same op order, so every lane is one
-/// scalar element's rounding.
-#[allow(clippy::too_many_arguments)]
-#[inline(always)]
-fn ring_hp4_v<T: F32x8Backend + Copy>(
-    token: T,
-    s: V8<T>,
-    dd: V8<T>,
-    sxl: V8<T>,
-    sxr: V8<T>,
-    syu: V8<T>,
-    syd: V8<T>,
-    dxl: V8<T>,
-    dxr: V8<T>,
-    dyu: V8<T>,
-    dyd: V8<T>,
-    act: V8<T>,
-    gsrc: V8<T>,
-) -> V8<T> {
-    let zero = V8::<T>::zero_t(token);
-    let quarter = V8::<T>::splat_t(token, 0.25);
-    let ns = (sxl + sxr) + (syu + syd);
-    let nd = (dxl + dxr) + (dyu + dyd);
-    let h = ((s - dd) - (ns - nd) * quarter).abs();
-    let a = act.max(zero);
-    (h * a * V8::<T>::splat_t(token, C_RING_EDGE as f32))
-        / ((h + V8::<T>::splat_t(token, C_RING_ERR as f32))
-            * (a + V8::<T>::splat_t(token, C_ACTIVITY as f32))
-            * (gsrc + V8::<T>::splat_t(token, C_RING_EDGE as f32)))
-}
-
 /// Vectorized MSCN divisive normalizer — `resid / sqrt(var + c)`.
 ///
 /// Deliberately IEEE `sqrt` + `div` (both correctly rounded on every vendor
@@ -4394,6 +4363,8 @@ pub(crate) fn gradient_terms64<const BANDVIS: bool, const BV_DSTACT: bool, const
     dst_h: &[f32],
     activity: &[f32],
     act_dst: &[f32],
+    mu1: &[f32],
+    mu2: &[f32],
     width: usize,
     x: usize,
     y: usize,
@@ -4426,15 +4397,17 @@ pub(crate) fn gradient_terms64<const BANDVIS: bool, const BV_DSTACT: bool, const
     let gdst = (gx_dst * gx_dst + gy_dst * gy_dst).sqrt();
     let g = 1.0 - bounded_sim(gsrc, gdst, C_GMS);
 
-    let act_b = saturate(act, C_ACTIVITY);
-    let ring = if HPR {
-        ring_hp4_64(s, dd, sxl, sxr, syu, syd, dxl, dxr, dyu, dyd, act, gsrc)
+    // `RingForm::HighPassMu` (HPR): the error with each image's local mean removed.
+    let raw_abs_err = if HPR {
+        let k = y * width + x;
+        ((s - mu1[k] as f64) - (dd - mu2[k] as f64)).abs()
     } else {
-        let raw_abs_err = (s - dd).abs();
-        let err_b = saturate(raw_abs_err, C_RING_ERR);
-        let edge_r = saturate(gsrc, C_RING_EDGE);
-        err_b * act_b * (1.0 - edge_r)
+        (s - dd).abs()
     };
+    let err_b = saturate(raw_abs_err, C_RING_ERR);
+    let act_b = saturate(act, C_ACTIVITY);
+    let edge_r = saturate(gsrc, C_RING_EDGE);
+    let ring = err_b * act_b * (1.0 - edge_r);
 
     let edge_excess = bounded_excess(gdst, gsrc, C_BAND_DST);
     let src_smooth_b = 1.0 - saturate(gsrc, C_BAND_SRC);
@@ -4511,6 +4484,8 @@ fn gradient_border_pixel<
     dst_h: &[f32],
     activity: &[f32],
     act_dst: &[f32],
+    mu1: &[f32],
+    mu2: &[f32],
     width: usize,
     x: usize,
     y: usize,
@@ -4527,6 +4502,8 @@ fn gradient_border_pixel<
         dst_h,
         activity,
         act_dst,
+        mu1,
+        mu2,
         width,
         x,
         y,
@@ -4595,6 +4572,8 @@ fn gradient_interior_elem_canon<
     dst_h: &[f32],
     activity: &[f32],
     act_dst: &[f32],
+    mu1: &[f32],
+    mu2: &[f32],
     width: usize,
     row: usize,
     row_u: usize,
@@ -4671,15 +4650,15 @@ fn gradient_interior_elem_canon<
     r_gms.add(lane, g);
     r_gms2.add(lane, g * g);
 
-    let act_b = sat32(act, C_ACTIVITY as f32);
-    let ring_i = if HPR {
-        ring_hp4_32(s, dd, sxl, sxr, syu, syd, dxl, dxr, dyu, dyd, act, gsrc)
+    let raw_abs_err = if HPR {
+        ((s - mu1[act_row + x]) - (dd - mu2[act_row + x])).abs()
     } else {
-        let raw_abs_err = (s - dd).abs();
-        let err_b = sat32(raw_abs_err, C_RING_ERR as f32);
-        let edge_r = sat32(gsrc, C_RING_EDGE as f32);
-        err_b * act_b * (1.0f32 - edge_r)
+        (s - dd).abs()
     };
+    let err_b = sat32(raw_abs_err, C_RING_ERR as f32);
+    let act_b = sat32(act, C_ACTIVITY as f32);
+    let edge_r = sat32(gsrc, C_RING_EDGE as f32);
+    let ring_i = err_b * act_b * (1.0f32 - edge_r);
     r_ring.add(lane, ring_i);
     if let Some(r4) = r4.as_mut() {
         rev4_grad_pixel(
@@ -4741,6 +4720,8 @@ fn gradient_block_kernel_canon<
     dst_h: &[f32],
     activity: &[f32],
     act_dst: &[f32],
+    mu1: &[f32],
+    mu2: &[f32],
     width: usize,
     height: usize,
     bv_lo: f32,
@@ -4770,6 +4751,8 @@ fn gradient_block_kernel_canon<
             dst_h,
             activity,
             act_dst,
+            mu1,
+            mu2,
             width,
             0,
             y,
@@ -4797,6 +4780,8 @@ fn gradient_block_kernel_canon<
                     dst_h,
                     activity,
                     act_dst,
+                    mu1,
+                    mu2,
                     width,
                     row,
                     row_u,
@@ -4835,6 +4820,8 @@ fn gradient_block_kernel_canon<
             dst_h,
             activity,
             act_dst,
+            mu1,
+            mu2,
             width,
             width - 1,
             y,
@@ -4896,6 +4883,8 @@ fn gradient_terms32_v<
     dd: V8<T>,
     act: V8<T>,
     actd: V8<T>,
+    m1: V8<T>,
+    m2: V8<T>,
     bv_lo: f32,
     bv_hi: f32,
 ) -> (V8<T>, V8<T>, V8<T>, V8<T>, V8<T>, V8<T>, V8<T>, V8<T>) {
@@ -4921,15 +4910,15 @@ fn gradient_terms32_v<
     let g = one - bounded_sim_v(token, gsrc, gdst, c_gms);
     let g2 = g * g;
 
-    let act_b = saturate_v(token, act, c_act);
-    let ring_i = if HPR {
-        ring_hp4_v(token, s, dd, sxl, sxr, syu, syd, dxl, dxr, dyu, dyd, act, gsrc)
+    let raw_abs_err = if HPR {
+        ((s - m1) - (dd - m2)).abs()
     } else {
-        let raw_abs_err = (s - dd).abs();
-        let err_b = saturate_v(token, raw_abs_err, c_ring_err);
-        let edge_r = saturate_v(token, gsrc, c_ring_edge);
-        err_b * act_b * (one - edge_r)
+        (s - dd).abs()
     };
+    let err_b = saturate_v(token, raw_abs_err, c_ring_err);
+    let act_b = saturate_v(token, act, c_act);
+    let edge_r = saturate_v(token, gsrc, c_ring_edge);
+    let ring_i = err_b * act_b * (one - edge_r);
 
     let edge_excess = bounded_excess_v(token, gdst, gsrc, c_band_dst);
     let src_smooth_b = one - saturate_v(token, gsrc, c_band_src);
@@ -4992,6 +4981,8 @@ fn gradient_block_kernel_canon64_vec<
     dst_h: &[f32],
     activity: &[f32],
     act_dst: &[f32],
+    mu1: &[f32],
+    mu2: &[f32],
     width: usize,
     height: usize,
     bv_lo: f32,
@@ -5022,6 +5013,8 @@ fn gradient_block_kernel_canon64_vec<
             dst_h,
             activity,
             act_dst,
+            mu1,
+            mu2,
             width,
             0,
             y,
@@ -5053,6 +5046,8 @@ fn gradient_block_kernel_canon64_vec<
                     dst_h,
                     activity,
                     act_dst,
+                    mu1,
+                    mu2,
                     width,
                     row,
                     row_u,
@@ -5098,10 +5093,15 @@ fn gradient_block_kernel_canon64_vec<
                 } else {
                     f32x8::zero_t(token)
                 };
+                let (m1, m2) = if HPR {
+                    (ld!(mu1, act_row + x0), ld!(mu2, act_row + x0))
+                } else {
+                    (f32x8::zero_t(token), f32x8::zero_t(token))
+                };
                 let (gsrc, gdst, g, g2, ring_i, band, bv_gain, bv_loss) =
                     gradient_terms32_v::<_, BANDVIS, BV_DSTACT, HPR>(
-                        token, sxl, sxr, syu, syd, dxl, dxr, dyu, dyd, s, dd, act, actd, bv_lo,
-                        bv_hi,
+                        token, sxl, sxr, syu, syd, dxl, dxr, dyu, dyd, s, dd, act, actd, m1, m2,
+                        bv_lo, bv_hi,
                     );
 
                 if BANK {
@@ -5222,6 +5222,8 @@ fn gradient_block_kernel_canon64_vec<
                     dst_h,
                     activity,
                     act_dst,
+                    mu1,
+                    mu2,
                     width,
                     row,
                     row_u,
@@ -5260,6 +5262,8 @@ fn gradient_block_kernel_canon64_vec<
             dst_h,
             activity,
             act_dst,
+            mu1,
+            mu2,
             width,
             width - 1,
             y,
@@ -5305,6 +5309,8 @@ fn gradient_block_kernel_canon64_vec_scalar<
     dst_h: &[f32],
     activity: &[f32],
     act_dst: &[f32],
+    mu1: &[f32],
+    mu2: &[f32],
     width: usize,
     height: usize,
     bv_lo: f32,
@@ -5313,7 +5319,7 @@ fn gradient_block_kernel_canon64_vec_scalar<
     mode: crate::featcanon::Mode,
 ) -> GradientAccum {
     gradient_block_kernel_canon::<P, BANDVIS, BV_DSTACT, BANK, HPR>(
-        src_h, dst_h, activity, act_dst, width, height, bv_lo, bv_hi, r4, mode,
+        src_h, dst_h, activity, act_dst, mu1, mu2, width, height, bv_lo, bv_hi, r4, mode,
     )
 }
 
@@ -5331,6 +5337,8 @@ fn gradient_block_kernel_canon64_vec_wasm128<
     dst_h: &[f32],
     activity: &[f32],
     act_dst: &[f32],
+    mu1: &[f32],
+    mu2: &[f32],
     width: usize,
     height: usize,
     bv_lo: f32,
@@ -5339,7 +5347,7 @@ fn gradient_block_kernel_canon64_vec_wasm128<
     mode: crate::featcanon::Mode,
 ) -> GradientAccum {
     gradient_block_kernel_canon::<P, BANDVIS, BV_DSTACT, BANK, HPR>(
-        src_h, dst_h, activity, act_dst, width, height, bv_lo, bv_hi, r4, mode,
+        src_h, dst_h, activity, act_dst, mu1, mu2, width, height, bv_lo, bv_hi, r4, mode,
     )
 }
 
@@ -5358,6 +5366,8 @@ fn gradient_block_kernel_canon64_vec_neon<
     dst_h: &[f32],
     activity: &[f32],
     act_dst: &[f32],
+    mu1: &[f32],
+    mu2: &[f32],
     width: usize,
     height: usize,
     bv_lo: f32,
@@ -5366,7 +5376,7 @@ fn gradient_block_kernel_canon64_vec_neon<
     mode: crate::featcanon::Mode,
 ) -> GradientAccum {
     gradient_block_kernel_canon::<P, BANDVIS, BV_DSTACT, BANK, HPR>(
-        src_h, dst_h, activity, act_dst, width, height, bv_lo, bv_hi, r4, mode,
+        src_h, dst_h, activity, act_dst, mu1, mu2, width, height, bv_lo, bv_hi, r4, mode,
     )
 }
 
@@ -5384,6 +5394,8 @@ fn gradient_block_kernel_exact<
     dst_h: &[f32],
     activity: &[f32],
     act_dst: &[f32],
+    mu1: &[f32],
+    mu2: &[f32],
     width: usize,
     height: usize,
     bv_lo: f32,
@@ -5411,6 +5423,8 @@ fn gradient_block_kernel_exact<
             dst_h,
             activity,
             act_dst,
+            mu1,
+            mu2,
             width,
             0,
             y,
@@ -5439,6 +5453,8 @@ fn gradient_block_kernel_exact<
                     dst_h,
                     activity,
                     act_dst,
+                    mu1,
+                    mu2,
                     width,
                     x,
                     y,
@@ -5505,6 +5521,8 @@ fn gradient_block_kernel_exact<
             dst_h,
             activity,
             act_dst,
+            mu1,
+            mu2,
             width,
             width - 1,
             y,
@@ -5561,6 +5579,7 @@ fn gradient_block_kernel(
         src,
         dst,
         activity,
+        None,
         width,
         height,
         bandvis,
@@ -5576,6 +5595,7 @@ fn gradient_block_kernel_at_revision(
     src: &[f32],
     dst: &[f32],
     activity: &[f32],
+    mu: Option<(&[f32], &[f32])>,
     width: usize,
     height: usize,
     bandvis: Option<(f32, f32)>,
@@ -5592,12 +5612,13 @@ fn gradient_block_kernel_at_revision(
     // `bv_act_dst` is ignored without `bandvis`, as in the production match
     // below.
     let mode = crate::featcanon::mode(revision);
-    let hp = active_ring_form() == RingForm::HighPass4;
+    let hp = active_ring_form() == RingForm::HighPassMu;
     assert!(
-        !hp || matches!(mode, crate::featcanon::Mode::Canon64),
-        "ZENSIM_RING_FORM=hp4 is implemented on the canonical gradient kernel \
-         (formula revision 4 or later, default ZENSIM_FEATCANON) only"
+        !hp || (matches!(mode, crate::featcanon::Mode::Canon64) && mu.is_some()),
+        "ZENSIM_RING_FORM=hpm is implemented on the canonical gradient kernel \
+         (formula revision 4 or later, default ZENSIM_FEATCANON) with local-mean planes only"
     );
+    let (mu1, mu2) = mu.unwrap_or((&[], &[]));
     if mode.active() {
         use crate::featcanon::Mode;
         #[cfg(feature = "oracle")]
@@ -5612,6 +5633,8 @@ fn gradient_block_kernel_at_revision(
                         dst,
                         activity,
                         &[],
+                        &[],
+                        &[],
                         width,
                         height,
                         0.0,
@@ -5623,6 +5646,8 @@ fn gradient_block_kernel_at_revision(
                         src,
                         dst,
                         activity,
+                        &[],
+                        &[],
                         &[],
                         width,
                         height,
@@ -5636,6 +5661,8 @@ fn gradient_block_kernel_at_revision(
                             src,
                             dst,
                             activity,
+                            &[],
+                            &[],
                             &[],
                             width,
                             height,
@@ -5651,6 +5678,8 @@ fn gradient_block_kernel_at_revision(
                             dst,
                             activity,
                             &[],
+                            &[],
+                            &[],
                             width,
                             height,
                             lo,
@@ -5661,12 +5690,12 @@ fn gradient_block_kernel_at_revision(
                     }
                     (Some((lo, hi)), Some(ad), false) => {
                         gradient_block_kernel_canon::<$p, true, true, false, false>(
-                            src, dst, activity, ad, width, height, lo, hi, r4, m,
+                            src, dst, activity, ad, &[], &[], width, height, lo, hi, r4, m,
                         )
                     }
                     (Some((lo, hi)), Some(ad), true) => {
                         gradient_block_kernel_canon::<$p, true, true, true, false>(
-                            src, dst, activity, ad, width, height, lo, hi, r4, m,
+                            src, dst, activity, ad, &[], &[], width, height, lo, hi, r4, m,
                         )
                     }
                 }
@@ -5681,25 +5710,25 @@ fn gradient_block_kernel_at_revision(
                 match (revision >= FormulaRevision::Rev5, hp) {
                     (true, false) => incant!(
                         gradient_block_kernel_canon64_vec::<crate::featcanon::Lanes16F64, $b, $v, $k, false>(
-                            src, dst, activity, $act_dst, width, height, $lo, $hi, r4, m,
+                            src, dst, activity, $act_dst, mu1, mu2, width, height, $lo, $hi, r4, m,
                         ),
                         [v4x, v4, v3, neon, wasm128, scalar]
                     ),
                     (true, true) => incant!(
                         gradient_block_kernel_canon64_vec::<crate::featcanon::Lanes16F64, $b, $v, $k, true>(
-                            src, dst, activity, $act_dst, width, height, $lo, $hi, r4, m,
+                            src, dst, activity, $act_dst, mu1, mu2, width, height, $lo, $hi, r4, m,
                         ),
                         [v4x, v4, v3, neon, wasm128, scalar]
                     ),
                     (false, false) => incant!(
                         gradient_block_kernel_canon64_vec::<crate::featcanon::LanesF64, $b, $v, $k, false>(
-                            src, dst, activity, $act_dst, width, height, $lo, $hi, r4, m,
+                            src, dst, activity, $act_dst, mu1, mu2, width, height, $lo, $hi, r4, m,
                         ),
                         [v4x, v4, v3, neon, wasm128, scalar]
                     ),
                     (false, true) => incant!(
                         gradient_block_kernel_canon64_vec::<crate::featcanon::LanesF64, $b, $v, $k, true>(
-                            src, dst, activity, $act_dst, width, height, $lo, $hi, r4, m,
+                            src, dst, activity, $act_dst, mu1, mu2, width, height, $lo, $hi, r4, m,
                         ),
                         [v4x, v4, v3, neon, wasm128, scalar]
                     ),
@@ -5715,6 +5744,8 @@ fn gradient_block_kernel_at_revision(
                         dst,
                         activity,
                         &[],
+                        &[],
+                        &[],
                         width,
                         height,
                         0.0,
@@ -5726,6 +5757,8 @@ fn gradient_block_kernel_at_revision(
                         src,
                         dst,
                         activity,
+                        &[],
+                        &[],
                         &[],
                         width,
                         height,
@@ -5739,6 +5772,8 @@ fn gradient_block_kernel_at_revision(
                             src,
                             dst,
                             activity,
+                            &[],
+                            &[],
                             &[],
                             width,
                             height,
@@ -5754,6 +5789,8 @@ fn gradient_block_kernel_at_revision(
                             dst,
                             activity,
                             &[],
+                            &[],
+                            &[],
                             width,
                             height,
                             lo,
@@ -5764,12 +5801,12 @@ fn gradient_block_kernel_at_revision(
                     }
                     (Some((lo, hi)), Some(ad), false) => {
                         gradient_block_kernel_exact::<true, true, false, false>(
-                            src, dst, activity, ad, width, height, lo, hi, r4, m,
+                            src, dst, activity, ad, &[], &[], width, height, lo, hi, r4, m,
                         )
                     }
                     (Some((lo, hi)), Some(ad), true) => {
                         gradient_block_kernel_exact::<true, true, true, false>(
-                            src, dst, activity, ad, width, height, lo, hi, r4, m,
+                            src, dst, activity, ad, &[], &[], width, height, lo, hi, r4, m,
                         )
                     }
                 }

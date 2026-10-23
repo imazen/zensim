@@ -1409,16 +1409,42 @@ impl<'a> Query<'a> {
             }
         }
         let act = &self.snap.planes[si][ch].act;
-        let terms = if feature_v2::active_ring_form() == feature_v2::RingForm::HighPass4 {
-            feature_v2::gradient_terms64::<false, false, true>
-        } else {
-            feature_v2::gradient_terms64::<false, false, false>
-        };
+        // `RingForm::HighPassMu` reads the local-mean planes, which a change
+        // moves over the blur radius, not this ±1 dilation.
+        assert!(
+            feature_v2::active_ring_form() == feature_v2::RingForm::Raw,
+            "local refinement supports ZENSIM_RING_FORM=raw only"
+        );
         for y in gy0..gy1 {
             let ly = y - gy0;
             for x in gx0..gx1 {
-                let o = terms(&src_g, &dst_old, &act[gy0 * w..], &[], w, x, ly, 0.0, 0.0);
-                let n = terms(&src_g, &dst_new, &act[gy0 * w..], &[], w, x, ly, 0.0, 0.0);
+                let terms = feature_v2::gradient_terms64::<false, false, false>;
+                let o = terms(
+                    &src_g,
+                    &dst_old,
+                    &act[gy0 * w..],
+                    &[],
+                    &[],
+                    &[],
+                    w,
+                    x,
+                    ly,
+                    0.0,
+                    0.0,
+                );
+                let n = terms(
+                    &src_g,
+                    &dst_new,
+                    &act[gy0 * w..],
+                    &[],
+                    &[],
+                    &[],
+                    w,
+                    x,
+                    ly,
+                    0.0,
+                    0.0,
+                );
                 acc.sum_grad_src += n.gsrc - o.gsrc;
                 acc.sum_grad_dst += n.gdst - o.gdst;
                 acc.sum_gms += n.g - o.g;

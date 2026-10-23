@@ -2551,6 +2551,8 @@ mod featcanon_contract_tests {
                     let bleed: Vec<f32> = (0..n).map(|_| $rng.f32v()).collect();
                     let cr: Vec<f32> = (0..n).map(|_| $rng.f32v()).collect();
                     let cd: Vec<f32> = (0..n).map(|_| $rng.f32v()).collect();
+                    let mu1: Vec<f32> = (0..n).map(|_| $rng.f32v()).collect();
+                    let mu2: Vec<f32> = (0..n).map(|_| $rng.f32v()).collect();
                     let (bv_lo, bv_hi) = (0.03f32, 0.21f32);
 
                     macro_rules! run_one {
@@ -2562,6 +2564,8 @@ mod featcanon_contract_tests {
                                         d,
                                         a,
                                         ad,
+                                        &mu1,
+                                        &mu2,
                                         w,
                                         h,
                                         lo,
@@ -2585,7 +2589,7 @@ mod featcanon_contract_tests {
                             );
                             let ($got, got_hooks) = run_gradient::<$B, $V, $K>(
                                 |s, d, a, ad, w, h, lo, hi, r4| {
-                                    $f::<$B, $V, $K, $R>($tok, s, d, a, ad, w, h, lo, hi, r4)
+                                    $f::<$B, $V, $K, $R>($tok, s, d, a, ad, &mu1, &mu2, w, h, lo, hi, r4)
                                 },
                                 &src_h,
                                 &dst_h,
@@ -2684,6 +2688,8 @@ mod featcanon_contract_tests {
                 d: &[f32],
                 a: &[f32],
                 ad: &[f32],
+                m1: &[f32],
+                m2: &[f32],
                 w: usize,
                 h: usize,
                 lo: f32,
@@ -2696,6 +2702,8 @@ mod featcanon_contract_tests {
                     d,
                     a,
                     ad,
+                    m1,
+                    m2,
                     w,
                     h,
                     lo,
@@ -2711,6 +2719,8 @@ mod featcanon_contract_tests {
                 d: &[f32],
                 a: &[f32],
                 ad: &[f32],
+                m1: &[f32],
+                m2: &[f32],
                 w: usize,
                 h: usize,
                 lo: f32,
@@ -2723,6 +2733,8 @@ mod featcanon_contract_tests {
                     d,
                     a,
                     ad,
+                    m1,
+                    m2,
                     w,
                     h,
                     lo,
@@ -2738,6 +2750,8 @@ mod featcanon_contract_tests {
                 d: &[f32],
                 a: &[f32],
                 ad: &[f32],
+                m1: &[f32],
+                m2: &[f32],
                 w: usize,
                 h: usize,
                 lo: f32,
@@ -2750,6 +2764,8 @@ mod featcanon_contract_tests {
                     d,
                     a,
                     ad,
+                    m1,
+                    m2,
                     w,
                     h,
                     lo,
@@ -2765,6 +2781,8 @@ mod featcanon_contract_tests {
                 d: &[f32],
                 a: &[f32],
                 ad: &[f32],
+                m1: &[f32],
+                m2: &[f32],
                 w: usize,
                 h: usize,
                 lo: f32,
@@ -2777,6 +2795,8 @@ mod featcanon_contract_tests {
                     d,
                     a,
                     ad,
+                    m1,
+                    m2,
                     w,
                     h,
                     lo,

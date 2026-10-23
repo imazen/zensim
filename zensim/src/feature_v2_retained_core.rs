@@ -175,6 +175,7 @@ pub(super) fn rev5_retained_phase_b(
             &raw[0][g_off..g_off + g_n],
             &raw[1][g_off..g_off + g_n],
             act,
+            Some((m1, m2)),
             width,
             info.strip_h,
             None,
