@@ -998,6 +998,11 @@ mean). E21 Δ is against `base-c` as everywhere in this record; mixture test as 
 | Ta | certified convex monotone hinges (descriptor constrained) | 32 | −0.0221 (0.0045) | −0.026 / −0.043 / −0.029 / +0.009 | 0.932 | 1–3 (+4.4) |
 | **Ts1a** | as Tga, **no scale-0 input** (`fx1gs1`) | 32 | −0.0099 (0.0039) | −0.010 / −0.026 / −0.013 / +0.010 | 0.928 | 0–4 (+3.7) |
 | Mgfa | max pairs with the descriptor sign-free in the v rows (trainer `805242d9`) | 32 | −0.0166 (0.0046) | −0.017 / −0.027 / −0.029 / +0.007 | 0.932 | 1–6 (+5.9) |
+| Tga128 | as Tga, AIC weight 128 | 128 | −0.0107 (0.0046) | −0.015 / −0.029 / −0.013 / +0.015 | **0.935** | **0–2 (+1.4)** |
+
+**Candidate by the committed rule: Tga.** Eligible (at most 10 inversions per cell, E21 Δ ≥ −0.010): Tga (AIC 0.932) and
+Ts1a (0.928). Tga128 has the best monotone AIC (0.935) and the fewest inversions, but its E21 Δ −0.0107 misses the bar by
+0.0007, so it is not picked; it stays the closest alternative. Max pairs (Ma, Mgfa) cost E21 here without an AIC gain.
 
 Dropping every scale-0 input costs Tga 0.001 on E21 (inside one SE) and 0.004 on AIC public_train, for 21–25% fewer
 instructions per score before any engine change (see Compute): the finest scale can go.
