@@ -1101,6 +1101,20 @@ read set and over fx1 without scale 0):
 | 512² | 95,488,070 | 75,092,745 | −21.4% |
 | 2048² | 1,459,946,055 | 1,100,277,015 | −24.6% |
 
+**Correction:** both timing bakes were trained in replay mode without a `zentrain.formula_revision` entry, so the table
+above measures the shipped-revision (Rev1) walk, which keeps the scale-0 mean-offset side channel. Stamped with Rev5
+(`bake_dial_refit append-meta`, weights byte-untouched), per-call instructions on today's tree (`a508d68f` sources;
+`byc_score_timing`, slope method, one thread), without and with the per-scale skip attempt below:
+
+| Read set (Rev5) | 512², no skip | 512², skip | 2048², no skip | 2048², skip |
+|---|---|---|---|---|
+| fx1 (B's) | 94,954,148 | 94,950,443 | 1,362,670,609 | 1,362,901,153 |
+| fx1 without scale 0 | 99,645,449 | **55,617,427** | 1,426,163,942 | **735,160,388** |
+
+With the skip, the scale-0-free read set costs 41% (512²) and 46% (2048²) fewer instructions than B's read set; without
+it, it costs slightly more. The Rev1 rows above stay as measured (the skip gains only 2–3% there, since the Rev1 side
+channel keeps scale 0).
+
 Less than the pixel share because the planner gates v2 per scale (`v2_scales`) but the v1 basic family as one switch:
 a profile of the scale-1+ bake at 2048² still spends 35% of samples in the basic SSIM blurs (`fused_vblur_ssim`,
 `fused_blur_h_ssim`, `box_blur_v_copy`) and 10% in `memmove`, at full resolution. A per-scale basic gate is the next
