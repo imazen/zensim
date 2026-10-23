@@ -1034,6 +1034,19 @@ number is **not** evidence of generalization: its 14 sources were inside the fir
   exposed TRAIN-population statistic (see the top of this record).
 - A clean claim needs one frozen candidate read once on data no step has touched, under a rule written first.
 
+**Contamination audit (AIC2026 / AIC-4), 2026-10-23.** The owner states no further datasets will exist, so AIC2026's
+public_test cannot be replaced; the standard is containment.
+- *No zensim feature was tuned on AIC2026, and no AIC-4 data was read this session.* Feature definitions, kernels and
+  constants are unchanged; the per-scale skip is bit-identical on every read slot, and the max-pairs change is a model
+  class. The candidate's inputs (fx1g: B's fx1 plus the byc_globaff descriptor) were fixed in earlier sessions.
+- *Informed by AIC2026 including the 14 public_test sources (overlay labels, first phase):* the Python feature
+  prototypes (band errors, tile pooling, gain/loss, saliency; all rejected, none in any model), the scale-0-free input
+  set `fx1gs1` (only in Ts1a; to adopt it, rely on its E21 result alone), the information-ceiling conclusion, and the
+  general picture of which contents and codecs fail.
+- *Trained on AIC2026 labels, as the goal directed:* the combined arms and the candidate (public_train only); the
+  first-phase research cells also fitted the public_test sources' overlay labels and are quarantined.
+- Quarantine list: `/mnt/v/output/zensim/byconstruction-2026-10-22/aic2026train/QUARANTINE.md` on dev.
+
 Tghpm's 12 cells (no AIC leg) score 0.907 on `public_train` zero-shot (range 0.904–0.909, as B's 0.909): the AIC leg
 is worth +0.025 out of fold. Per codec, Tga beats B on 13 of 14 codecs out of fold (JPEG XL modular 0.801 → 0.833,
 JPEG 2000 0.890 → 0.932, WebP 0.908 → 0.950; VVC 0.978 → 0.967), and it is more even than the AIC-only T, which
