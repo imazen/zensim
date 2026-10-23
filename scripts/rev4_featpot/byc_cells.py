@@ -56,6 +56,24 @@ def arm_name(tokens: str) -> str:
     return LABEL or tokens.replace(":", "-") or "control"
 
 
+def predict_cell(bake: Path, table: Path, out: Path, spec: str):
+    """Held-out predictions. Bakes that read research ids past zensim's registry (fx1g, the byc_globaff descriptor)
+    go through `byc_predict` (zenpredict, same row layout; bit-identical to `bake_dial_refit predict --score-units` on
+    fx1 bakes); every other bake through the registered owner."""
+    if ":fx1g" not in spec:
+        return predict(bake, table, out)
+    import numpy as np
+    import pandas as pd
+    from v2_common import derived_declaration
+    decl, _, _ = derived_declaration("fx1g")
+    subprocess.run([str(Path(os.environ["REV4_V2_BIN_DIR"]) / "byc_predict"), "--bake", str(bake), "--decl", str(decl),
+                    "--corpus", str(table), "--out", str(out)], check=True, capture_output=True)
+    pred = pd.read_csv(out, sep="\t").pred.to_numpy(dtype=np.float64)
+    if not np.isfinite(pred).all():
+        raise ValueError(f"{out}: nonfinite prediction")
+    return pred
+
+
 def run_cell(tokens: str, fold: str, seed: int) -> dict:
     dest = CELLS / arm_name(tokens) / f"without_{fold}_s{seed}"
     record = dest / "byc_record.json"
@@ -75,7 +93,8 @@ def run_cell(tokens: str, fold: str, seed: int) -> dict:
     train_s = time.time() - t0
     if proc.returncode:
         raise RuntimeError(f"{dest}: rc={proc.returncode}\n{proc.stderr[-2000:]}")
-    pred = predict(dest / "refit/last.bin", ROOT / "wide/main/real" / f"{fold}.parquet", dest / f"pred_{fold}.tsv")
+    pred = predict_cell(dest / "refit/last.bin", ROOT / "wide/main/real" / f"{fold}.parquet", dest / f"pred_{fold}.tsv",
+                        spec_of(tokens))
     rec = {"tokens": tokens, "spec": spec_of(tokens), "fold": fold, "seed": seed, "train_seconds": round(train_s, 1),
            "last_bin_sha256": sha(dest / "refit/last.bin"), "pred_sha256": sha(dest / f"pred_{fold}.tsv"),
            "rows": int(len(pred)), "curve": read_curve(dest / "train.log"),

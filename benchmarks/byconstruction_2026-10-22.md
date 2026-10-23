@@ -767,6 +767,90 @@ Notes:
   different fit than the bottom.
 - Whether a local residual can share the SSIM pass's local moments is not checked.
 
+### Ringing corrected (`ZENSIM_RING_FORM=hpm`): implementation, cost, retraining
+
+Owner direction (2026-10-23): correct ringing with performance parity, train and test, then look for the next
+feature improvement.
+
+**What changed** (`08930023`, `980fde3f`). `RingForm` in `zensim/src/feature_v2.rs` is a per-process
+measurement arm, selected with `ZENSIM_RING_FORM` and modelled on `ZENSIM_HF_GAIN`. `raw` (the default)
+keeps every stored value. `hpm` measures the ringing error as `(src − mu1) − (dst − mu2)`, where `mu1`/`mu2`
+are the SSIM local means the dense kernel already holds for the strip. The three saturations are unchanged.
+The form is a const generic on the canonical gradient kernels, so the raw instantiations compile to the
+previous code. The diffmap and both attribution passes follow the form. Local refinement refuses `hpm`,
+because a local change moves the local means over the blur radius rather than the ±1 dilation it patches.
+The first version (`hp4`, `08930023`) used the 4-neighbour mean instead; it cost about eight vector
+operations per 8 pixels and is superseded.
+
+Checks:
+- B's 512² timing pair scores 88.280549 under `raw` with the old and new binaries, and 88.281888 under `hpm`.
+- Vector against scalar canonical body is bit-identical on scalar, v3, v4 and v4x for both forms
+  (extended `gradient_canon64_vec_matches_scalar_on_every_compiled_tier`). New tests cover offset
+  invariance, noise response and an independent f64 per-pixel sum. `cargo test --release -p zensim
+  --all-features`: 907 passed, 0 failed, 27 ignored. CI-exact clippy clean.
+- Rev5 extraction under `raw` with the new extractor reproduces the stored bank on all 576 requested
+  slots (600 safesyn rows across jpg/webp/avif/jxl, 600 cid22_a25 rows). Under `hpm`, every one of the
+  eight training/assessment sets differs from the stored bank in exactly the 12 ringing slots.
+
+**Cost.** Whole-walk timing between two builds is dominated by code placement. With the same instructions,
+the dense kernel ran 9.8% (512²) and 10.7% (2048²) slower in the `hpm` build than in the old one. Its
+machine code is identical (1,991 instructions, 0x3255 bytes, same alignment within 64 bytes); L1
+instruction-cache misses rose from 84.5M to 148.7M over 22 walks, while branch mispredicts (19.8M/19.9M)
+and op-cache misses (356M/355M) did not move. So parity is measured on the phase the change touches,
+with the walk's own phase timer (`ZENSIM_FOLD_TIMING`, `scripts/byconstruction/phase_timing.py`, min over
+8 interleaved process starts, 1 thread, B's served bake):
+
+| Phase | Size | Old binary (raw) | New binary, raw | New binary, `hpm` |
+|---|---|---|---|---|
+| `v2:gradient` (changed) | 512² | 0.315 ms | 0.315 ms | **0.294 ms (−6.7%)** |
+| `v2:gradient` (changed) | 2048² | 3.902 ms | 3.904 ms | **3.668 ms (−6.0%)** |
+| `v2:dense` (unchanged code) | 512² | 1.153 ms | 1.266 ms | 1.266 ms |
+| `v2:dense` (unchanged code) | 2048² | 17.583 ms | 19.436 ms | 19.455 ms |
+| whole walk | 2048² | 42.909 ms | 44.880 ms | 44.592 ms |
+
+Retired instructions in the gradient phase (sampled per symbol, same binary, 22 walks at 2048²) are 5.6%
+higher under `hpm` (two vector instructions per 8 pixels; about +0.6% of the walk's instructions). Its time
+is lower in this build, which may partly be placement. Raw files: `benchmarks/byconstruction_timing_2026-10-23/`.
+
+**Training root.** `scripts/byconstruction/ring_bank.sh` re-extracted every set of the v40r4 `v2e29` root
+(kadid train/select, tid2013, konfig train/val, cid22_a25, cid22_train, safesyn; 1,037 s on 24 threads,
+peak RSS 7.05 GiB) and the E15 coverage-pool selection (44,000 pairs) under `hpm` with the pinned
+decoders. `scripts/byconstruction/ring_root.py build` wrote a derived root
+(`/mnt/v/output/zensim/byconstruction-2026-10-22/ringhpm/root`). In every table, all 564 non-ringing
+measured columns are bit-identical to the stored root, and only the 12 ringing columns change. The
+derived feature-set id `basic+peaks+v2@w1825/rev5_localwin_ringhpm#36c3f3af` is appended to the registry.
+Strict admission (Python and the Rust trainer) accepts it only on declarations that record
+`byc_derived_from`.
+
+**Feature probe under `hpm`** (`feature_probe.py --all-families`, same 24 references; ringing summed over its
+12 cells, median over references):
+
+| | +8 shift | contrast ×0.85 | sat ×1.25 | sat ×0.8 | blur σ1.2 | luma noise σ4 | chroma noise σ8 |
+|---|---|---|---|---|---|---|---|
+| ringing, raw | 0.334 | 0.231 | 0.187 | 0.160 | 0.139 | 0.083 | 0.203 |
+| ringing, `hpm` | **0.017** | 0.130 | 0.075 | 0.063 | 0.143 | 0.082 | 0.185 |
+
+Every other family reproduces the earlier probe values exactly.
+
+**Retrained on the derived root** (`scripts/byconstruction/ring_arms.sh`, trainer `35e90254`, 12 E21 cells per arm,
+seeds 0–2; scored against E34 `base-c` by `byc_cells.py score`; mixture test on the same 1,152 steps, scored under
+`ZENSIM_RING_FORM=hpm` with the `35e90254` scorer, which reproduces all 1,344 stored raw Bnr mixture scores exactly
+under `raw`):
+
+| Arm | E21 Δ (SE) | KADID | TID2013 | KonFiG | CID22-A | Mixture inversions / cell (max rise) |
+|---|---|---|---|---|---|---|
+| Bhpm: B's signed recipe | **−0.0002 (0.0023)** | −0.0037 | −0.0026 | +0.0045 | +0.0009 | 78–184 (+53.8) |
+| FRhpm: monotone, ringing sign-free | −0.0042 (0.0029) | −0.0067 | −0.0027 | −0.0131 | +0.0058 | 6–70 (+35.8) |
+| for reference: Bnr | −0.0003 (0.0009) | −0.0010 | −0.0023 | +0.0041 | −0.0019 | 72–178 (+53.1) |
+| for reference: FR (raw ringing free) | −0.0039 (0.0029) | −0.0046 | −0.0153 | −0.0043 | +0.0085 | 2–41 (+26.2) |
+
+- B's recipe is at parity on the corrected feature (E33 point form passes) and keeps its inversion: blur σ1.2
+  then chroma noise σ8 inverts on 48 of 48 references in every cell, as in `base-c` and Bnr.
+- Freeing the corrected ringing still recovers most of the monotone gap (T −0.0205) and still opens the
+  chroma-noise route (blur + chroma σ8 inverts on up to 38 references). The high-pass error still responds to
+  noise, so a sign-free ringing input can still be used to forgive it. Inside the monotone class ringing has to
+  count as damage; the sign-free channel needs a signal noise cannot drive.
+
 ## Summary (all arms, E21 screen, seeds 0–2, Δ vs `base-c`)
 
 | Arm | Guarantee | E21 Δ (SE) | Mixture inversions / cell (max rise) |

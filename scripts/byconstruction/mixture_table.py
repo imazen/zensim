@@ -8,7 +8,7 @@ manifest image order; `bake_dial_refit predict --score-units` scores it. The rou
 a bake that reads no research column (`check`), which must agree before any table score is reported.
 
   build   --mixture DIR --bin-dir BIN --bake B.bin --globaff BIN --out DIR [--jobs 16]
-  score   --mixture DIR --table DIR --bin-dir BIN --bake NAME=PATH [--bake ...]
+  score   --mixture DIR --table DIR --bin-dir BIN --bake NAME=PATH [--bake ...] [--decl DECL.json]
   check   --mixture DIR --table DIR --pixel-scores scores_X.json --table-scores scores_Y.json
 """
 
@@ -95,7 +95,14 @@ def cmd_score(a) -> int:
             print(f"exists: {dest}")
             continue
         with tempfile.TemporaryDirectory(dir=Path.home() / "tmp") as td:
-            pred = predict(Path(path), table / "table.parquet", Path(td) / "pred.tsv")
+            if a.decl:  # research bake: zenpredict forward (byc_predict), same row layout as the trainer
+                subprocess.run([str(Path(a.bin_dir) / "byc_predict"), "--bake", path, "--decl", a.decl, "--corpus",
+                                str(table / "table.parquet"), "--out", str(Path(td) / "pred.tsv")],
+                               check=True, capture_output=True)
+                import pandas as pd
+                pred = pd.read_csv(Path(td) / "pred.tsv", sep="\t").pred.to_numpy(dtype=np.float64)
+            else:
+                pred = predict(Path(path), table / "table.parquet", Path(td) / "pred.tsv")
         scores = dict(zip(meta["images"], (float(round(p, 6)) for p in pred)))
         dest.write_text(json.dumps({"bake": path, "post": "table-score-units", "route": "table",
                                     "ring_form": meta["ring_form"], "table": str(table),
@@ -129,6 +136,7 @@ def main() -> int:
     s.add_argument("--table", required=True)
     s.add_argument("--bin-dir", required=True)
     s.add_argument("--bake", action="append", required=True)
+    s.add_argument("--decl", help="fx1-family declaration: forward compact research bakes through byc_predict")
     s.set_defaults(fn=cmd_score)
     c = sub.add_parser("check")
     c.add_argument("--mixture", required=True)
