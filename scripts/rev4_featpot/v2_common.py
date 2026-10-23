@@ -88,6 +88,9 @@ FX1NR_SHA256 = "923da70c2ccdfcdf2d34192a8b7f6679dd27d918b55ff1c7827e5da5234cb740
 # By-construction exploration: fx1 plus the byc_globaff global affine-change descriptor (research ids f1867-f1890).
 FX1G_DECLARATION = Path(__file__).resolve().parent / "byc_fx1g_declaration.json"
 FX1G_SHA256 = "2fa7a8c8a908406e101b705d061cb41cfb6f36a31afd815f8ef1d3529fd2d2a0"
+# fx1g restricted to pyramid scales 1-3 (no scale-0 slot read; byconstruction AIC2026 TRAIN compute arm)
+FX1GS1_DECLARATION = Path(__file__).resolve().parent / "byc_fx1gs1_declaration.json"
+FX1GS1_SHA256 = "a8d224e465ed9014793496926630399bf189ec1e6e28b966feb9538493269b52"
 
 
 def fx1_declaration() -> dict:
@@ -105,6 +108,10 @@ def derived_declaration(token):
         data=FX1NR_DECLARATION.read_bytes()
         if hashlib.sha256(data).hexdigest()!=FX1NR_SHA256:raise ValueError('fx1nr declaration changed')
         return FX1NR_DECLARATION, FX1NR_SHA256, json.loads(data)
+    if token == 'fx1gs1':
+        data=FX1GS1_DECLARATION.read_bytes()
+        if hashlib.sha256(data).hexdigest()!=FX1GS1_SHA256:raise ValueError('fx1gs1 declaration changed')
+        return FX1GS1_DECLARATION, FX1GS1_SHA256, json.loads(data)
     if token == 'fx1g':
         data=FX1G_DECLARATION.read_bytes()
         if hashlib.sha256(data).hexdigest()!=FX1G_SHA256:raise ValueError('fx1g declaration changed')
@@ -283,7 +290,7 @@ def recipe_of(spec: str) -> dict:
             out.update(hdr_weight=4.0, hdr_mode={"hp": "rank", "ha": "withinref,both", "hb": "rank", "hc": "rank"}[tok[:2]], **({"hdr_consensus": tok} if tok[:2] in ("hb", "hc") else {}))
         elif tok == "sh1" and "smooth_hinge" not in out:
             out["smooth_hinge"] = True
-        elif tok in ("fx1", "fx2", "fx1nr", "fx1g") and "derived_inputs" not in out:
+        elif tok in ("fx1", "fx2", "fx1nr", "fx1g", "fx1gs1") and "derived_inputs" not in out:
             out["derived_inputs"] = tok
         elif tok == "mono" and "mono_all" not in out:  # by-construction exploration: W1 >= 0 on every input
             out["mono_all"] = True
@@ -301,6 +308,8 @@ def recipe_of(spec: str) -> dict:
             out["free_mask"] = "free_ringing"
         elif tok == "freeglob" and "free_mask" not in out:  # partial monotone: byc_globaff descriptor inputs sign-free
             out["free_mask"] = "free_globaff"
+        elif tok == "freeglobs1" and "free_mask" not in out:  # the same for fx1gs1 (descriptor scales 1-3)
+            out["free_mask"] = "free_globaff_s1"
         elif tok == "dropring" and "free_mask" not in out:  # exactly monotone, v2 ringing inputs dropped
             out.update(free_mask="free_ringing", drop_masked=True)
         elif tok == "dropglobal" and "free_mask" not in out:  # exactly monotone, probe-flagged global-sensitive families dropped

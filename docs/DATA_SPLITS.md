@@ -2430,21 +2430,21 @@ image hashes remain bound.
 [Complete results and runtime bindings](../benchmarks/jnd_reconstruction_b_2026-10-19.pointer.md).
 
 
-## Exposure ledger — 2026-10-23: AIC2026 reconstructed-JND labels fitted under reference-held-out folds (explore/byconstruction)
+## Exposure ledger — 2026-10-23: AIC2026 reconstructed-JND labels fitted under source-held-out folds (explore/byconstruction)
 
-The owner's goal of 2026-10-23 names the supplied 42-reference JND reconstruction **"AIC2026 TRAIN"** and asks for
-SROCC above 0.99 on it without memorization. On the `explore/byconstruction` branch only, its `JND_curve` labels
-(5,768 PTC pairs, CSV SHA-256 `5bdbf540…`, every crop SHA-256-equal to the 2026-10-19 admission) are therefore
-**fitted**, by exploration models (Python and the Rust trainer in `--historical-replay` research mode), under 6
-reference-disjoint folds. Every reported AIC2026 number is a frozen model's score or an out-of-fold prediction; no
-in-sample number is reported. Frozen B, full-data T and full-data M were scored once without any fit.
+The owner's goal of 2026-10-23 asks for SROCC above 0.99 on **"AIC2026 TRAIN"** without memorization. That is WG1's
+`public_train` split (document m112107, preliminary public-split JND reconstruction, CSV SHA-256 `bd5ea3c5…`):
+3,920 PTC crops of 28 sources, label `JND_score`. On the `explore/byconstruction` branch only, these labels are
+**fitted** by exploration models (Python, and the Rust trainer in `--historical-replay` research mode) under
+source-held-out folds; every reported AIC2026 number is a frozen model's score or an out-of-fold prediction.
 
-- **Exposed:** the 42 labelled AIC2026 references (fit within folds). Models fitted on them cannot report AIC2026
-  accuracy except out of fold, and none of them can qualify through the strict route, which still refuses the AIC
-  family (`v2_human_role.py` is unchanged).
-- **Untouched:** the 28 unlabelled AIC2026 references, AIC-3, AIC-4, SDR25, CID22 gold, KonJND JPEG, CSIQ and every
+- **Before the split was found**, the same day, the owner-supplied `JND_curve` overlay (CSV `5bdbf540…`) of all 42
+  labelled sources was fitted under 6 source folds. That includes the 14 `public_test` sources, so `public_test`
+  informed this study's design choices; it is read only to assess frozen candidates and is not a clean test for them.
+- **Frozen reads:** B, full-data T and full-data M, each once, without fit.
+- **Untouched:** the 28 unlabelled AIC2026 sources, AIC-3, AIC-4, SDR25, CID22 gold, KonJND JPEG, CSIQ and every
   secret holdout.
-- **Not changed:** the main-line role of AIC2026 (§3d) and the protected-population guards. Main-line adoption of
-  this role needs the owner's explicit decision.
+- **Not changed:** the main-line role of AIC2026 (§3d), the strict route's AIC-family refusal
+  (`v2_human_role.py`) and the protected-population guards. Main-line adoption needs the owner's explicit decision.
 
 Record: `benchmarks/byconstruction_2026-10-22.md`, section "AIC2026 TRAIN".

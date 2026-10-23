@@ -935,18 +935,49 @@ energy 4e-6; that is why both numbers are inputs.)
 **Goal (owner, 2026-10-23):** convex, monotone scoring across every distortion type and dataset, and SROCC above
 0.99 on AIC2026 TRAIN, with less compute and without memorization or overfitting.
 
-**Population and role.** "AIC2026 TRAIN" is read as the supplied JND reconstruction: 5,768 PTC crops, 42 references
-(`JND_curve`, lower is better; quality SROCC uses −JND), the same population as the 2026-10-19 frozen-B read. All
-5,810 crop files on dev were SHA-256-equal to that admission before any use. The owner's goal names it TRAIN; this
-branch therefore fits on it, and **every AIC2026 number below is either a frozen model (no fit on AIC2026) or out of
-fold**: references are split into 6 folds (seed 1000), and each reference's rows are predicted by a model fitted
-without any row of that reference. In-sample fits are never reported. The 28 unlabelled references and every other
-protected population stay untouched. Exposure ledger: `docs/DATA_SPLITS.md`, entry of 2026-10-23.
+**Population.** AIC2026 TRAIN is WG1's `public_train` split (document m112107, preliminary public-split JND
+reconstruction, CSV SHA-256 `bd5ea3c5…`, tower IQA library `jpeg-aic2026`): **3,920 PTC crops of 28 sources**,
+label `JND_score` (lower is better; quality SROCC uses −JND). `public_test` is the other 1,848 crops of 14 sources;
+28 further sources have no labels. The first half of this study used the owner's separately supplied overlay
+`jnd_reconstruction_2026-10-19.csv` (`JND_curve`) over all 42 labelled sources before the split was found; those
+results are kept below and labelled "42-source pool". `JND_curve` and `JND_score` are two reconstructions of the
+same study and agree at SROCC **0.9835** on `public_train` (0.986 on `public_test`); their difference grows with the
+distortion level (σ 0.07 JND at level 1, 0.50 at level 20; `JND_score` is higher at the top).
+
+**Role and exposure.** The owner's goal names the split TRAIN, so this branch fits on it, and **every AIC2026
+number reported is either a frozen model (no fit on AIC2026) or out of fold** (sources split into folds; a source's
+rows are predicted by a model fitted without any row of that source); in-sample numbers are never reported. The
+42-source pool phase fitted the `JND_curve` labels of the 14 `public_test` sources inside its folds, so `public_test`
+informed this study's design choices and is not a clean test for them; it is read only to assess frozen candidates.
+The 28 unlabelled sources and every other protected population stay untouched. Ledger: `docs/DATA_SPLITS.md`,
+2026-10-23. All 5,810 crop files on dev were SHA-256-equal to the 2026-10-19 admission before any use.
 
 Tooling: `mixture_table.py build-pairs` (Rev5 vector + descriptor table; the table route reproduces all 5,768
 stored B scores bit for bit), `aic_train.py` (zero-shot, out-of-fold fits, `analyze`), `jnd_band_proto.py` (band
-feature prototypes), `aic_rust_cv.py` (the same folds through the Rust trainer). Data:
-`/mnt/v/output/zensim/byconstruction-2026-10-22/aic2026train/` on dev.
+feature prototypes), `aic_rust_cv.py` (the same folds through the Rust trainer), `byc_cells.py --aic-weight` (E21
+cells that also fit the split). Data: `/mnt/v/output/zensim/byconstruction-2026-10-22/aic2026train/` on dev
+(`folds_train/`: the split, its 7 source folds, pairs lists and the WG1 CSV).
+
+**`public_train`, WG1 `JND_score`:**
+
+| Model | Fit on AIC2026 | Global SROCC | Within source | Within ladder |
+|---|---|---|---|---|
+| B (`diff+frag-820`) | no | 0.9091 | 0.9558 | 0.9995 |
+| full-data M (certified monotone) | no | 0.9108 | 0.9508 | 0.9998 |
+| full-data T (convex monotone) | no | **0.9115** | 0.9494 | 0.9997 |
+| NNLS linear on fx1g (844 inputs) | out of fold, 7 folds × 3 | 0.934 | 0.959 | 0.999 |
+| additive hinges, **convex** monotone | out of fold | 0.939 | 0.963 | 0.997 |
+| additive hinges + ramps, monotone | out of fold | 0.939 | 0.967 | 0.999 |
+| gradient boosting, monotone | out of fold | 0.953 | 0.964 | 0.996 |
+| gradient boosting, unconstrained | out of fold | 0.957 | 0.967 | 0.997 |
+| fx1g + all 75 supplied peer metrics, monotone boosting | out of fold | 0.964 | — | — |
+| fx1g + all 75 supplied peer metrics, unconstrained boosting | out of fold | **0.968** | — | — |
+
+The last two rows are the measured information ceiling of every full-reference measurement available here (our 844
+inputs plus 75 published metrics, DVIFM excluded because its constants were trained on AIC2026): **0.968, 0.022
+below the target**, and the two label reconstructions agree with each other only at 0.9835.
+
+**42-source pool (`JND_curve` overlay; the first phase).**
 
 **Zero-shot (no AIC2026 fit), global quality SROCC / mean within reference / mean within ladder:**
 

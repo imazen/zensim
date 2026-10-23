@@ -44,10 +44,13 @@ def v2_name(i: int) -> str:
 
 
 def load(table: str, pairs: str):
+    """The table rows of the pairs list, in its order (a pairs list may select a subset, e.g. one WG1 split)."""
     t = pq.read_table(table).to_pandas()
     p = pd.read_csv(pairs, sep="\t")
-    if t.key.tolist() != p.key.astype(str).tolist():
-        raise ValueError("table and pairs list disagree on row order")
+    keys = p.key.astype(str)
+    if keys.duplicated().any():
+        raise ValueError("duplicate keys in the pairs list")
+    t = t.set_index("key").loc[keys].reset_index()
     return t, p
 
 
@@ -143,7 +146,8 @@ PEER_TABLE = "/mnt/v/datasets/aic2026/combined-july-drop-2026-10-20/combined.csv
 def peer_columns(p: pd.DataFrame, cols: list[str]) -> np.ndarray:
     """Supplied (published) peer metric columns, cropped view, joined on the distorted id; oriented so higher = worse."""
     m = pd.read_csv(PEER_TABLE, low_memory=False)
-    m = m[m.view == "cropped"].set_index(m[m.view == "cropped"].distorted.str.removesuffix(".png"))
+    m = m[m.view == "cropped"]
+    m = m.set_index(m.distorted.str.removesuffix(".png"))
     out = []
     for c in cols:
         name, sign = (c[1:], -1.0) if c.startswith("-") else (c, 1.0)
@@ -156,9 +160,7 @@ def inputs(a, t: pd.DataFrame, p: pd.DataFrame):
     if a.only_peers or a.no_fx1:
         X, names = X[:, :0], []
     for path in a.extra:  # extra damage-feature tables (key + columns), e.g. jnd_band_proto.py output
-        e = pd.read_parquet(path)
-        if e.key.astype(str).tolist() != p.key.astype(str).tolist():
-            raise ValueError(f"{path}: row order differs from the pairs list")
+        e = pd.read_parquet(path).set_index("key").loc[p.key.astype(str)].reset_index()
         cols = [c for c in e.columns if c != "key" and (not a.extra_match or any(m in c for m in a.extra_match))]
         E = e[cols].to_numpy(np.float64)
         if not np.isfinite(E).all() or (E < 0).any():
@@ -270,6 +272,8 @@ def cmd_zeroshot(a) -> int:
                 pred = pd.read_csv(Path(td) / "pred.tsv", sep="\t").pred.to_numpy(np.float64)
             else:
                 pred = predict(Path(path), Path(a.table), Path(td) / "pred.tsv")
+        full_keys = pq.read_table(a.table, columns=["key"])["key"].to_pylist()
+        pred = pd.Series(pred, index=full_keys).loc[p.key.astype(str)].to_numpy()  # the pairs list's rows
         res["models"][name] = {"bake": path, **panel(pred, p)}
         m = res["models"][name]
         print(f"{name:20s} global {m['global']:.4f} within-ref {m['within_ref_mean']:.4f} "

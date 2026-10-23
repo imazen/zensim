@@ -51,15 +51,16 @@ def spec_of(tokens: str) -> str:
 
 LABEL = None
 # AIC2026 TRAIN (benchmarks/byconstruction_2026-10-22.md, section "AIC2026 TRAIN"): with --aic-weight W each E21 cell also
-# fits the AIC2026 references outside one fold (pooled rank, research replay) and predicts that fold. Fold of cell
-# (E21 fold index i, seed s): (4 s + i) mod 6, so seeds 0-2 hold out every AIC fold twice.
-AIC = Path(os.environ.get("AIC_OUT", "/mnt/v/output/zensim/byconstruction-2026-10-22/aic2026train"))
+# fits the AIC2026 public_train references outside one fold (pooled rank, research replay) and predicts that fold. Fold
+# of cell (E21 fold index i, seed s): (4 s + i) mod AIC_NFOLDS (7 by default), so seeds 0-2 hold out every fold.
+AIC = Path(os.environ.get("AIC_FOLDS", "/mnt/v/output/zensim/byconstruction-2026-10-22/aic2026train/folds_train"))
+AIC_NFOLDS = int(os.environ.get("AIC_NFOLDS", "7"))
 AIC_WEIGHT = None
 AIC_REPLAY = "byconstruction AIC2026 TRAIN research fit (owner goal 2026-10-23); reference-held-out folds; never ship"
 
 
 def aic_fold(fold: str, seed: int) -> int:
-    return (4 * seed + FOLDS.index(fold)) % 6
+    return (4 * seed + FOLDS.index(fold)) % AIC_NFOLDS
 
 
 def arm_name(tokens: str) -> str:
@@ -70,12 +71,13 @@ def predict_cell(bake: Path, table: Path, out: Path, spec: str):
     """Held-out predictions. Bakes that read research ids past zensim's registry (fx1g, the byc_globaff descriptor)
     go through `byc_predict` (zenpredict, same row layout; bit-identical to `bake_dial_refit predict --score-units` on
     fx1 bakes); every other bake through the registered owner."""
-    if ":fx1g" not in spec:
+    token = next((t for t in spec.split(":") if t in ("fx1g", "fx1gs1")), None)
+    if token is None:
         return predict(bake, table, out)
     import numpy as np
     import pandas as pd
     from v2_common import derived_declaration
-    decl, _, _ = derived_declaration("fx1g")
+    decl, _, _ = derived_declaration(token)
     subprocess.run([str(Path(os.environ["REV4_V2_BIN_DIR"]) / "byc_predict"), "--bake", str(bake), "--decl", str(decl),
                     "--corpus", str(table), "--out", str(out)], check=True, capture_output=True)
     pred = pd.read_csv(out, sep="\t").pred.to_numpy(dtype=np.float64)
@@ -86,7 +88,7 @@ def predict_cell(bake: Path, table: Path, out: Path, spec: str):
 
 def aic_predict(dest: Path, fold: str, seed: int, spec: str) -> dict:
     k = aic_fold(fold, seed)
-    pred = predict_cell(dest / "refit/last.bin", AIC / "folds" / f"aic_k{k}_test.parquet", dest / f"pred_aic_k{k}.tsv", spec)
+    pred = predict_cell(dest / "refit/last.bin", AIC / f"aic_k{k}_test.parquet", dest / f"pred_aic_k{k}.tsv", spec)
     return {"aic_weight": AIC_WEIGHT, "aic_fold": k, "aic_rows": int(len(pred)),
             "aic_pred_sha256": sha(dest / f"pred_aic_k{k}.tsv")}
 
@@ -107,7 +109,7 @@ def run_cell(tokens: str, fold: str, seed: int) -> dict:
            "--dest", str(dest), "--train-only"]
     if AIC_WEIGHT is not None:
         k = aic_fold(fold, seed)
-        cmd += ["--research-extra-group", f"aic:{AIC}/folds/aic_k{k}_fit.parquet:{AIC_WEIGHT!r}:0:rank",
+        cmd += ["--research-extra-group", f"aic:{AIC}/aic_k{k}_fit.parquet:{AIC_WEIGHT!r}:0:rank",
                 "--research-replay", AIC_REPLAY]
     t0 = time.time()
     proc = subprocess.run(cmd, env=env, capture_output=True, text=True)

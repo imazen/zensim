@@ -1,7 +1,8 @@
 """Reference-held-out folds on AIC2026 TRAIN through the Rust trainer (research replay; never ship).
 
-Exploration record: benchmarks/byconstruction_2026-10-22.md, section "AIC2026 TRAIN". The six fold tables come from
-`aic_train.py`'s fold assignment (seed 1000) written under OUT/folds/ (aic_k<k>_{fit,test}.parquet). For each fold the
+Exploration record: benchmarks/byconstruction_2026-10-22.md, section "AIC2026 TRAIN". The fold tables come from
+`aic_train.py`'s fold assignment (seed 1000): OUT/folds_train/ holds WG1's public_train split with its JND_score labels
+in 7 folds (the default); OUT/folds/ the earlier 42-reference JND_curve pool in 6 folds (AIC_FOLDS, AIC_NFOLDS=6). For each fold the
 trainer fits the arm on the fit references only, plus any extra groups given (the E21 legs of a by-construction root),
 and `byc_predict` scores the held-out references with the exported bake. The out-of-fold panel is aic_train.panel.
 
@@ -30,7 +31,10 @@ import aic_train  # noqa: E402
 
 OUT = Path(os.environ.get("AIC_OUT", "/mnt/v/output/zensim/byconstruction-2026-10-22/aic2026train"))
 BIN = Path(os.environ.get("AIC_BIN", "/var/tmp/byconstruction-bin/58a4d100ad36"))
-PAIRS = Path(os.environ.get("AIC_PAIRS", str(Path.home() / "tmp/aictrain/pairs_curve.tsv")))
+# Fold tables: AIC_FOLDS (default OUT/folds_train: WG1 public_train, JND_score, 7 folds) with its pairs list.
+FOLDS = Path(os.environ.get("AIC_FOLDS", str(OUT / "folds_train")))
+NFOLDS = int(os.environ.get("AIC_NFOLDS", "7"))
+PAIRS = Path(os.environ.get("AIC_PAIRS", str(FOLDS / "pairs_train.tsv")))
 DECL = HERE.parent / "rev4_featpot" / "byc_fx1g_declaration.json"
 REPLAY = "byconstruction AIC2026 TRAIN research fit (owner goal 2026-10-23); reference-held-out folds; never ship"
 
@@ -43,14 +47,14 @@ def keep_file() -> Path:
 
 
 def run_fold(a, k: int) -> dict:
-    dest = OUT / "rust" / a.arm / f"k{k}"
+    dest = OUT / "rust" / FOLDS.name / a.arm / f"k{k}"
     rec_path = dest / "record.json"
     if rec_path.is_file():
         return json.loads(rec_path.read_text())
     if dest.exists():
         raise ValueError(f"{dest}: incomplete earlier attempt; inspect and move it aside")
     dest.mkdir(parents=True)
-    groups = [f"aic:{OUT}/folds/aic_k{k}_fit.parquet:{a.aic_weight!r}:1:{a.aic_mode}", *a.group]
+    groups = [f"aic:{FOLDS}/aic_k{k}_fit.parquet:{a.aic_weight!r}:1:{a.aic_mode}", *a.group]
     cmd = [str(BIN / "zensim_mlp_train")]
     for g in groups:
         cmd += ["--group", g]
@@ -68,7 +72,7 @@ def run_fold(a, k: int) -> dict:
                               env=dict(os.environ, ZENSIM_MAX_TIER="v3", RAYON_NUM_THREADS="1"))
     if proc.returncode:
         raise RuntimeError(f"{dest}: trainer rc={proc.returncode}")
-    test = OUT / "folds" / f"aic_k{k}_test.parquet"
+    test = FOLDS / f"aic_k{k}_test.parquet"
     subprocess.run([str(BIN / "byc_predict"), "--bake", str(dest / "best.bin"), "--decl", str(DECL), "--corpus", str(test),
                     "--out", str(dest / "pred.tsv")], check=True, capture_output=True)
     rec = {"arm": a.arm, "fold": k, "flags": a.flags, "groups": groups, "train_seconds": round(time.time() - t0, 1),
@@ -84,7 +88,7 @@ def aic_train_sha(path: Path) -> str:
 
 def cmd_run(a) -> int:
     with cf.ThreadPoolExecutor(a.jobs) as pool:
-        futs = {pool.submit(run_fold, a, k): k for k in range(6)}
+        futs = {pool.submit(run_fold, a, k): k for k in range(NFOLDS)}
         bad = 0
         for f in cf.as_completed(futs):
             try:
@@ -99,14 +103,14 @@ def score(arms: list[str]) -> int:
     p = pd.read_csv(PAIRS, sep="\t")
     for arm in arms:
         pred = pd.Series(np.nan, index=p.key.astype(str))
-        for k in range(6):
-            test = pd.read_parquet(OUT / "folds" / f"aic_k{k}_test.parquet", columns=["key"])
-            pr = pd.read_csv(OUT / "rust" / arm / f"k{k}" / "pred.tsv", sep="\t")
+        for k in range(NFOLDS):
+            test = pd.read_parquet(FOLDS / f"aic_k{k}_test.parquet", columns=["key"])
+            pr = pd.read_csv(OUT / "rust" / FOLDS.name / arm / f"k{k}" / "pred.tsv", sep="\t")
             pred.loc[test.key.astype(str).to_numpy()] = pr.pred.to_numpy(np.float64)
         if pred.isna().any():
             raise ValueError(f"{arm}: missing out-of-fold predictions")
         res = aic_train.panel(pred.to_numpy(), p)
-        (OUT / "rust" / arm / "oof_panel.json").write_text(json.dumps(res, indent=1) + "\n")
+        (OUT / "rust" / FOLDS.name / arm / "oof_panel.json").write_text(json.dumps(res, indent=1) + "\n")
         print(f"{arm:24s} OOF global {res['global']:.4f} within-ref {res['within_ref_mean']:.4f} "
               f"within-ladder {res['within_ladder_mean']:.4f}", flush=True)
     return 0
