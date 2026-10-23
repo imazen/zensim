@@ -997,6 +997,7 @@ mean). E21 Δ is against `base-c` as everywhere in this record; mixture test as 
 | Bga | B's signed recipe | 32 | −0.0031 (0.0049) | −0.006 / −0.005 / +0.002 / −0.003 | 0.949 (within source 0.968) | 52–211 (+62.6) |
 | Ta | certified convex monotone hinges (descriptor constrained) | 32 | −0.0221 (0.0045) | −0.026 / −0.043 / −0.029 / +0.009 | 0.932 | 1–3 (+4.4) |
 | **Ts1a** | as Tga, **no scale-0 input** (`fx1gs1`) | 32 | −0.0099 (0.0039) | −0.010 / −0.026 / −0.013 / +0.010 | 0.928 | 0–4 (+3.7) |
+| Mgfa | max pairs with the descriptor sign-free in the v rows (trainer `805242d9`) | 32 | −0.0166 (0.0046) | −0.017 / −0.027 / −0.029 / +0.007 | 0.932 | 1–6 (+5.9) |
 
 Dropping every scale-0 input costs Tga 0.001 on E21 (inside one SE) and 0.004 on AIC public_train, for 21–25% fewer
 instructions per score before any engine change (see Compute): the finest scale can go.
