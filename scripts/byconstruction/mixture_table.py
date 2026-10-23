@@ -8,6 +8,9 @@ manifest image order; `bake_dial_refit predict --score-units` scores it. The rou
 a bake that reads no research column (`check`), which must agree before any table score is reported.
 
   build   --mixture DIR --bin-dir BIN --bake B.bin --globaff BIN --out DIR [--jobs 16]
+  build-pairs --pairs PAIRS.tsv --bin-dir BIN --bake B.bin --globaff BIN --out DIR [--jobs 16]
+          (any labelled pairs list: columns key, group, label, ref_path, dist_path; the table keeps them in file order
+          as `key`, `ref_basename` = group and `human_score` = label)
   score   --mixture DIR --table DIR --bin-dir BIN --bake NAME=PATH [--bake ...] [--decl DECL.json]
   check   --mixture DIR --table DIR --pixel-scores scores_X.json --table-scores scores_Y.json
 """
@@ -36,10 +39,9 @@ def images(mix: Path) -> list[tuple[str, str]]:
     return sorted({(r["ref"], r["base"]) for r in man["rows"]} | {(r["ref"], r["more"]) for r in man["rows"]})
 
 
-def cmd_build(a) -> int:
-    mix, out = Path(a.mixture), Path(a.out)
+def build_table(pairs: list[tuple[str, str]], out: Path, a, groups: list[str], labels, keys: list[str]) -> None:
+    """Dump the computed vector of every (ref, dist) pair, add the descriptor, write `table.parquet` + `table.json`."""
     out.mkdir(parents=True, exist_ok=False)
-    pairs = images(mix)
     dumps = out / "dumps"
     dumps.mkdir()
 
@@ -47,8 +49,7 @@ def cmd_build(a) -> int:
         ref, dist = pairs[i]
         dest = dumps / f"{i:05d}.f32"
         subprocess.run([str(Path(a.bin_dir) / "score_pair_with_bake"), "--bake", a.bake, "--bake-post", "raw", "--ref",
-                        str(mix / "img" / ref), "--dist", str(mix / "img" / dist), "--dump-features-to", str(dest)],
-                       check=True, capture_output=True)
+                        ref, "--dist", dist, "--dump-features-to", str(dest)], check=True, capture_output=True)
         b = dest.read_bytes()
         n = int.from_bytes(b[:4], "little")
         return np.frombuffer(b[8:8 + 4 * n], dtype="<f4")
@@ -60,7 +61,7 @@ def cmd_build(a) -> int:
         raise ValueError(f"unexpected dump widths {n}")
     tsv = out / "pairs.tsv"
     tsv.write_text("ref_path\tdist_path\thuman_score\trow_id\n" +
-                   "".join(f"{mix / 'img' / r}\t{mix / 'img' / d}\t0\t{i}\n" for i, (r, d) in enumerate(pairs)))
+                   "".join(f"{r}\t{d}\t0\t{i}\n" for i, (r, d) in enumerate(pairs)))
     gcsv = out / "globaff.csv"
     subprocess.run([a.globaff, "--pairs", str(tsv), "--out", str(gcsv)], check=True,
                    env=dict(os.environ, RAYON_NUM_THREADS=str(a.jobs)))
@@ -71,14 +72,29 @@ def cmd_build(a) -> int:
     k = next(iter(n))
     X[:, :min(k, 720)] = np.stack(vecs)[:, :min(k, 720)]
     X[:, GLOBAFF] = G
-    cols = {"ref_basename": pa.array([r for r, _ in pairs]), "human_score": pa.array(np.zeros(len(pairs)))}
+    cols = {"key": pa.array(keys), "ref_basename": pa.array(groups),
+            "human_score": pa.array(np.asarray(labels, dtype=np.float64))}
     cols.update({f"f{i}": pa.array(X[:, i]) for i in range(WIDTH)})
     pq.write_table(pa.table(cols), out / "table.parquet", compression="zstd")
-    meta = {"images": [d for _, d in pairs], "ring_form": os.environ.get("ZENSIM_RING_FORM", "raw"), "dump_bake": a.bake,
+    meta = {"images": keys, "ring_form": os.environ.get("ZENSIM_RING_FORM", "raw"), "dump_bake": a.bake,
             "dump_bake_sha256": hashlib.sha256(Path(a.bake).read_bytes()).hexdigest(), "dump_width": k,
             "globaff_sha256": hashlib.sha256(Path(a.globaff).read_bytes()).hexdigest()}
     (out / "table.json").write_text(json.dumps(meta, indent=1) + "\n")
     print(f"{len(pairs)} images, dump width {k}")
+
+
+def cmd_build(a) -> int:
+    mix = Path(a.mixture)
+    pairs = images(mix)
+    build_table([(str(mix / "img" / r), str(mix / "img" / d)) for r, d in pairs], Path(a.out), a,
+                [r for r, _ in pairs], np.zeros(len(pairs)), [d for _, d in pairs])
+    return 0
+
+
+def cmd_build_pairs(a) -> int:
+    rows = pacsv.read_csv(a.pairs, parse_options=pacsv.ParseOptions(delimiter="\t")).to_pylist()
+    build_table([(r["ref_path"], r["dist_path"]) for r in rows], Path(a.out), a, [str(r["group"]) for r in rows],
+                [float(r["label"]) for r in rows], [str(r["key"]) for r in rows])
     return 0
 
 
@@ -131,6 +147,14 @@ def main() -> int:
     b.add_argument("--out", required=True)
     b.add_argument("--jobs", type=int, default=16)
     b.set_defaults(fn=cmd_build)
+    bp = sub.add_parser("build-pairs")
+    bp.add_argument("--pairs", required=True)
+    bp.add_argument("--bin-dir", required=True)
+    bp.add_argument("--bake", required=True)
+    bp.add_argument("--globaff", required=True)
+    bp.add_argument("--out", required=True)
+    bp.add_argument("--jobs", type=int, default=16)
+    bp.set_defaults(fn=cmd_build_pairs)
     s = sub.add_parser("score")
     s.add_argument("--mixture", required=True)
     s.add_argument("--table", required=True)
