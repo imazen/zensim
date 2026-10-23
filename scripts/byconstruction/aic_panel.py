@@ -9,7 +9,12 @@ Sample roles:
   folds), `in sample` (fitted on all of public_train).
 - AIC2026 public_test: frozen B only (the one read of 2026-10-23); no candidate is read.
 
-  python3 aic_panel.py --out PANEL.json [--arms base-c,Tghpm,Tga,Thpm,Mhpm]
+Options: `--dvifm` adds DVIFM 0.3 (dvifm_e21.py outputs; zero-shot on E21, its constants were fitted on AIC2026);
+`--geo` adds the scatter geometry (zenstats `diagnose`: rank-mapped residual envelope, tails, coverage, clamp mass) and
+the absolute-error tails around the panel's own 4-parameter logistic fit; `--per-type` adds every E21 statistic per
+distortion type (KADID 25, TID2013 24, KonFiG 7, CID22-A 8 codecs).
+
+  python3 aic_panel.py --out PANEL.json [--arms base-c,Tghpm,Tga,Thpm,Mhpm] [--dvifm] [--geo] [--per-type]
 """
 
 import argparse
@@ -27,7 +32,7 @@ import pandas as pd
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
-from lib.zen_stats import panel_batch  # noqa: E402
+from lib.zen_stats import logistic_fit, panel_batch, scatter  # noqa: E402
 
 BIN = Path(os.environ.get("AIC_BIN", "/var/tmp/byconstruction-bin/58a4d100ad36"))
 os.environ.setdefault("REV4_V2_BIN_DIR", str(BIN))
@@ -51,6 +56,57 @@ FOLDS = ("kadid", "tid2013", "konfig", "cid22_a25")
 POP = {"kadid": "KADID TRAIN+SELECT", "tid2013": "TID2013 (train-only by ruling)", "konfig": "KonFiG TRAIN+VAL",
        "cid22_a25": "CID22-A, 25 references"}
 STATS = ("srocc_signed", "plcc", "krocc", "or", "pwrc", "z_rmse")
+DVIFM = Path("/mnt/v/output/zensim/byconstruction-2026-10-22/dvifm03")
+# Readable distortion-type names: KADID-10k (Lin, Hosu and Saupe 2019, Table 1) and TID2013 type order.
+TYPE_NAMES = {
+    **{f"kadid_{i:02d}": n for i, n in enumerate((
+        "Gaussian blur", "lens blur", "motion blur", "color diffusion", "color shift", "color quantization",
+        "color saturation 1", "color saturation 2", "JPEG 2000", "JPEG", "white noise", "white noise in color",
+        "impulse noise", "multiplicative noise", "denoise", "brighten", "darken", "mean shift", "jitter",
+        "non-eccentricity patch", "pixelate", "quantization", "color block", "high sharpen", "contrast change"), 1)},
+    **{f"tid_{i:02d}": n for i, n in enumerate((
+        "additive Gaussian noise", "noise in color components", "spatially correlated noise", "masked noise",
+        "high-frequency noise", "impulse noise", "quantization noise", "Gaussian blur", "denoising", "JPEG",
+        "JPEG 2000", "JPEG transmission errors", "JPEG 2000 transmission errors", "non-eccentricity pattern noise",
+        "local block-wise distortion", "mean shift", "contrast change", "color saturation change",
+        "multiplicative Gaussian noise", "comfort noise", "lossy compression of noisy images",
+        "color quantization with dither", "chromatic aberration", "sparse sampling and reconstruction"), 1)},
+    "colordiffusion": "color diffusion", "highsharpen": "high sharpen", "multinoise": "multiplicative noise",
+    "jpeg2000": "JPEG 2000", "lensblur": "lens blur", "motionblur": "motion blur", "jitter": "jitter",
+}
+GEO = ("out4", "p99d", "maxd", "mad", "cov", "clump", "clampLo", "clampHi")
+GEOMETRY = GEO + ("raw_chart_p99", "fit_p99", "fit_max", "fit_mad", "fit_out4")
+
+
+def dvifm_e21():
+    """E21-ordered DVIFM 0.3 quality (-JND) and distortion type per dataset (dvifm_e21.py outputs; no labels there)."""
+    rows = pd.read_parquet(DVIFM / "rows.parquet")
+    jnd = pd.read_csv(DVIFM / "dvifm.tsv", sep="\t").set_index(["ref_path", "dist_path"]).jnd
+    q = -jnd.loc[list(zip(rows.ref_path, rows.dist_path))].to_numpy(np.float64)
+    return ({ds: q[(rows.dataset == ds).to_numpy()] for ds in FOLDS},
+            {ds: rows.type[rows.dataset == ds].to_numpy() for ds in FOLDS})
+
+
+def geometry(x, y, arrays: bool = False):
+    """zenstats scatter geometry (rank-mapped residual: share outside the ±4 robust-scale envelope, p99 and max over
+    the target span, robust scale, coverage, clump, clamp mass; raw chart-z p99) and the absolute-error tails around
+    the panel's 4-parameter logistic fit (p99 and max over the target span, robust scale, share beyond 4 robust
+    scales). Polarity is the caller's: `x` and `y` must agree in direction. With `arrays`, also returns the
+    rank-mapped and logistic-fitted predictions in target units, in row order."""
+    x, y = np.asarray(x, np.float64), np.asarray(y, np.float64)
+    g = scatter(x, y)
+    ok = g["status"] == "MEASURED"
+    out = {k: (g["geo"][k] if ok else None) for k in GEO}
+    out["raw_chart_p99"] = g["raw"]["p99"] if ok else None
+    fitted = np.asarray(logistic_fit(x, y))
+    r = fitted - y
+    span = float(np.quantile(y, 0.99) - np.quantile(y, 0.01))
+    mad = 1.4826 * float(np.median(np.abs(r - np.median(r))))
+    out.update(fit_p99=float(np.quantile(np.abs(r), 0.99) / span), fit_max=float(np.abs(r).max() / span),
+               fit_mad=mad, fit_out4=float((np.abs(r) > 4 * mad).mean()))
+    if arrays:
+        return out, {"rank": np.asarray(g["normalized_pred"]) if ok else None, "fit": fitted}
+    return out
 
 
 def research_decl(spec: str):
@@ -72,11 +128,14 @@ def predict(bake: Path, table: Path, spec: str) -> np.ndarray:
         return owner_predict(bake, table, Path(td) / "p.tsv")
 
 
-def e21_jobs(arms: list[str]):
+def e21_jobs(arms: list[str], dvifm=None):
     panel_in = {d["name"]: d for d in json.loads(E34.read_text())["datasets"]}
     jobs, meta = [], []
     for fold in FOLDS:
         y = np.asarray(panel_in[fold]["target"], np.float64)
+        if dvifm is not None:
+            jobs.append((f"{fold}|DVIFM03|zero|0", dvifm[fold], y))
+            meta.append(dict(dataset=fold, model="DVIFM 0.3", sample="zero-shot (constants fitted on AIC2026)", seed=0))
         for arm in arms:
             for s in (0, 1, 2):  # out of sample: the cell trained without this dataset
                 if arm == "base-c":
@@ -101,9 +160,8 @@ def e21_jobs(arms: list[str]):
     return jobs, meta
 
 
-def aic_jobs():
+def aic_jobs(public_test: bool = True):
     ptr = pd.read_csv(F / "pairs_train.tsv", sep="\t")
-    pte = pd.read_csv(F / "pairs_test.tsv", sep="\t")
     keys = ptr.key.astype(str)
     y = -ptr.jnd.to_numpy(np.float64)
     b = pd.read_csv("/mnt/v/output/zensim/jnd-reconstruction-2026-10-19-b/JND_curve.scored.csv").set_index("distorted").score_b
@@ -150,9 +208,12 @@ def aic_jobs():
             s.loc[kk] = np.mean(ps, 0)
         jobs.append((f"aic_train|{arm}|oof", s.to_numpy(), y))
         meta.append(dict(dataset="aic2026_public_train", model=f"{arm} (E21 + AIC)", sample="out of fold (rotating source fold)", seed=None))
-    tkeys = pte.key.astype(str)
-    jobs.append(("aic_test|B|zero", b.loc[tkeys].to_numpy(), -pte.jnd.to_numpy(np.float64)))
-    meta.append(dict(dataset="aic2026_public_test", model="B", sample="zero-shot, frozen; the one public_test read", seed=None))
+    if public_test:  # the one frozen-B read; pairs_test.tsv is opened only here
+        pte = pd.read_csv(F / "pairs_test.tsv", sep="\t")
+        tkeys = pte.key.astype(str)
+        jobs.append(("aic_test|B|zero", b.loc[tkeys].to_numpy(), -pte.jnd.to_numpy(np.float64)))
+        meta.append(dict(dataset="aic2026_public_test", model="B", sample="zero-shot, frozen; the one public_test read",
+                         seed=None))
     return jobs, meta
 
 
@@ -160,20 +221,43 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", required=True)
     ap.add_argument("--arms", default="base-c,Tghpm,Tga,Thpm,Mhpm")
+    ap.add_argument("--dvifm", action="store_true", help="add DVIFM 0.3 on the E21 sets (dvifm_e21.py outputs)")
+    ap.add_argument("--geo", action="store_true", help="add scatter geometry and logistic-fit error tails per row")
+    ap.add_argument("--per-type", action="store_true", help="add E21 statistics per distortion type")
+    ap.add_argument("--no-public-test", action="store_true",
+                    help="leave out the frozen-B public_test row (reuse panel_public_test_frozen.json instead)")
     a = ap.parse_args()
-    j1, m1 = e21_jobs(a.arms.split(","))
-    j2, m2 = aic_jobs()
+    dv, types = dvifm_e21() if (a.dvifm or a.per_type) else (None, None)
+    j1, m1 = e21_jobs(a.arms.split(","), dv if a.dvifm else None)
+    j2, m2 = aic_jobs(public_test=not a.no_public_test)
     res = panel_batch(j1 + j2, stats="full")
     rows = []
-    for m, r, (label, x, _) in zip(m1 + m2, res, j1 + j2):
-        rows.append({**m, "n": int(r["n"]), **{k: float(r[k]) for k in STATS}})
-    # E21 out of sample: mean over seeds
-    df = pd.DataFrame(rows)
-    out = []
-    for (ds, model, sample), g in df.groupby(["dataset", "model", "sample"], sort=False):
-        out.append({"dataset": ds, "model": model, "sample": sample, "n": int(g.n.iloc[0]), "seeds": int(len(g)),
-                    **{k: float(g[k].mean()) for k in STATS}})
-    Path(a.out).write_text(json.dumps({"stats": list(STATS), "rows": out, "per_seed": rows}, indent=1) + "\n")
+    for m, r, (label, x, y) in zip(m1 + m2, res, j1 + j2):
+        rows.append({**m, "n": int(r["n"]), **{k: float(r[k]) for k in STATS},
+                     **(geometry(x, y) if a.geo else {})})
+    keep = STATS + (GEOMETRY if a.geo else ())
+
+    def seed_mean(df, by):  # E21 out of sample: mean over seeds
+        return [{**dict(zip(by, k)), "n": int(g.n.iloc[0]), "seeds": int(len(g)),
+                 **{s_: (None if g[s_].isna().all() else float(g[s_].mean())) for s_ in keep if s_ in g}}
+                for k, g in df.groupby(list(by), sort=False)]
+    out = seed_mean(pd.DataFrame(rows), ("dataset", "model", "sample"))
+    per_type = []
+    if a.per_type:
+        tj, tm = [], []
+        for (label, x, y), m in zip(j1, m1):
+            if not m["sample"].startswith(("out", "zero")):
+                continue
+            t = types[m["dataset"]]
+            for ty in sorted(set(t)):
+                idx = t == ty
+                tj.append((f"{label}|{ty}", np.asarray(x)[idx], np.asarray(y)[idx]))
+                tm.append({**m, "type": ty})
+        tr = [{**m, "n": int(r["n"]), **{k: float(r[k]) for k in STATS}}
+              for m, r in zip(tm, panel_batch(tj, stats="full"))]
+        per_type = seed_mean(pd.DataFrame(tr), ("dataset", "type", "model", "sample"))
+    Path(a.out).write_text(json.dumps({"stats": list(keep), "rows": out, "per_type": per_type, "per_seed": rows},
+                                      indent=1) + "\n")
     for r in out:
         print(f"{r['dataset']:22s} {r['model']:24s} {r['sample'][:38]:38s} n={r['n']:5d} srocc={r['srocc_signed']:+.4f} "
               f"plcc={r['plcc']:.4f} krocc={r['krocc']:.4f} or={r['or']:.4f} pwrc={r['pwrc']:.4f} zrmse={r['z_rmse']:.4f}")

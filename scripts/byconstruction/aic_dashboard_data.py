@@ -1,10 +1,12 @@
 """Data files of the AIC2026 TRAIN dashboard. Exploration record: benchmarks/byconstruction_2026-10-22.md.
 
 results.json holds every summary table in long form (`table` names it, `id` keys a row); predictions.json one row per
-WG1 public_train crop (official JND, B score, out-of-fold T and Tga outputs, butteraugli 3-norm), without stimulus
-names or levels. Everything is read from the study's saved outputs; the E21 scores, mixture report and panel are
-regenerated through their owners (byc_cells.py score, mixture_test.py report, aic_panel.py). Nothing new is computed
-on AIC2026 public_test: the panel's frozen-B row reuses the one read, and public_test label statistics are dropped.
+WG1 public_train crop (official JND; raw B, T, Tga, Tga128, butteraugli 3-norm and DVIFM 0.3 outputs; each also mapped
+onto the JND scale three ways: `f_` the panel's 4-parameter logistic fit, `r_` zenstats' rank map, `a_` mean and SD
+matched), without stimulus names or levels. Everything is read from the study's saved outputs; the E21 scores,
+mixture report and panel are regenerated through their owners (byc_cells.py score, mixture_test.py report,
+aic_panel.py --dvifm --geo --per-type). Nothing is computed on AIC2026 public_test: its labels are never loaded here;
+the frozen-B row comes from panel_public_test_frozen.json and the candidate's from full/Tga/panel.json.
 
   python3 aic_dashboard_data.py --out DIR --arms Tga,Ma,Bga,... [--commits-since 322930e4]
 """
@@ -25,6 +27,8 @@ from scipy.stats import spearmanr
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import aic_train as A  # noqa: E402
+from aic_panel import TYPE_NAMES, geometry  # noqa: E402
+from lib.zen_stats import panel_batch  # noqa: E402
 
 REPO = HERE.parents[1]
 O = Path("/mnt/v/output/zensim/byconstruction-2026-10-22/aic2026train")
@@ -56,6 +60,7 @@ COMMIT_SUMMARY = {
     "b7aba684": "First E21 + AIC arm (Tga); engine skip attempt recorded, not landed",
     "bf828d6c": "Full-data research fit route; per-type bias by arm",
     "4da1d051": "Six-statistic panel per dataset and split; Ma arm; AIC test-data ledger",
+    "e5bfcf1c": "Engine: declared-ID plans skip pyramid scales nothing reads (exact; tests pass)",
 }
 # Every use of AIC2026 public_test or its 14 sources on 2026-10-23, counted from the commands run (record section
 # "AIC2026 TRAIN"). Edit only when a new use happens.
@@ -75,7 +80,8 @@ EXPOSURE = [
     ("After the split was found", "Official labels (JND_score), public_test sources",
      "Per-source JND statistics computed for the dashboard, then removed from it", 1, "description"),
     ("After the split was found", "Official labels (JND_score), public_test sources",
-     "Six-statistic panel on the same frozen-B predictions (the dashboard)", 1, "score only"),
+     "Six-statistic panel on the same frozen-B predictions (the dashboard); regenerated with identical numbers on each "
+     "dashboard rebuild until it was frozen to a file the same evening", 1, "score only"),
     ("After the split was found", "Official labels (JND_score), public_test sources",
      "The candidate (Tga, full-data fit, chosen by the rule committed in 04743622) scored once", 1, "score only"),
     ("After the split was found", "Official labels (JND_score), public_test sources",
@@ -139,14 +145,14 @@ def main() -> int:
         rows.append({"table": table, **kw})
 
     ptr = pd.read_csv(F / "pairs_train.tsv", sep="\t")
-    pte = pd.read_csv(F / "pairs_test.tsv", sep="\t")
+    pte = pd.read_csv(F / "pairs_test.tsv", sep="\t", usecols=["key", "group", "codec"])  # no label column
     keys = ptr.key.astype(str)
     y_tr = ptr.set_index("key").jnd
     q = lambda pred: float(spearmanr(np.asarray(pred, float), -y_tr.loc[keys]).correlation)  # noqa: E731
     b = pd.read_csv("/mnt/v/output/zensim/jnd-reconstruction-2026-10-19-b/JND_curve.scored.csv").set_index("distorted").score_b
     curve = pd.read_csv("/mnt/v/output/zensim/jnd-reconstruction-2026-10-19-b/JND_curve.csv").set_index("distorted").JND_curve
     T, S = oof_rust("T", keys), oof_rust("S", keys)
-    tga = oof_cells("Tga", keys)
+    tga, tga128 = oof_cells("Tga", keys), oof_cells("Tga128", keys)
     allp = json.loads((O / "allpeers_train.json").read_text())["results"]
     ceil = max(r["oof_global"] for r in allp)
 
@@ -295,6 +301,13 @@ def main() -> int:
             ("zensim_allfeat_attempt", "zensim all features, per-scale skip attempt (lib binary)", LOGS / "zensim_allfeat_tests.log", "attempt, reverted")):
         p, f_, i = last_result(log)
         add("tests", id=tid, suite=suite, passed=p, failed=f_, ignored=i, state=state)
+    landed = LOGS / "zensim_allfeat_landed.log"  # cargo test -p zensim --all-features, every test binary summed
+    if landed.is_file():
+        sums = [tuple(map(int, m.groups())) for m in
+                re.finditer(r"(\d+) passed; (\d+) failed; (\d+) ignored", landed.read_text())]
+        add("tests", id="zensim_allfeat_landed", suite="zensim all features, every test binary (per-scale skip landed, e5bfcf1c)",
+            passed=sum(x[0] for x in sums), failed=sum(x[1] for x in sums), ignored=sum(x[2] for x in sums),
+            state="current tree")
     add("tests", id="new_free_pairs", suite="new test: max pairs with a sign-free input stay monotone", passed=1, failed=0, ignored=0, state="current tree")
     lint = subprocess.run([sys.executable, str(REPO / "scripts/lint_scripts.py")], capture_output=True, text=True, cwd=REPO).stdout
     m_ = re.search(r"(\d+) scripts checked, all runnable", lint)
@@ -312,16 +325,41 @@ def main() -> int:
 
     panel_json = O / "panel_mohammadi.json"
     subprocess.run([sys.executable, str(HERE / "aic_panel.py"), "--out", str(panel_json), "--arms",
-                    ",".join(["base-c", "Thpm", "Mhpm"] + [x for x in have])], check=True, capture_output=True, env=env)
+                    ",".join(["base-c", "Thpm", "Mhpm"] + [x for x in have]), "--dvifm", "--geo", "--per-type",
+                    "--no-public-test"], check=True, capture_output=True, env=env)
+    pj = json.loads(panel_json.read_text())
+    frozen = json.loads((O / "panel_public_test_frozen.json").read_text())["rows"]
     names = {"kadid": "KADID", "tid2013": "TID2013", "konfig": "KonFiG", "cid22_a25": "CID22-A",
              "aic2026_public_train": "AIC2026 public_train", "aic2026_public_test": "AIC2026 public_test"}
     models = {"base-c": "B recipe (base-c)", "Thpm": "Thpm (convex monotone)", "Mhpm": "Mhpm (max pairs)", **CONTROLS,
               **{k: v[0] for k, v in ARMS.items()}}
-    for x in json.loads(panel_json.read_text())["rows"]:
+    geo_f = ("fit_p99", "fit_max", "out4", "p99d", "maxd")
+    for x in pj["rows"] + frozen:
         add("panel", id=slug(x["dataset"] + " " + x["model"] + " " + x["sample"]), dataset=names[x["dataset"]],
             model=models.get(x["model"], x["model"]), sample=x["sample"],
             kind="out" if x["sample"].startswith(("out", "zero")) else "in", n=x["n"], seeds=x["seeds"],
-            srocc=x["srocc_signed"], plcc=x["plcc"], krocc=x["krocc"], **{"or": x["or"]}, pwrc=x["pwrc"], z_rmse=x["z_rmse"])
+            srocc=x["srocc_signed"], plcc=x["plcc"], krocc=x["krocc"], **{"or": x["or"]}, pwrc=x["pwrc"], z_rmse=x["z_rmse"],
+            **{k: x.get(k) for k in geo_f})
+    # Smoothness per arm: error around the panel's logistic curve, E21 out of sample (mean of the four sets) and AIC OOF.
+    def z_of(model, ds=None):
+        xs = [x for x in pj["rows"] if x["model"] == model and x["sample"].startswith(("out", "zero"))
+              and (x["dataset"] == ds if ds else x["dataset"] in ("kadid", "tid2013", "konfig", "cid22_a25"))]
+        return (float(np.mean([x["z_rmse"] for x in xs])), float(np.mean([x["fit_p99"] for x in xs]))) if xs else (None, None)
+    for r in rows:
+        if r["table"] == "arms":
+            arm = next(k for k, v in {**CONTROLS, **{k: v[0] for k, v in ARMS.items()}}.items() if v == r["arm"])
+            r["z_e21"], r["p99_e21"] = z_of(arm)
+            r["z_aic"] = z_of(f"{arm} (E21 + AIC)", "aic2026_public_train")[0]
+    add("headline", id="basec_z", label="B's recipe (base-c), E21 Z-RMSE out of sample", value=z_of("base-c")[0])
+    add("headline", id="basec_p99", label="B's recipe (base-c), E21 error p99 out of sample", value=z_of("base-c")[1])
+    tmodels = {"DVIFM 0.3": "dvifm", "base-c": "basec", "Tga": "tga", "Tga128": "tga128"}
+    by_type = {}
+    for x in pj["per_type"]:
+        if x["model"] in tmodels:
+            r = by_type.setdefault((x["dataset"], x["type"]), {"n": x["n"]})
+            r[tmodels[x["model"]]], r[tmodels[x["model"]] + "_z"] = x["srocc_signed"], x["z_rmse"]
+    for (ds, ty), r in by_type.items():
+        add("types", id=slug(ds + " " + ty), dataset=names[ds], type=TYPE_NAMES.get(ty, ty), **r)
     if cand:
         for key, ds, sample in (("public_test", "AIC2026 public_test", "candidate, full-data fit: the one candidate read"),
                                 ("train_all", "AIC2026 public_train", "candidate, full-data fit: in sample")):
@@ -329,6 +367,24 @@ def main() -> int:
             add("panel", id=slug(ds + " candidate " + key), dataset=ds, model="Tga candidate (full data)", sample=sample,
                 kind="out" if key == "public_test" else "in", n=int(x["n"]), seeds=1, srocc=x["srocc_signed"], plcc=x["plcc"],
                 krocc=x["krocc"], **{"or": x["or"]}, pwrc=x["pwrc"], z_rmse=x["z_rmse"])
+    # Scatter views: every model on one JND scale, with zenstats geometry and the logistic-fit error tails.
+    jnd_tr = y_tr.loc[keys].to_numpy(np.float64)
+    views = {}
+    for sid, lab, v, sign in (
+            ("b", "B today (zero-shot)", b.loc[keys], 1),
+            ("t", "T, AIC only (out of fold)", T, 1),
+            ("tga", "Tga, E21 + AIC (out of fold)", tga, 1),
+            ("tga128", "Tga128, AIC weight 128 (out of fold)", tga128, 1),
+            ("butter", "butteraugli 3-norm (zero-shot)", bu.loc[keys].butteraugli_pnorm3, -1),
+            ("dvifm", "DVIFM 0.3 (constants fitted on AIC2026)", dv.loc[keys].jnd, -1)):
+        v = np.asarray(v, np.float64)
+        worse = -sign * v  # same direction as JND: higher is worse
+        st, arr = geometry(worse, jnd_tr, arrays=True)
+        pn = panel_batch([(sid, sign * v, -jnd_tr)], stats="full")[0]
+        views[f"f_{sid}"], views[f"r_{sid}"] = arr["fit"], arr["rank"]
+        views[f"a_{sid}"] = jnd_tr.mean() + (worse - worse.mean()) * (jnd_tr.std() / worse.std())
+        add("scatter", id=sid, model=lab, n=int(pn["n"]), srocc=pn["srocc_signed"], plcc=pn["plcc"],
+            z_rmse=pn["z_rmse"], **{"or": pn["or"]}, **st)
     for i, (ph, labels, what, runs, use) in enumerate(EXPOSURE):
         add("exposure", id=f"e{i}", phase=ph, labels=labels, what=what, runs=runs, use=use)
 
@@ -341,7 +397,8 @@ def main() -> int:
     (out / "results.json").write_text(json.dumps(rows, indent=0))
     pr = pd.DataFrame({"jnd": y_tr.loc[keys].round(3).to_numpy(), "codec": ptr.codec.to_numpy(),
                        "b": b.loc[keys].round(4).to_numpy(), "t": T.round(5).to_numpy(), "tga": tga.round(5).to_numpy(),
-                       "butter": bu.loc[keys].butteraugli_pnorm3.round(4).to_numpy()})
+                       "tga128": tga128.round(5).to_numpy(), "butter": bu.loc[keys].butteraugli_pnorm3.round(4).to_numpy(),
+                       "dvifm": dv.loc[keys].jnd.round(5).to_numpy(), **{k: np.round(v, 3) for k, v in views.items()}})
     pr.sample(frac=1, random_state=0).reset_index(drop=True).to_json(out / "predictions.json", orient="records")
     print(f"{len(rows)} result rows; {len(pr)} prediction rows; arms {have}")
     return 0
