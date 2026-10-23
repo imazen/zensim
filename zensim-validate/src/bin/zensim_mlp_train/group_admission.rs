@@ -9,6 +9,10 @@ use zensim_validate::{feature_set, train_manifest};
 type Group = (String, PathBuf, f64, f64, bool, GroupLossMode);
 const SOURCES: [&str; 4] = ["kadid", "tid2013", "konfig", "cid22_a25"];
 const BASE: &str = "basic+peaks+v2@w1825/rev5_localwin#36c3f3af";
+/// By-construction exploration (`benchmarks/byconstruction_2026-10-22.md`): derived roots that re-extract named
+/// columns under a measurement arm (`scripts/byconstruction/ring_root.py`). Admitted only on a declaration that
+/// records `byc_derived_from`; the registry entry carries the same 576 slots.
+const BYC_DERIVED: &[&str] = &["basic+peaks+v2@w1825/rev5_localwin_ringhpm#36c3f3af"];
 
 pub(super) fn safe(path: &Path) -> Result<(), String> {
     for p in [
@@ -519,7 +523,9 @@ pub(super) fn preflight(
         {
             return Err("unapproved/AIC bank source".into());
         }
-        if (!palette && identity.id.to_string() != BASE)
+        let derived = d.get("byc_derived_from").is_some()
+            && BYC_DERIVED.contains(&identity.id.to_string().as_str());
+        if (!palette && !derived && identity.id.to_string() != BASE)
             || d["formula_revision"] != 5
             || d["decoder_era"].as_str().is_none_or(str::is_empty)
             || [
