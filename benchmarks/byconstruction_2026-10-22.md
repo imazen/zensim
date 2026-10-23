@@ -841,30 +841,100 @@ under `raw`):
 |---|---|---|---|---|---|---|
 | Bhpm: B's signed recipe | **−0.0002 (0.0023)** | −0.0037 | −0.0026 | +0.0045 | +0.0009 | 78–184 (+53.8) |
 | FRhpm: monotone, ringing sign-free | −0.0042 (0.0029) | −0.0067 | −0.0027 | −0.0131 | +0.0058 | 6–70 (+35.8) |
+| Mhpm: certified monotone max pairs | −0.0158 (0.0017) | −0.0159 | −0.0302 | −0.0183 | +0.0014 | 2–35 (+8.0) |
 | for reference: Bnr | −0.0003 (0.0009) | −0.0010 | −0.0023 | +0.0041 | −0.0019 | 72–178 (+53.1) |
 | for reference: FR (raw ringing free) | −0.0039 (0.0029) | −0.0046 | −0.0153 | −0.0043 | +0.0085 | 2–41 (+26.2) |
+| for reference: M (raw ringing) | −0.0144 (0.0016) | | | | | 1–32 (+6.5) |
 
 - B's recipe is at parity on the corrected feature (E33 point form passes) and keeps its inversion: blur σ1.2
   then chroma noise σ8 inverts on 48 of 48 references in every cell, as in `base-c` and Bnr.
+- In the certified-monotone class the correction alone does not move E21: Mhpm −0.0158 against M −0.0144, under one
+  seed-unit SE apart. Its mixture behaviour is unchanged too (worst: blur σ1.2 then luma σ4, small rises).
 - Freeing the corrected ringing still recovers most of the monotone gap (T −0.0205) and still opens the
   chroma-noise route (blur + chroma σ8 inverts on up to 38 references). The high-pass error still responds to
   noise, so a sign-free ringing input can still be used to forgive it. Inside the monotone class ringing has to
   count as damage; the sign-free channel needs a signal noise cannot drive.
+
+
+### Next feature: a global affine-change descriptor (`byc_globaff`)
+
+**Why this one.** Under `hpm` the probe flags one remaining family by the same criterion (response to a
+clipping-free global edit above a visible blur): the JND transducers, which also use the raw per-pixel error
+(`pjnd_transducer` contrast ×0.85 0.494 vs blur 0.357; +8 shift 0.705). Error-magnitude families measure global
+changes by definition, and DG showed dropping them costs more than it saves. FR and FRhpm show the monotone class
+recovers most of its gap when it gets a sign-free signal it can subtract, and that ringing is the wrong such signal
+because noise drives it. So the next feature is an explicit descriptor that a global change drives and noise does
+not: per scale and XYB channel, the share of the mean squared error that a least-squares global fit
+`dst ≈ a·src + b` explains, and that explained error (24 values). It streams in one pass (five additive sums per
+channel; see "Can the fixes stream?").
+
+**Implementation (research only).** `zensim-bench/examples/byc_globaff.rs` decodes with the shared decode owner,
+converts with zensim's own XYB conversion and builds the 4-scale pyramid with zensim's own 2× downscale (two-pass f64
+moments). It is a sidecar at research ids f1867–f1890, registered as
+`basic+peaks+v2@w1891/rev5_localwin_ringhpm_globaff#d56ad477` (hash from the new `byc_fsid` bin, which reproduces the
+registered `#36c3f3af`); zensim cannot compute these ids, so such bakes cannot be served. Training reads them from
+a widened derived root (`ring_root.py globaff`); predictions use `byc_predict` (zenpredict, the trainer's row
+layout), which reproduces all 7,869 stored `bake_dial_refit --score-units` predictions of a Bhpm cell bit for bit;
+the mixture test uses a table of dumped feature vectors plus the descriptor, which reproduces the pixel-route
+scores of a Bhpm cell exactly on all 1,344 images. 271,590 training pairs plus the pool: 482 s on 20 threads.
+
+**Label-free check on the probe images** (median share at scale 0, X / Y / B, 24 references):
+
+| Edit | Share |
+|---|---|
+| +8 luma shift | 0.37 / **0.997** / 0.22 |
+| contrast ×0.85 | 0.23 / **0.997** / 0.16 |
+| saturation ×1.25 | **0.97** / 0.35 / **0.94** |
+| saturation ×0.8 | **0.99** / 0.41 / **0.97** |
+| blur σ1.2 | 0.17 / 0.16 / 0.15 |
+| luma noise σ4 | 0.003 / 0.000 / 0.004 |
+| chroma noise σ8 | 0.003 / 0.14 / 0.002 |
+
+(At the coarsest scale chroma noise leaves a tiny Y error that is mostly "explained", share 0.85 but explained
+energy 4e-6; that is why both numbers are inputs.)
+
+**Arms** (`globaff_arms.sh`, `globaff_arms2.sh`; trainer and scorers `58a4d100`; 12 E21 cells each):
+
+| Arm | Class | E21 Δ (SE) | KADID | TID2013 | KonFiG | CID22-A | Mixture inversions / cell (max rise) |
+|---|---|---|---|---|---|---|---|
+| **Tghpm** | monotone in all 820 damage inputs, descriptor sign-free | **−0.0101 (0.0024)** | −0.0066 | −0.0236 | −0.0175 | +0.0071 | **2–7 (+7.1)** |
+| Thpm (control) | monotone, no descriptor | −0.0221 (0.0032) | −0.0192 | −0.0452 | −0.0296 | +0.0055 | 0–4 (+4.2) |
+| Bghpm | B's signed recipe plus the descriptor | −0.0031 (0.0017) | −0.0010 | −0.0033 | −0.0044 | −0.0037 | 70–190 (+61.4) |
+
+- The descriptor recovers about half of the monotone class's E21 gap (Thpm −0.0221 → Tghpm −0.0101) **without** the
+  chroma-noise route: Tghpm's only inversions are posterize then light noise (dithering, at most 3 references per
+  cell), the same benign pattern as T. Sign-free ringing recovered more (FRhpm −0.0042) but inverts blur + chroma
+  noise on up to 38 of 48 references. Tghpm has the best E21 of the arms that keep inversions bounded, ahead of the
+  certified-monotone M64 (−0.0131, 1–6 inversions) and M (−0.0144, blur + luma σ4 on up to 24 references); its
+  0.003 margin over M64 is about one seed-unit SE.
+- Tghpm's guarantee is weaker than M's: it is monotone in every damage input, but the descriptor is free, so the
+  monotonicity is not certified end to end. The descriptor is built to fall when unexplained error is added, and
+  on the 1,152 mixture steps that held.
+- Adding the descriptor to B's signed recipe does not help (−0.0031, E33 point form fails) and leaves B's
+  inversions (blur + chroma σ8 on 48 of 48 references).
+- Remaining gap: TID2013 −0.0236 and KonFiG −0.0175. Not tested: combining the descriptor with max pairs (the
+  free-mask route refuses `mp`), gating products instead of sign-free inputs, and a served (streaming) version.
 
 ## Summary (all arms, E21 screen, seeds 0–2, Δ vs `base-c`)
 
 | Arm | Guarantee | E21 Δ (SE) | Mixture inversions / cell (max rise) |
 |---|---|---|---|
 | Ts: B + thresholds | pin only | −0.0008 (0.0012) | — |
+| Bhpm: B, ringing `hpm` | pin only | −0.0002 (0.0023) | 78–184 (+53.8) |
+| Bghpm: B + descriptor | pin only | −0.0031 (0.0017) | 70–190 (+61.4) |
 | Bnr: B without ringing | pin only | −0.0003 (0.0009) | 72–178 (+53.1) |
 | FR: ringing sign-free | monotone in 800 of 820 | −0.0039 (0.0029) | 2–41 (+26.2) |
+| FRhpm: `hpm` ringing sign-free | monotone in 800 of 820 | −0.0042 (0.0029) | 6–70 (+35.8) |
+| **Tghpm: descriptor sign-free** | **monotone in all 820 damage inputs** | **−0.0101 (0.0024)** | **2–7 (+7.1)** |
 | **M64: max pairs** | **certified monotone** | **−0.0131 (0.0023)** | 1–6 (+7.6) |
 | **M: max pairs + hinges** | **certified monotone** | **−0.0144 (0.0016)** | 1–32 (+6.5) |
+| Mhpm: M, ringing `hpm` | certified monotone | −0.0158 (0.0017) | 2–35 (+8.0) |
 | E20: budget 20 | ≤ +20 certified | −0.0154 (0.0026) | 4–37 (+7.3) |
 | E5: budget 5 | ≤ +5 certified | −0.0194 (0.0027) | 3–8 (+5.0) |
 | G: content-gated | certified monotone | −0.0202 (0.0030) | 0–4 (+4.5) |
 | Lc: linear | certified monotone | −0.0204 (0.0029) | — |
 | T: thresholds | certified monotone | −0.0205 (0.0029) | 0–4 (+4.0) |
+| Thpm: T, ringing `hpm` | certified monotone | −0.0221 (0.0032) | 0–4 (+4.2) |
 | DR: ringing dropped | certified monotone | −0.0216 (0.0031) | 0–3 (+4.3) |
 | R: ramps | certified monotone | −0.0225 (0.0024) | 4–9 (+5.2) |
 | DG: global-sensitive dropped | certified monotone | −0.0229 (0.0032) | — |

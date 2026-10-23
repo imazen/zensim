@@ -430,7 +430,10 @@ impl LanesF32 {
 /// the same adjacent-pairwise tree shape as [`LanesF32`], but every partial
 /// is f64, so per-term error is only the term's own f32 rounding. FEATACC's
 /// recommendation (`c64`); under `oracle` also a measurement arm.
+///
+/// 64-byte aligned for the same reason as [`Lanes16F64`].
 #[derive(Debug, Clone, Copy, Default)]
+#[repr(align(64))]
 pub(crate) struct LanesF64(pub [f64; CANON_LANES]);
 
 /// dead_code until chunked-pool kernels land; see LanesF32::add_chunk.
@@ -477,7 +480,14 @@ impl LanesF64 {
 }
 
 /// Rev5's sixteen virtual f64 lanes, independent of the hardware width.
+///
+/// 64-byte aligned: the canonical kernels add whole 8-lane chunks (`chunk8`, 64 bytes) every few pixels, and
+/// at the default 8-byte alignment those accesses split cache lines whenever the caller's frame puts the
+/// array off a line. Measured (benchmarks/byconstruction_2026-10-22.md): the Rev5 walk at 2048², one thread,
+/// ran 9.3% faster with this alignment, and without it an unrelated call-site change cost 3.5% in the
+/// unchanged dense kernel. Values are unchanged; this is memory alignment only.
 #[derive(Debug, Clone, Copy, Default)]
+#[repr(align(64))]
 pub(crate) struct Lanes16F64(pub [f64; 16]);
 
 impl Pool for Lanes16F64 {

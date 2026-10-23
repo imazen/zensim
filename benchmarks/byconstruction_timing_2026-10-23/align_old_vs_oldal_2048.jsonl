@@ -1,0 +1,16 @@
+{"round":1,"arm":"A","ring":"raw","threads":1,"result":{"size":2048,"iters":8,"median_ms":87.1745,"p25_ms":87.1323,"p75_ms":87.2538,"score":88.488814,"hp_ring":false}}
+{"round":1,"arm":"B","ring":"raw","threads":1,"result":{"size":2048,"iters":8,"median_ms":78.7785,"p25_ms":78.6871,"p75_ms":79.2344,"score":88.488814,"hp_ring":false}}
+{"round":2,"arm":"B","ring":"raw","threads":1,"result":{"size":2048,"iters":8,"median_ms":78.8108,"p25_ms":78.7711,"p75_ms":78.8294,"score":88.488814,"hp_ring":false}}
+{"round":2,"arm":"A","ring":"raw","threads":1,"result":{"size":2048,"iters":8,"median_ms":87.0982,"p25_ms":87.0329,"p75_ms":87.1589,"score":88.488814,"hp_ring":false}}
+{"round":3,"arm":"A","ring":"raw","threads":1,"result":{"size":2048,"iters":8,"median_ms":86.9877,"p25_ms":86.8850,"p75_ms":87.1195,"score":88.488814,"hp_ring":false}}
+{"round":3,"arm":"B","ring":"raw","threads":1,"result":{"size":2048,"iters":8,"median_ms":79.7153,"p25_ms":79.0650,"p75_ms":79.9516,"score":88.488814,"hp_ring":false}}
+{"round":4,"arm":"B","ring":"raw","threads":1,"result":{"size":2048,"iters":8,"median_ms":78.7161,"p25_ms":78.6572,"p75_ms":78.7179,"score":88.488814,"hp_ring":false}}
+{"round":4,"arm":"A","ring":"raw","threads":1,"result":{"size":2048,"iters":8,"median_ms":86.9150,"p25_ms":86.8382,"p75_ms":86.9535,"score":88.488814,"hp_ring":false}}
+{"round":5,"arm":"A","ring":"raw","threads":1,"result":{"size":2048,"iters":8,"median_ms":86.8670,"p25_ms":86.8292,"p75_ms":86.9236,"score":88.488814,"hp_ring":false}}
+{"round":5,"arm":"B","ring":"raw","threads":1,"result":{"size":2048,"iters":8,"median_ms":78.8663,"p25_ms":78.8061,"p75_ms":78.9182,"score":88.488814,"hp_ring":false}}
+{"round":6,"arm":"B","ring":"raw","threads":1,"result":{"size":2048,"iters":8,"median_ms":79.0299,"p25_ms":78.8817,"p75_ms":79.2189,"score":88.488814,"hp_ring":false}}
+{"round":6,"arm":"A","ring":"raw","threads":1,"result":{"size":2048,"iters":8,"median_ms":87.0305,"p25_ms":86.8121,"p75_ms":87.2157,"score":88.488814,"hp_ring":false}}
+{"round":7,"arm":"A","ring":"raw","threads":1,"result":{"size":2048,"iters":8,"median_ms":87.9376,"p25_ms":87.3063,"p75_ms":88.0076,"score":88.488814,"hp_ring":false}}
+{"round":7,"arm":"B","ring":"raw","threads":1,"result":{"size":2048,"iters":8,"median_ms":79.0915,"p25_ms":79.0200,"p75_ms":79.1670,"score":88.488814,"hp_ring":false}}
+{"round":8,"arm":"B","ring":"raw","threads":1,"result":{"size":2048,"iters":8,"median_ms":79.4104,"p25_ms":79.3549,"p75_ms":79.4682,"score":88.488814,"hp_ring":false}}
+{"round":8,"arm":"A","ring":"raw","threads":1,"result":{"size":2048,"iters":8,"median_ms":87.2445,"p25_ms":87.0894,"p75_ms":87.2494,"score":88.488814,"hp_ring":false}}

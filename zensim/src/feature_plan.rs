@@ -1909,7 +1909,12 @@ pub(crate) mod servability_census {
     fn every_registered_producer_set_is_plannable() {
         let ns = crate::NUM_SCALES;
         let mut checked = 0usize;
-        for (compute, width, expect, selection) in registered_producer_sets() {
+        for (compute, width, expect, selection, research) in registered_producer_sets() {
+            // Declared `research_slots` come from a sidecar outside zensim; the rest must plan exactly.
+            let expect = match research {
+                Some(r) => r.missing_from(&expect),
+                None => expect,
+            };
             let Some(parts) = crate::feature_set_id::ComputeParts::parse(&compute) else {
                 panic!("unparseable compute {compute:?}");
             };
@@ -1952,7 +1957,10 @@ pub(crate) mod servability_census {
     }
 
     /// The registry's producer entries as `(compute, layout_width, slots)`.
-    fn registered_producer_sets() -> Vec<(String, usize, SlotSet, Option<String>)> {
+    /// `(compute, width, recorded slots, slot_selection, research_slots)` of every registered producer set.
+    type ProducerSet = (String, usize, SlotSet, Option<String>, Option<SlotSet>);
+
+    fn registered_producer_sets() -> Vec<ProducerSet> {
         let json = include_str!("../../benchmarks/feature_sets_registry.json");
         let mut out = Vec::new();
         for chunk in json.split("\"compute\":").skip(1) {
@@ -1987,7 +1995,12 @@ pub(crate) mod servability_census {
                 .split("\"slot_selection\":")
                 .nth(1)
                 .and_then(between_quotes);
-            out.push((compute, width, slots, selection));
+            let research = chunk
+                .split("\"research_slots\":")
+                .nth(1)
+                .and_then(between_quotes)
+                .and_then(|s| SlotSet::parse(&s));
+            out.push((compute, width, slots, selection, research));
         }
         out
     }

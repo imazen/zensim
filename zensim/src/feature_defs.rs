@@ -4423,6 +4423,14 @@ mod owner_gates {
                 derived =
                     crate::feature_plan::apply_registered_slot_selection(&selection, derived, NS);
             }
+            // A set may declare `research_slots`: columns a sidecar outside zensim supplies (the by-construction
+            // byc_globaff descriptor). zensim cannot derive them; everything else must still match exactly.
+            let recorded = match json_str_field(&obj, "research_slots") {
+                Some(r) => SlotSet::parse(&r)
+                    .unwrap_or_else(|| panic!("{key}: unparseable research_slots"))
+                    .missing_from(&recorded),
+                None => recorded,
+            };
 
             if role == "consumer" {
                 // A read set is a subset of what its producer populates.

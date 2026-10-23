@@ -1077,6 +1077,7 @@
    "layout": 1891,
    "era": "rev5_localwin_ringhpm_globaff",
    "slots": "0-227,372-719,1867-1890",
+   "research_slots": "1867-1890",
    "slots_hash8": "d56ad477",
    "n_slots": 600,
    "role": "producer",
