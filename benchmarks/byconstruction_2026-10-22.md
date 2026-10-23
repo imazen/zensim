@@ -973,9 +973,25 @@ cells that also fit the split). Data: `/mnt/v/output/zensim/byconstruction-2026-
 | fx1g + all 75 supplied peer metrics, monotone boosting | out of fold | 0.964 | — | — |
 | fx1g + all 75 supplied peer metrics, unconstrained boosting | out of fold | **0.968** | — | — |
 
+**Through the Rust trainer** (`aic_rust_cv.py`, AIC2026 alone, global rank loss on the split, 60 epochs × 20k pairs,
+same 7 folds; `58a4d100` trainer): certified convex monotone **T 0.9527**, convex monotone max pairs M 0.9512, signed
+S 0.9566 (within source 0.968 / 0.968 / 0.969). The servable convex monotone class matches monotone boosting.
+**Memorization gap:** T fitted on all of `public_train` scores 0.9743 on it in sample, 0.022 above its out-of-fold
+0.9527 (source-level offsets it can learn but not transfer). Even in sample this class does not reach 0.99.
+
 The last two rows are the measured information ceiling of every full-reference measurement available here (our 844
 inputs plus 75 published metrics, DVIFM excluded because its constants were trained on AIC2026): **0.968, 0.022
 below the target**, and the two label reconstructions agree with each other only at 0.9835.
+
+**E21 cells that also fit `public_train`** (`aic_arms.sh`; `byc_cells.py --aic-weight W`): every E21 cell adds an
+AIC2026 group (global rank loss over the split, research replay) without one of the 7 source folds and predicts that
+fold; seeds 0–2 cover every fold (`aicscore` pools the held-out predictions; a fold held out by two cells takes their
+mean). E21 Δ is against `base-c` as everywhere in this record; mixture test as above (1,152 steps per cell).
+
+| Arm | Class | AIC weight | E21 Δ (SE) | KADID / TID / KonFiG / CID22-A | AIC `public_train` OOF | Mixture inversions / cell (max rise) |
+|---|---|---|---|---|---|---|
+| Tghpm (no AIC leg) | monotone in damage inputs, descriptor sign-free | — | −0.0101 (0.0024) | −0.007 / −0.024 / −0.018 / +0.007 | — | 2–7 (+7.1) |
+| **Tga** | same | 32 | **−0.0089 (0.0038)** | −0.012 / −0.023 / −0.011 / +0.010 | **0.932** (within source 0.958) | **1–4 (+4.1)**, dithering only |
 
 **42-source pool (`JND_curve` overlay; the first phase).**
 
@@ -1052,6 +1068,15 @@ Less than the pixel share because the planner gates v2 per scale (`v2_scales`) b
 a profile of the scale-1+ bake at 2048² still spends 35% of samples in the basic SSIM blurs (`fused_vblur_ssim`,
 `fused_blur_h_ssim`, `box_blur_v_copy`) and 10% in `memmove`, at full resolution. A per-scale basic gate is the next
 engine change if the E21 arms show scale 0 can go. Wall time was not measured (the box was running training).
+
+A first attempt (`ComputeSet::v1_scales` from the declared ids; the streaming walk skips a scale with no v1-era read
+and no v2-era work) is bit-identical on every requested slot in its own test, at the default revision and at Rev5,
+and passes all 454 library tests. With all features on it fails 6 tests, all for one reason: the scalar walk skips
+the dead scale while the attribution, session and refinement walks still compute it, so their full feature vectors
+(unread slots included) disagree; one refinement golden also moves on a read slot (f488, local 1.0e-2 vs full 2.1e-5).
+Profile plans needed every v1 scale kept (a profile's linear tail reads the v1 prefix undeclared). Not landed: every
+walk must honour the skip first. Patch (261 lines, SHA-256 `0e3195eb…`):
+`/mnt/v/output/zensim/byconstruction-2026-10-22/aic2026train/v1_scale_skip_attempt_2026-10-23.patch` on dev.
 
 ## Summary (all arms, E21 screen, seeds 0–2, Δ vs `base-c`)
 
