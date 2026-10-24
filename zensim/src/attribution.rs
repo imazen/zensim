@@ -1257,6 +1257,33 @@ impl BinAccum {
         self.add_scale_plane(PlaneRef::F32(plane), sw, sh, factor);
     }
 
+    /// [`Self::add_scale_plane_f32`] under the research paint mode
+    /// ([`crate::map_paint`]): at `bin == 1` with a source-resolution guide,
+    /// `PaintMode::Guided` splits each coarse pixel over its footprint in
+    /// proportion to the guide; otherwise the nearest-neighbour fold.
+    #[cfg(feature = "custom-profiles")]
+    pub(crate) fn add_scale_plane_painted_f32(
+        &mut self,
+        plane: &[f32],
+        sw: usize,
+        sh: usize,
+        scale: usize,
+        paint: crate::map_paint::PaintMode,
+        guide0: Option<&[f64]>,
+    ) {
+        if scale > 0
+            && self.bin == 1
+            && paint == crate::map_paint::PaintMode::Guided
+            && let Some(g) = guide0.filter(|g| g.len() == self.width * self.height)
+        {
+            let full =
+                crate::map_paint::paint_guided(plane, sw, sh, scale, g, self.width, self.height);
+            self.add_scale_plane(PlaneRef::F32(&full), self.width, self.height, 1);
+            return;
+        }
+        self.add_scale_plane(PlaneRef::F32(plane), sw, sh, 1usize << scale);
+    }
+
     fn into_result(self) -> AttributionResult {
         let mut lattice = self.lattice;
         for l in &mut lattice {
@@ -2671,6 +2698,7 @@ mod tests {
                             8,
                             None,
                             None,
+                            crate::map_paint::MapPaint::default(),
                         )
                         .unwrap();
                         bins.into_result()
@@ -6354,6 +6382,7 @@ impl crate::metric::Zensim {
             1,
             None,
             None,
+            crate::map_paint::MapPaint::default(),
         )
     }
 
@@ -6371,6 +6400,7 @@ impl crate::metric::Zensim {
         moment_bin: usize,
         retained: Option<BasicMapRetention<'_>>,
         map_scratch: Option<&mut BasicMapScratch>,
+        paint: crate::map_paint::MapPaint,
     ) -> Result<(crate::metric::ZensimResult, f64, f64), ZensimError> {
         const FPC: usize = FEATURES_PER_CHANNEL_BASIC;
         let params = self.profile().params();
@@ -6443,6 +6473,10 @@ impl crate::metric::Zensim {
             win_plane.resize(comp_pw * comp_h, 0.0);
         }
 
+        // Source-resolution difference guide for research guided painting,
+        // filled at scale 0 (`crate::map_paint`).
+        let mut guide0_cell: Option<Vec<f64>> = None;
+        let guide0 = &mut guide0_cell;
         let mut on_scale = |scale: usize,
                             stats: &crate::metric::ScaleStats,
                             src_planes: [&[f32]; 3],
@@ -6604,21 +6638,38 @@ impl crate::metric::Zensim {
                     }
                 }
                 AttrSinkF32::Bins(accum) => {
-                    crate::blur::box_spread_merge_f32(
+                    // The research window/paint modes (`crate::map_paint`);
+                    // the defaults are the uniform spread and fold above.
+                    let (window_mode, paint_mode) = (paint.window, paint.paint);
+                    crate::map_paint::merge_window(
+                        window_mode,
                         &mut win_plane[..n],
                         &mut id_plane[..n],
                         sw,
                         sh,
                         config.blur_radius,
+                        || crate::map_paint::difference_guide(src_planes, dst_planes, n),
                         spread_tmp,
                         spread_out,
                         config.allow_multithreading && n >= crate::blur::SPREAD_PARALLEL_MIN_N,
                     );
+                    if scale == 0 && paint_mode == crate::map_paint::PaintMode::Guided {
+                        *guide0 = Some(crate::map_paint::difference_guide(
+                            src_planes, dst_planes, n,
+                        ));
+                    }
                     if let Some(geometry) = &precomputed.sampling_geometry {
                         let projected = geometry.project(&id_plane[..n], scale);
                         accum.add_scale_plane_f32(&projected, width, height, 1);
                     } else {
-                        accum.add_scale_plane_f32(&id_plane[..n], sw, sh, 1usize << scale);
+                        accum.add_scale_plane_painted_f32(
+                            &id_plane[..n],
+                            sw,
+                            sh,
+                            scale,
+                            paint_mode,
+                            guide0.as_deref(),
+                        );
                     }
                 }
             }
@@ -7267,6 +7318,7 @@ impl crate::metric::Zensim {
             session,
             bin,
             None,
+            crate::map_paint::MapPaint::default(),
         )?;
         Ok((result, v2res, attribution))
     }
@@ -7285,6 +7337,7 @@ impl crate::metric::Zensim {
         session: &mut Fused944Session,
         bin: usize,
         revision: Option<crate::feature_defs::FormulaRevision>,
+        paint: crate::map_paint::MapPaint,
     ) -> Result<(crate::ZensimResult, AttributionResult), ZensimError> {
         let width = distorted.width();
         let height = distorted.height();
@@ -7318,6 +7371,7 @@ impl crate::metric::Zensim {
                     .map(|_| BasicMapRetention::Basic(&session.basic))
             },
             Some(&mut session.basic_map),
+            paint,
         )?;
         let block = |start: usize, end: usize| -> Option<&[f64]> {
             (s.len() > start).then(|| &s[start..s.len().min(end)])
@@ -7335,6 +7389,7 @@ impl crate::metric::Zensim {
                 &mut session.pass_b,
                 &mut accum,
                 precomputed.sampling_geometry.as_ref(),
+                paint,
             );
         }
         Ok((result, accum.into_result_reusing(&mut session.bin_scratch)))

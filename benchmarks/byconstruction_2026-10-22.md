@@ -1392,6 +1392,40 @@ the strictly monotone frontier (M64) reads neither it nor the hpm ringing. Servi
 like palette's, five running sums per channel and scale fused into the walk, closed-form map derivatives) waits for a
 model that needs it.
 
+### Serving the top candidate: formula revision 6 (2026-10-24)
+
+Owner, 2026-10-24: "I really want to get the current top candidate code optimized and formalized to test in the new
+zenmetrics workbench." The candidate (Tga) read two research-only inputs: the `hpm` ringing form, a per-process
+`ZENSIM_RING_FORM` arm, and the `byc_globaff` descriptor, a sidecar zensim could not compute. Both are now served.
+
+- **Formula revision 6** = revision 5 with the high-pass ringing form, selected by the bake's declared revision
+  (`zentrain.formula_revision = 6`). B (revision 5) and a revision-6 bake serve in one process and in wasm, where no
+  environment exists. The registry carries the change as the per-signal era `ringhpm` on the 12 ringing slots
+  (`FormulaRevision::Rev6`, `#[non_exhaustive]`, so the enum change is additive).
+- **`globaff` family**, f1867..1890 (after the research palette block), computed at revision 6 only. The streaming walk
+  adds each emitted strip's rows of every channel and scale into five f64 sums per cell (16 fixed lanes, column mod 16,
+  one fixed pairwise reduce; `zensim/src/globaff.rs`), so the result does not depend on SIMD tier, strip tiling or
+  thread count. The scale-zero chroma rows stay in the rolling planes for it; no kernel runs on them. A revision-6
+  bake's plan derives at its own revision, so the read set reaching f1890 does not switch on the layout-only blocks or
+  the scale-zero chroma kernels.
+- Checks: the walk's descriptor equals a two-pass f64 reference over the walk's own planes at 64², 97×71 and 203×300;
+  revision 6 against revision 5 on the same read set moves only the 12 ringing slots; identity gives exact zeros;
+  plans below revision 6 refuse the family. `cargo clippy --workspace --all-targets --all-features` is clean.
+- **Served against training (pixel route vs table route).** The candidate bake, stamped revision 6
+  (`bake_stamp_revision`), scored through `score_pair_with_bake --bake-post raw` with no ring-form environment,
+  reproduces its training-route predictions (`byc_predict` on the research tables) on all 3,920 AIC2026 public_train
+  pairs: max |Δ| 7.5e-6, p99 5.0e-7 (scores on a 0–100 scale). A Tga E21 cell reproduces its stored table-route
+  mixture scores on all 1,344 images: max |Δ| 7.0e-6 (those scores are rounded to 1e-6). The served descriptor
+  therefore matches the sidecar to well below anything a score can resolve.
+- Stamped bakes (private: trained on AIC2026 public_train labels): `~/tmp/byc/parity/tga_full_rev6.bin` on dev, SHA-256
+  `5ece9e45…`; the source bake is `aic2026train/full/Tga/refit/last.bin` (`2664b4c7…`).
+
+**M64a** (`mono:thr:mp64` on fx1 with the AIC2026 TRAIN leg at weight 32): E21 Δ **−0.0222** (SE 0.0032; KADID
+−0.013, TID2013 −0.039, KonFiG −0.042, CID22-A +0.006), AIC2026 public_train out of fold 0.929 (within source 0.952),
+standard mixture 2–12 inversions per cell (max +4.5), global-edit mixture **0** in all 12 cells. The AIC leg costs the
+max-pair class 0.009 on E21 (M64 −0.0131) for no AIC gain over Tga (0.932). Tga stays the candidate by the committed
+rule; M64a keeps M64's strict global-edit monotonicity.
+
 ### DVIFM 0.3 on the E21 sets and the mixture test (2026-10-23)
 
 Owner request: "eval dvifm 0.3 on kadid and other distortion//corrputions". Scorer: the frozen runtime of the

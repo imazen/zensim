@@ -87,6 +87,8 @@ verify-all = ["verify-avif", "verify-jxl", "verify-webp"]
 # `verify_bitstream_decode` are guaranteed to build the SAME decoders.
 zen-decode = ["verify-all", "dep:serde_json", "dep:sha2", "zenpixels-convert/cms-moxcms"]
 gmsbank-peer = ["zen-decode", "dep:gmsd"]
+# map_dump's DVIFM 0.3 judge (the sibling dvifmish checkout; research only).
+dvifm-judge = ["zen-decode", "dep:dvifmish"]
 
 # Test-only: the fixture ENCODERS for `tests/zen_decode_formats.rs`. The gates
 # synthesise their own AVIF / JXL / XYB-JPEG / WebP / PNG fixtures rather than
@@ -188,6 +190,7 @@ zenpredict = { git = "https://github.com/imazen/zenanalyze", rev = "f0903489300a
 # Match the root metadata-splicing owner used by bake_stamp_revision.
 zenpredict-bake = { git = "https://github.com/imazen/zenanalyze", rev = "f0903489300aea240ffae2e3f1359f8f2b9a0ba4" }
 csv = "1"
+dvifmish = { path = "../../../dvifmish", optional = true }
 image = "0.25"
 rayon = "1.10"
 
@@ -293,6 +296,11 @@ required-features = ["training", "zen-decode"]
 # By-construction exploration: global affine-change descriptor sidecar (research only).
 [[example]]
 name = "byc_globaff"
+required-features = ["zen-decode"]
+
+# By-construction exploration: candidate/legacy/judge spatial maps for the map-quality study.
+[[example]]
+name = "map_dump"
 required-features = ["zen-decode"]
 
 [[example]]

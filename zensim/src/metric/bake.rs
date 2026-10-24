@@ -37,6 +37,10 @@ pub struct BakeScorer<'a> {
     parallel: bool,
     #[cfg(feature = "feature-regime-v2")]
     finite_moments: bool,
+    /// Research map painting for the attribution map; `None` reads the
+    /// process selection (`crate::map_paint::MapPaint::from_env`).
+    #[cfg(feature = "custom-profiles")]
+    map_paint: Option<crate::map_paint::MapPaint>,
     members: Vec<BakeScorer<'a>>,
     weights: Option<Vec<f64>>,
     #[cfg(feature = "corruption-head")]
@@ -72,6 +76,24 @@ impl<'a> BakeScorer<'a> {
     pub fn with_parallel(mut self, parallel: bool) -> Self {
         self.parallel = parallel;
         self
+    }
+
+    /// Research: how the attribution map paints windowed signals and coarse
+    /// scales — `window` is `box` (default), `center` or `guided`; `paint` is
+    /// `nearest` (default) or `guided`. Scores are unchanged.
+    /// Exploration record: `benchmarks/byconstruction_2026-10-22.md` ("Maps").
+    ///
+    /// # Errors
+    /// An unknown mode name.
+    #[doc(hidden)]
+    #[cfg(feature = "custom-profiles")]
+    pub fn with_map_paint(mut self, window: &str, paint: &str) -> Result<Self, ZensimError> {
+        self.map_paint = Some(crate::map_paint::MapPaint::parse(window, paint).ok_or(
+            ZensimError::ModelLoadFailed {
+                reason: "map paint modes are box|center|guided and nearest|guided",
+            },
+        )?);
+        Ok(self)
     }
 
     /// Opt into finite L2/L4/L8 moment removal for rectangle refinement.
@@ -246,6 +268,8 @@ impl<'a> BakeScorer<'a> {
             parallel: true,
             #[cfg(feature = "feature-regime-v2")]
             finite_moments: false,
+            #[cfg(feature = "custom-profiles")]
+            map_paint: None,
             members: Vec::new(),
             weights: None,
             #[cfg(feature = "corruption-head")]
@@ -830,7 +854,7 @@ impl<'a> BakeScorer<'a> {
         // Raw/older wide walks retain the process-mix guard. Validated Rev5
         // plans carry their revision through conversion, blur, pooling and
         // finalization, so they can serve alongside older named models.
-        if revision != crate::feature_defs::FormulaRevision::Rev5 {
+        if revision < crate::feature_defs::FormulaRevision::Rev5 {
             crate::ssim_form::refuse_rev4_mix(revision)?;
         }
         // Basic/peak plans carry their arithmetic explicitly through both
@@ -1457,6 +1481,8 @@ impl<'a> BakeScorer<'a> {
                 session,
                 bin,
                 Some(plan.compute.formula_revision),
+                self.map_paint
+                    .unwrap_or_else(crate::map_paint::MapPaint::from_env),
             )?;
         #[cfg(steerfix_instrument)]
         mapperf_audit::stage(&mut mapperf_stage, "density");
@@ -4594,9 +4620,9 @@ mod revision_contract_tests {
             crate::feature_layout::formula_revision(&model).expect("undeclared resolves"),
             crate::ssim_form::SHIPPED_REVISION
         );
-        // `4` is registered since featcanon (Rev4, the `tiercanon` era) and
-        // `5` since rev5 (the `localwin` era); the first unregistered value
-        // is `6`.
+        // `4` is registered since featcanon (Rev4, the `tiercanon` era), `5`
+        // since rev5 (the `localwin` era) and `6` since the by-construction
+        // `ringhpm` era; the first unregistered value is `7`.
         let bytes = bake_declaring(Some("4"), 5);
         let model = zenpredict::Model::from_bytes(&bytes).expect("parse bake");
         assert_eq!(
@@ -4610,6 +4636,12 @@ mod revision_contract_tests {
             crate::feature_defs::FormulaRevision::Rev5
         );
         let bytes = bake_declaring(Some("6"), 5);
+        let model = zenpredict::Model::from_bytes(&bytes).expect("parse bake");
+        assert_eq!(
+            crate::feature_layout::formula_revision(&model).expect("6 resolves"),
+            crate::feature_defs::FormulaRevision::Rev6
+        );
+        let bytes = bake_declaring(Some("7"), 5);
         let model = zenpredict::Model::from_bytes(&bytes).expect("parse bake");
         assert!(
             crate::feature_layout::formula_revision(&model).is_err(),

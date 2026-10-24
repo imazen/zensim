@@ -4130,7 +4130,9 @@ pub(crate) fn check_profile_route(
     config: &ZensimConfig,
 ) -> Result<(), ZensimError> {
     if params.mlp_bytes.is_some()
-        && config.formula_revision == Some(crate::feature_defs::FormulaRevision::Rev5)
+        && config
+            .formula_revision
+            .is_some_and(|r| r >= crate::feature_defs::FormulaRevision::Rev5)
         && crate::fold_engine::is_fold_backable(config)
     {
         return Ok(());
@@ -4144,7 +4146,7 @@ pub(crate) fn config_from_params(params: &ProfileParams, parallel: bool) -> Zens
             .mlp_bytes
             .and_then(|load| cached_profile_model(load()).ok())
             .and_then(|model| crate::feature_layout::formula_revision(&model).ok())
-            .filter(|revision| *revision == crate::feature_defs::FormulaRevision::Rev5),
+            .filter(|revision| *revision >= crate::feature_defs::FormulaRevision::Rev5),
         local_only: false,
         omit_edges: false,
         attribution_channels: None,

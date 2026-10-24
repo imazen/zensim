@@ -11,7 +11,7 @@ pub(super) struct RetainedCoreWork {
 }
 
 pub(super) fn retained_core_admits(local: &ComputeSet) -> bool {
-    local.formula_revision == FormulaRevision::Rev5
+    local.formula_revision >= FormulaRevision::Rev5
         && matches!(
             crate::featcanon::mode(local.formula_revision),
             crate::featcanon::Mode::Canon64

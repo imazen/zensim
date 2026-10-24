@@ -3292,6 +3292,7 @@ pub(crate) mod tests {
                     mapdev: false,
                     z1max: false,
                     gmsnative: false,
+                    globaff: false,
                 };
                 let cs = ComputeSet::from_toggles(t);
                 // --- the legacy derivation, verbatim ---

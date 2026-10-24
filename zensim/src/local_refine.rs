@@ -1412,8 +1412,10 @@ impl<'a> Query<'a> {
         // `RingForm::HighPassMu` reads the local-mean planes, which a change
         // moves over the blur radius, not this ±1 dilation.
         assert!(
-            feature_v2::active_ring_form() == feature_v2::RingForm::Raw,
-            "local refinement supports ZENSIM_RING_FORM=raw only"
+            feature_v2::active_ring_form() == feature_v2::RingForm::Raw
+                && !self.snap.revision.ring_high_pass(),
+            "local refinement supports the raw ringing form only \
+             (not revision 6 or ZENSIM_RING_FORM=hpm)"
         );
         for y in gy0..gy1 {
             let ly = y - gy0;

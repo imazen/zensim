@@ -93,10 +93,17 @@ fn rev5_unsupported(
         return None;
     }
     let ns = crate::NUM_SCALES;
-    let supported = crate::feature_defs::family_slots(ComputeToken::Basic, ns)
+    let mut supported = crate::feature_defs::family_slots(ComputeToken::Basic, ns)
         .union(&crate::feature_defs::family_slots(ComputeToken::Peaks, ns))
-        .union(&crate::feature_defs::family_slots(ComputeToken::V2, ns))
-        .clipped_to(layout_width);
+        .union(&crate::feature_defs::family_slots(ComputeToken::V2, ns));
+    // Revision 6 adds the globaff family to the scope.
+    if revision.computes_globaff() {
+        supported = supported.union(&crate::feature_defs::family_slots(
+            ComputeToken::GlobAff,
+            ns,
+        ));
+    }
+    let supported = supported.clipped_to(layout_width);
     // `a.missing_from(&b)` is b∖a — so this is want∖supported, the
     // requested slots Rev5 does not compute.
     let extra = supported.missing_from(want);
@@ -165,6 +172,20 @@ impl Plan {
     /// general form. [`Plan::derive`] is this with an identity layout, which
     /// is every artifact that exists today.
     pub(crate) fn derive_with_layout(want: &SlotSet, layout: Layout) -> Result<Plan, PlanError> {
+        Plan::derive_with_layout_at(want, layout, crate::ssim_form::active_revision())
+    }
+
+    /// [`Plan::derive_with_layout`] at an explicit formula revision rather
+    /// than the process's: the scope check, and the normalization that drops
+    /// layout-only families, use `revision`. A revision-6 bake's read set
+    /// reaches f1890, so its layout spans every optional block; deriving at
+    /// the process revision would treat those blocks as computed and force the
+    /// scale-zero chroma kernels on.
+    pub(crate) fn derive_with_layout_at(
+        want: &SlotSet,
+        layout: Layout,
+        revision: crate::feature_defs::FormulaRevision,
+    ) -> Result<Plan, PlanError> {
         let ns = crate::NUM_SCALES;
         // COMPUTE is decided in ID space against the layout's WALK width (one
         // past the highest id it carries), never against its emitted width —
@@ -175,9 +196,7 @@ impl Plan {
         // rev5 scope (spec §1): the request's slots must live inside
         // `basic + peaks + v2` — the families Rev5 computes. Anything else
         // is a loud plan-time error, never a silent lower-revision value.
-        if let Some(extra) =
-            rev5_unsupported(&want, layout_width, crate::ssim_form::active_revision())
-        {
+        if let Some(extra) = rev5_unsupported(&want, layout_width, revision) {
             return Err(PlanError::UnsupportedAtRev5 { extra });
         }
         let touches = |t: ComputeToken| -> bool {
@@ -226,6 +245,12 @@ impl Plan {
         let mapdev = touches(ComputeToken::Mapdev);
         let z1max = touches(ComputeToken::Z1max);
         let gmsnative = touches(ComputeToken::Gmsnative);
+        // `globaff` reads every channel's planes at every scale but runs no
+        // kernel: its slots are kept out of the channel and scale derivations
+        // below (`kernel_want`), so asking for it never turns on X/B kernels.
+        let globaff = touches(ComputeToken::GlobAff);
+        let kernel_want =
+            crate::feature_defs::family_slots(ComputeToken::GlobAff, ns).missing_from(&want);
         // `csfw_on` is `csfw_block && v2_blocks` in the walk, so a CSFW
         // request implies the v2-era pass regardless of what else is asked.
         // The four Rev4 feature-bank families are `rev4_* && v2_blocks` too.
@@ -255,7 +280,7 @@ impl Plan {
             // A slot-set request carries no bake, so it takes the process's
             // revision. A BAKE-driven plan takes the bake's own — see
             // `Plan::for_bake`.
-            formula_revision: crate::ssim_form::active_revision(),
+            formula_revision: revision,
             v1_basic: touches(ComputeToken::Basic) || v1_pools != V1PoolsMode::Off,
             full_res_xb: true,
             coarse_y_only_scales: 0,
@@ -328,6 +353,7 @@ impl Plan {
             mapdev,
             z1max,
             gmsnative,
+            globaff,
             free_extras,
         };
         let mut requested = requested;
@@ -335,7 +361,7 @@ impl Plan {
             requested.v2_scales = ComputeSet::ALL_SCALES;
         }
         requested.full_res_xb = !requested.allows_full_res_y_subset()
-            || want
+            || kernel_want
                 .iter_slots()
                 .any(|id| ComputeSet::is_full_res_xb(id, ns));
         // v2-bearing requests over basic/peaks/v2 only (channel-local families): skip X/B work at every scale
@@ -344,7 +370,7 @@ impl Plan {
         let v2_start = ns * 3 * crate::metric::FEATURES_PER_CHANNEL_EXTENDED
             + ns * 3 * crate::metric::FEATURES_PER_CHANNEL_IW;
         let v2_end = v2_start + ns * 3 * crate::feature_v2::FEATURES_PER_CHANNEL_V2_TOTAL;
-        let basic_peaks_v2_only = want
+        let basic_peaks_v2_only = kernel_want
             .iter_slots()
             .all(|id| id < peaks_end || (v2_start..v2_end).contains(&id));
         // With the v2 block running over a request that reads nothing past f719, every class-C slot it touches is the v2
@@ -356,7 +382,7 @@ impl Plan {
         }
         if requested.v2_blocks && basic_peaks_v2_only && requested.chroma_local_families() {
             let mut chroma = 0u8;
-            for id in want.iter_slots() {
+            for id in kernel_want.iter_slots() {
                 if let Some(d) = crate::feature_defs::def_at(id, ns)
                     && matches!(
                         d.channel,
@@ -454,6 +480,9 @@ impl Plan {
         compute.v1_scales = requested.v1_scales;
         compute.v2_scales = requested.v2_scales;
         compute.omit_pjnd_fragility = requested.omit_pjnd_fragility;
+        // The globaff LAYOUT flag follows the width; the computation follows
+        // the request (it is cheap, but a wide layout must not imply it).
+        compute.globaff = requested.globaff;
         compute.full_res_xb = requested.full_res_xb || !compute.allows_full_res_y_subset();
         compute.sampling = requested.sampling;
         compute.coarse_y_only_scales = if (!compute.v2_blocks || compute.chroma_local_families())
@@ -501,7 +530,23 @@ impl Plan {
                 layout_width,
             });
         }
-        let mut plan = Plan::derive_with_layout(&want, layout)?;
+        let globaff = want.intersect(&crate::feature_defs::family_slots(
+            ComputeToken::GlobAff,
+            crate::NUM_SCALES,
+        ));
+        if !globaff.is_empty() && !revision.computes_globaff() {
+            return Err(PlanError::Uncomputable {
+                missing: globaff,
+                layout_width,
+            });
+        }
+        // Revision 6 derives at its own revision (see `derive_with_layout_at`);
+        // earlier bakes keep the process-revision derivation they always had.
+        let mut plan = if revision.computes_globaff() {
+            Plan::derive_with_layout_at(&want, layout, revision)?
+        } else {
+            Plan::derive_with_layout(&want, layout)?
+        };
         plan.compute.formula_revision = revision;
         // The derive checked the PROCESS revision; the bake's own
         // declaration is what this plan computes, so the rev5 scope check
@@ -590,6 +635,7 @@ impl Plan {
             mapdev: false,
             z1max: false,
             gmsnative: false,
+            globaff: false,
             free_extras: V1FreeExtras::Off,
         };
         Plan::normalized(compute, Layout::identity(layout_width))
@@ -653,6 +699,7 @@ impl Plan {
             mapdev: layout.mapdev,
             z1max: layout.z1max,
             gmsnative: layout.gmsnative,
+            globaff: layout.globaff,
             // A sub-toggle that REFINES a block cannot outlive it: the walk
             // asserts `append2_dst_activity => append2_block`. `everything`
             // (the fallback compute set for a wide bake) turns it on
@@ -788,6 +835,7 @@ impl Plan {
             mapdev: a.mapdev || b.mapdev,
             z1max: a.z1max || b.z1max,
             gmsnative: a.gmsnative || b.gmsnative,
+            globaff: a.globaff || b.globaff,
             free_extras: free_union(a.free_extras, b.free_extras),
         };
         let _ = ns;
@@ -815,6 +863,7 @@ struct LayoutBlocks {
     mapdev: bool,
     z1max: bool,
     gmsnative: bool,
+    globaff: bool,
 }
 
 impl LayoutBlocks {
@@ -830,6 +879,7 @@ impl LayoutBlocks {
         let mapdev = gmsbank && width > base_of(ComputeToken::Mapdev, ns);
         let z1max = mapdev && width > base_of(ComputeToken::Z1max, ns);
         let gmsnative = z1max && width > base_of(ComputeToken::Gmsnative, ns);
+        let globaff = gmsnative && width > base_of(ComputeToken::GlobAff, ns);
         Self {
             append,
             append2,
@@ -842,6 +892,7 @@ impl LayoutBlocks {
             mapdev,
             z1max,
             gmsnative,
+            globaff,
         }
     }
 }
@@ -1792,7 +1843,8 @@ pub(crate) mod servability_census {
             FormulaRevision::Rev2
             | FormulaRevision::Rev3
             | FormulaRevision::Rev4
-            | FormulaRevision::Rev5 => FormulaRevision::Rev1,
+            | FormulaRevision::Rev5
+            | FormulaRevision::Rev6 => FormulaRevision::Rev1,
         };
         assert!(
             !a.revisions_agree(&b),
@@ -1870,11 +1922,11 @@ pub(crate) mod servability_census {
                 let mut scorer = BakeScorer::new(&model).unwrap();
                 let served = scorer.compute(&rs, &ds, None).unwrap();
                 let full = if plan.compute.formula_revision
-                    == crate::feature_defs::FormulaRevision::Rev5
+                    >= crate::feature_defs::FormulaRevision::Rev5
                 {
                     let want = SlotSet::from_slots((0..228).chain(372..720));
                     let mut baseline = Plan::derive(&want, 720).unwrap();
-                    baseline.compute.formula_revision = crate::feature_defs::FormulaRevision::Rev5;
+                    baseline.compute.formula_revision = plan.compute.formula_revision;
                     baseline.compute.rev5_scope();
                     crate::feature_v2::compute_folded720_streaming_impl(
                         &rs,

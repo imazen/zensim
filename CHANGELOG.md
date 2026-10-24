@@ -12,6 +12,11 @@
 
 None.
 
+### Added
+
+- Formula revision 6 (research, branch `explore/byconstruction`): revision 5 with the corrected ringing measurement (`ringhpm`, imazen/zensim#72) selected by a bake's declared revision instead of `ZENSIM_RING_FORM`, plus the `globaff` family (f1867..1890: per scale and XYB channel, the share of the mean squared error a global affine fit explains, and that error), accumulated over the streaming walk's strips with fixed 16-lane f64 sums. Revision 5 and every earlier revision keep their bits ([record](benchmarks/byconstruction_2026-10-22.md)).
+- Research map-painting modes for the candidate attribution map (`ZENSIM_MAP_WINDOW=box|center|guided`, `ZENSIM_MAP_PAINT=nearest|guided`); the defaults keep today's map bits.
+
 ### Changed
 
 - Declared-ID plans skip every scale nothing reads (no v1-era read, no v2-era work): all walks honour it through `ComputeSet::scale_dead`, read slots stay bit-identical, and profile plans keep every v1 scale for their linear tails. A bake with no scale-0 read costs 41% (512²) and 46% (2048²) fewer instructions than B's read set at Rev5; B is unchanged ([record](benchmarks/byconstruction_2026-10-22.md), branch `explore/byconstruction`).

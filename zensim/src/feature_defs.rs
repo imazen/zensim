@@ -327,6 +327,8 @@ pub(crate) enum KernelId {
     RestoreMaps,
     /// Research palette signature and population transport.
     Palette,
+    /// The walk's per-strip global-affine moment sums (`crate::globaff`).
+    GlobAff,
 }
 
 impl KernelId {
@@ -346,6 +348,7 @@ impl KernelId {
             KernelId::Gridblk => "gridblk",
             KernelId::RestoreMaps => "restore_maps",
             KernelId::Palette => "palette",
+            KernelId::GlobAff => "globaff",
         }
     }
 }
@@ -480,6 +483,22 @@ pub enum FormulaRevision {
     /// model is Rev4's: `ZENSIM_FORMULA_REV=5` pins it and
     /// `ssim_form::refuse_rev4_mix` refuses every cross-boundary mix.
     Rev5,
+    /// Revision 5 with the corrected ringing measurement (the `ringhpm` era,
+    /// imazen/zensim#72, `benchmarks/byconstruction_2026-10-22.md`).
+    ///
+    /// The twelve v2 `ringing` slots measure the error after removing each
+    /// image's SSIM local mean, `(src − mu1) − (dst − mu2)`, instead of
+    /// `src − dst` (`feature_v2::RingForm::HighPassMu`), so a global offset,
+    /// contrast or saturation change no longer reads as ringing away from
+    /// edges. Every other slot keeps Rev5's arithmetic bit for bit. It also
+    /// admits the `globaff` family (f1867..1890): per scale and XYB channel,
+    /// the share of the mean squared error a global least-squares fit
+    /// `dst ≈ a·src + b` explains, and that explained error.
+    ///
+    /// Rev5's scope and process model otherwise apply unchanged:
+    /// `ZENSIM_FORMULA_REV=6` pins it for research, and a bake declaring
+    /// revision 6 selects it per call.
+    Rev6,
 }
 
 impl FormulaRevision {
@@ -525,7 +544,32 @@ impl FormulaRevision {
                 "c3negfold",
                 "localwin",
             ],
+            Self::Rev6 => &[
+                "v1ssimcap",
+                "freecomp",
+                "v1hfgain",
+                "v1detroot",
+                "scorepow",
+                "v1ssimstable",
+                "v2ssimstable",
+                "v1extfused",
+                "tiercanon",
+                "c3negfold",
+                "localwin",
+                "ringhpm",
+            ],
         }
+    }
+
+    /// Whether the v2 `ringing` family measures the local-mean-removed error
+    /// ([`Self::Rev6`]'s `ringhpm` era) rather than the raw pixel error.
+    pub(crate) const fn ring_high_pass(self) -> bool {
+        matches!(self, Self::Rev6)
+    }
+
+    /// Whether the `globaff` family (f1867..1890) is computed at this revision.
+    pub(crate) const fn computes_globaff(self) -> bool {
+        matches!(self, Self::Rev6)
     }
 
     /// Whether `GLOBAL_CGAIN`/`GLOBAL_CLOSS` are formed from the PAIRED
@@ -554,7 +598,10 @@ impl FormulaRevision {
     /// remaining free-vs-append gap into a MEASUREMENT of the append route's
     /// own error (plan R4) rather than an unattributed disagreement.
     pub(crate) const fn paired_global_contrast(self) -> bool {
-        matches!(self, Self::Rev2 | Self::Rev3 | Self::Rev4 | Self::Rev5)
+        matches!(
+            self,
+            Self::Rev2 | Self::Rev3 | Self::Rev4 | Self::Rev5 | Self::Rev6
+        )
     }
 
     /// Every slot id this revision moves, derived from the signal table's own
@@ -764,6 +811,34 @@ const REV_C3NEGFOLD: Revision = Revision {
            phantom C3 top-bin saturation measured in REVIEW_PARTB \
            2026-09-25; record in benchmarks/rev4canon_WORKLOG.md.",
 };
+
+/// The defect behind the `ringhpm` era: the ringing error is the raw pixel
+/// error, so a global edit reads as ringing.
+const DEFECT_RING_GLOBAL: Defect = Defect {
+    id: "RINGGLOBAL",
+    note: "v2 `ringing` saturates the raw error `|src − dst|`, which a global \
+           offset, contrast or saturation change makes uniformly large away \
+           from edges. MEASURED on 24 references (feature_probe.py, \
+           benchmarks/byconstruction_2026-10-22.md): a +8 luma shift was \
+           ringing's largest response, 2.4x a visible blur sigma 1.2 \
+           (median 0.334 vs 0.139). imazen/zensim#72.",
+};
+
+/// The `ringhpm` era: ringing measures the error after removing each image's
+/// SSIM local mean ([`FormulaRevision::Rev6`]).
+const REV_RINGHPM: Revision = Revision {
+    era: "ringhpm",
+    commit: "-",
+    status: RevisionStatus::Proposed,
+    note: "ringing's per-pixel error becomes `(src − mu1) − (dst − mu2)` with \
+           the SSIM local means the dense kernel already holds; the three \
+           saturations are unchanged. Moves only the 12 ringing slots \
+           (+8 shift median 0.334 -> 0.017, blur unchanged 0.139 -> 0.143). \
+           Rev5 keeps the raw form byte for byte; `ZENSIM_RING_FORM=hpm` is \
+           the per-process research arm of the same arithmetic. Record: \
+           benchmarks/byconstruction_2026-10-22.md.",
+};
+const RINGING_REVS: &[Revision] = &[REV_RINGHPM];
 
 /// The tailhist `Bin` signals carry `rev4bank` plus the C3 binning fix;
 /// `Max` signals keep `REV4BANK` alone (exact maxima are unaffected).
@@ -1966,7 +2041,7 @@ pub(crate) static V2: [SignalDef; 29] = {
             Tranche::None,
             None,
         ),
-        v2sig(
+        v2sig_rev(
             26,
             "ringing",
             Mean,
@@ -1974,7 +2049,8 @@ pub(crate) static V2: [SignalDef; 29] = {
             HigherIsWorse,
             V2Gradient,
             Tranche::None,
-            None,
+            Some(DEFECT_RING_GLOBAL),
+            RINGING_REVS,
         ),
         v2sig(
             27,
@@ -2792,6 +2868,43 @@ pub(crate) static PALETTE_SIGNALS: [SignalDef; 42] = [
     palette_signal(41, "n8_largest_shift", Direction::HigherIsWorse),
 ];
 
+/// The `globaff` introduction (formula revision 6): an append-only family.
+const GLOBAFF_REVISION: &[Revision] = &[Revision {
+    era: "globaff",
+    commit: "-",
+    status: RevisionStatus::Proposed,
+    note: "append-only introduction of the global affine-change descriptor, \
+           f1867..1890, computed at formula revision 6 only: per scale and XYB \
+           channel the share of the mean squared error a least-squares fit \
+           dst = a*src + b explains, and that explained error, from five f64 \
+           sums per cell accumulated over the walk's strips (`crate::globaff`). \
+           It replaces the research sidecar zensim-bench/examples/byc_globaff.rs \
+           (two-pass moments) at the same ids. No earlier slot moves.",
+}];
+const fn globaff_signal(block_local: u16, name: &'static str, direction: Direction) -> SignalDef {
+    SignalDef {
+        family: Family::Supported(ComputeToken::GlobAff),
+        block_local,
+        name,
+        statistic: Statistic::Global,
+        cost: CostClass::Cheap,
+        tranche: Tranche::None,
+        placement: Placement::AllCells,
+        form: Form::Difference,
+        direction,
+        kernel: KernelId::GlobAff,
+        deprecated: false,
+        defect: None,
+        revisions: GLOBAFF_REVISION,
+    }
+}
+/// `share` (block-local 0) and `explained` (1) per (scale, channel), in the
+/// sidecar's order `2·(3·scale + channel) + signal`.
+pub(crate) static GLOBAFF_SIGNALS: [SignalDef; crate::globaff::GLOBAFF_PER_CELL] = [
+    globaff_signal(0, "share", Direction::Unsigned),
+    globaff_signal(1, "explained", Direction::HigherIsWorse),
+];
+
 // ============================================================================
 // Layout arithmetic — THE owner
 // ============================================================================
@@ -2912,6 +3025,11 @@ pub(crate) static BLOCKS: &[BlockDef] = &[
         signals: &PALETTE_SIGNALS,
         replication: Replication::Flat,
     },
+    BlockDef {
+        family: Family::Supported(ComputeToken::GlobAff),
+        signals: &GLOBAFF_SIGNALS,
+        replication: Replication::PerChannel,
+    },
 ];
 
 impl BlockDef {
@@ -2979,13 +3097,14 @@ pub(crate) fn block_base(
 ///
 /// Sourced from `benchmarks/feature_sets_registry.json`'s `sets[].layout`
 /// (append-only; 2026-09-19: 372, 720, 924, 944, 956, 986; 2026-09-23: the
-/// Rev4 feature bank's full width 1322) plus C8's width 1502 and the restored-cut families' widths 1562 (mapdev),
+/// Rev4 feature bank's full width 1322) plus C8's width 1502, the by-construction research widths 1891 (globaff)
+/// and 2301 (the gated globaff research set) and the restored-cut families' widths 1562 (mapdev),
 /// `zensim-validate`'s
 /// `every_registered_layout_width_is_a_candidate` holds the two in sync, so
 /// registering a set at a new width fails the build rather than silently
 /// becoming unreproducible.
 pub(crate) const REGISTERED_LAYOUT_WIDTHS: &[usize] = &[
-    372, 720, 924, 944, 956, 986, 1322, 1502, 1562, 1790, 1820, 1825, 1867,
+    372, 720, 924, 944, 956, 986, 1322, 1502, 1562, 1790, 1820, 1825, 1867, 1891, 2301,
 ];
 
 /// Total layout width at `n_scales` with every registered block present.
@@ -3568,7 +3687,12 @@ mod tests {
             1825,
             "legacy width stays frozen"
         );
-        assert_eq!(w, 1867, "full registered width with palette");
+        assert_eq!(
+            block_base(ComputeToken::GlobAff, NS).unwrap().0,
+            1867,
+            "globaff sits after the palette block"
+        );
+        assert_eq!(w, 1891, "full registered width with palette and globaff");
         for id in 0..w {
             let Some(d) = def_at(id, NS) else {
                 assert!((956..986).contains(&id) || (1820..1825).contains(&id));
@@ -3679,7 +3803,8 @@ mod tests {
             );
             assert!(seen.insert(n.clone()), "duplicate slot name {n:?} at {id}");
         }
-        assert_eq!(seen.len(), 1832);
+        // 1832 through the palette, plus globaff's 24 (2 signals × 4 scales × 3 channels).
+        assert_eq!(seen.len(), 1832 + 24);
     }
 
     /// Signal names are unique WITHIN a family (the family prefix is what
@@ -4129,10 +4254,11 @@ mod owner_gates {
             mapdev: false,
             z1max: false,
             gmsnative: false,
+            globaff: false,
             free_extras: V1FreeExtras::Off,
         };
         // One `ComputeSet` per token that turns on EXACTLY that family.
-        let cases: [(T, ComputeSet); 17] = [
+        let cases: [(T, ComputeSet); 18] = [
             (
                 T::Basic,
                 ComputeSet {
@@ -4216,6 +4342,13 @@ mod owner_gates {
                 T::Gmsnative,
                 ComputeSet {
                     gmsnative: true,
+                    ..off
+                },
+            ),
+            (
+                T::GlobAff,
+                ComputeSet {
+                    globaff: true,
                     ..off
                 },
             ),

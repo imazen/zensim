@@ -245,8 +245,13 @@ mod fused;
 /// Unconditional: `contrast_inc` is a v1 basic slot, so it exists on a
 /// `--no-default-features` build too.
 pub(crate) mod hf_gain_form;
+// The `globaff` family's strip moment sums (formula revision 6).
+pub(crate) mod globaff;
+// Research painting modes for the candidate attribution map.
 mod iw_pool;
 mod jnd;
+#[cfg(feature = "custom-profiles")]
+pub(crate) mod map_paint;
 pub mod mapping;
 mod metric;
 // MLP runtime is internal — V0_4+ dispatch is exposed only through

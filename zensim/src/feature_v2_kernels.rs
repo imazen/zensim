@@ -904,6 +904,12 @@ pub struct V2NewFeatureToggles {
     /// scale. Default OFF. Requires `z1max`'s layout.
     #[doc(hidden)]
     pub gmsnative: bool,
+    /// `globaff` f1867..1890 ([`crate::globaff`]): the global affine-change
+    /// descriptor, formula revision 6 only. Default OFF. Requires
+    /// `gmsnative`'s layout; f1820..1866 (reserved and the research palette)
+    /// are emitted as structural zeros before it.
+    #[doc(hidden)]
+    pub globaff: bool,
 }
 
 /// Which of v1's pool slots (`f156..372`) the folded walk emits live.
@@ -1139,6 +1145,7 @@ impl Default for V2NewFeatureToggles {
             mapdev: false,
             z1max: false,
             gmsnative: false,
+            globaff: false,
         }
     }
 }
@@ -1319,6 +1326,9 @@ pub(crate) struct ComputeSet {
     pub z1max: bool,
     /// Restored cut `gmsnative`: C8's native-scale X/B gradient bank runs.
     pub gmsnative: bool,
+    /// The `globaff` strip moment sums run (formula revision 6). Independent
+    /// of the v2 kernels: it reads the planes of every channel at every scale.
+    pub globaff: bool,
     /// The free v2-era slots a v1-only walk emits ([`V1FreeExtras`]). Held
     /// here rather than re-read from the toggles at each site, so
     /// `raw_moments` has ONE derivation.
@@ -1471,6 +1481,7 @@ impl ComputeSet {
             mapdev: t.mapdev && v2_blocks,
             z1max: t.z1max && v2_blocks,
             gmsnative: t.gmsnative && v2_blocks,
+            globaff: t.globaff,
             free_extras: t.free_extras,
         };
         set.rev5_scope();
@@ -1518,6 +1529,9 @@ impl ComputeSet {
         self.mapdev = false;
         self.z1max = false;
         self.gmsnative = false;
+        if !self.formula_revision.computes_globaff() {
+            self.globaff = false;
+        }
         self.free_extras = V1FreeExtras::Off;
     }
 
@@ -1664,6 +1678,9 @@ impl ComputeSet {
         if self.gmsnative {
             p = p.with(T::Gmsnative);
         }
+        if self.globaff {
+            p = p.with(T::GlobAff);
+        }
         if self.raw_moments() {
             p = p.with(T::Moments);
         }
@@ -1776,6 +1793,24 @@ impl ComputeSet {
         if self.gmsnative {
             ranges.push((z1max_end, gmsnative_end));
         }
+        // Registered base (after the reserved slots and the research palette
+        // block), so the range follows the registry rather than a re-typed
+        // offset. Every channel at every scale: the channel masks below are
+        // kernel masks and do not apply to it.
+        let globaff_base = crate::feature_defs::block_base(
+            crate::feature_set_id::ComputeToken::GlobAff,
+            n_scales,
+        )
+        .expect("globaff is a registered block")
+        .0;
+        let globaff_range = if self.globaff {
+            globaff_base..globaff_base + n_scales * 3 * crate::globaff::GLOBAFF_PER_CELL
+        } else {
+            0..0
+        };
+        if self.globaff {
+            ranges.push((globaff_range.start, globaff_range.end));
+        }
         if self.raw_moments() {
             scattered.extend(free_slot_indices(n_scales));
         }
@@ -1786,7 +1821,8 @@ impl ComputeSet {
             .union(&SlotSet::from_slots(scattered))
             .clipped_to(layout_width);
         SlotSet::from_slots(slots.iter_slots().filter(|&id| {
-            (!self.omit_pjnd_fragility
+            globaff_range.contains(&id)
+                || ((!self.omit_pjnd_fragility
                 || !(v1_total..v2_end).contains(&id)
                 || (id - v1_total) % FEATURES_PER_CHANNEL_V2_TOTAL != idx::PJND_FRAGILITY)
                 && (!self.local_only
@@ -1804,7 +1840,7 @@ impl ComputeSet {
                 && !(self.v1_pools == V1PoolsMode::Full
                     && (peaks_end..v1_total).contains(&id)
                     && crate::feature_defs::def_at(id, n_scales)
-                        .is_some_and(|d| self.pools_at(usize::from(d.scale)) != V1PoolsMode::Full))
+                        .is_some_and(|d| self.pools_at(usize::from(d.scale)) != V1PoolsMode::Full)))
         }))
     }
 
@@ -5642,11 +5678,14 @@ fn gradient_block_kernel_at_revision(
     // `bv_act_dst` is ignored without `bandvis`, as in the production match
     // below.
     let mode = crate::featcanon::mode(revision);
-    let hp = active_ring_form() == RingForm::HighPassMu;
+    // Revision 6 owns the high-pass ringing form; `ZENSIM_RING_FORM=hpm` is
+    // the per-process research arm of the same arithmetic at Rev4/Rev5.
+    let hp = revision.ring_high_pass() || active_ring_form() == RingForm::HighPassMu;
     assert!(
         !hp || (matches!(mode, crate::featcanon::Mode::Canon64) && mu.is_some()),
-        "ZENSIM_RING_FORM=hpm is implemented on the canonical gradient kernel \
-         (formula revision 4 or later, default ZENSIM_FEATCANON) with local-mean planes only"
+        "the high-pass ringing form (revision 6 or ZENSIM_RING_FORM=hpm) is implemented on \
+         the canonical gradient kernel (formula revision 4 or later, default ZENSIM_FEATCANON) \
+         with local-mean planes only"
     );
     let (mu1, mu2) = mu.unwrap_or((&[], &[]));
     if mode.active() {

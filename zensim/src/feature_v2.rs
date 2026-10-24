@@ -258,6 +258,15 @@ pub(crate) fn active_ring_form() -> RingForm {
     })
 }
 
+/// The ringing form of the process-revision legacy paths (the diffmap and the
+/// caller-gradient attribution passes, which read
+/// [`crate::ssim_form::active_revision`] rather than a request's revision):
+/// high-pass under `ZENSIM_RING_FORM=hpm` or in a revision-6 process.
+pub(crate) fn process_ring_high_pass() -> bool {
+    active_ring_form() == RingForm::HighPassMu
+        || crate::ssim_form::active_revision().ring_high_pass()
+}
+
 #[cfg(test)]
 mod ring_form_tests {
     use super::*;
@@ -4053,7 +4062,7 @@ pub(crate) fn compute_v2_diffmap_channel_scale(
     // the v2 SSIM signal must read it as such. Hoisted once per call;
     // loop-invariant, so every call site below unswitches on it.
     let direct = crate::ssim_form::active_revision() >= crate::feature_defs::FormulaRevision::Rev3;
-    let ring_hp = active_ring_form() == RingForm::HighPassMu;
+    let ring_hp = process_ring_high_pass();
     let n = width * height;
     assert_eq!(src.len(), n, "src plane length must be width*height");
     assert_eq!(dst.len(), n, "dst plane length must be width*height");
@@ -6725,6 +6734,13 @@ fn validate_wide_revision(toggles: V2NewFeatureToggles) -> Result<(), ZensimErro
 /// Raw toggles request computation, unlike the layout flags of a validated
 /// plan. Refuse unsupported families before `rev5_scope` can narrow work.
 fn validate_raw_rev5_request(t: V2NewFeatureToggles) -> Result<(), ZensimError> {
+    // `globaff` sits past the whole optional-block layout chain, which no raw
+    // Rev5+ request may carry; only a validated revision-6 plan reaches it.
+    if t.globaff {
+        return Err(ZensimError::ModelLoadFailed {
+            reason: "the globaff family is served only through a validated formula revision 6 plan",
+        });
+    }
     if t.formula_revision >= FormulaRevision::Rev5
         && (matches!(t.v1_pools, V1PoolsMode::Full | V1PoolsMode::Carriers)
             || t.append_block
@@ -6790,7 +6806,7 @@ pub(crate) fn compute_folded720_streaming_extras(
 ) -> Result<ZensimV2Result, ZensimError> {
     if !extras
         .compute
-        .is_some_and(|c| c.formula_revision == FormulaRevision::Rev5)
+        .is_some_and(|c| c.formula_revision >= FormulaRevision::Rev5)
     {
         validate_wide_revision(toggles)?;
     }
@@ -7298,7 +7314,7 @@ pub(crate) fn compute_folded720_hdr_streaming_extras(
 ) -> Result<ZensimV2Result, ZensimError> {
     if !extras
         .compute
-        .is_some_and(|c| c.formula_revision == FormulaRevision::Rev5)
+        .is_some_and(|c| c.formula_revision >= FormulaRevision::Rev5)
     {
         validate_wide_revision(toggles)?;
     }
@@ -7535,6 +7551,7 @@ pub(crate) fn compute_v2_append_attribution_from_retention(
         &mut crate::attribution::AttrSinkF32::Canvas(&mut canvas),
         None,
         (orig_w, orig_h),
+        crate::map_paint::MapPaint::default(),
     );
     let lattice = scratch.lattice.finish();
     // Trim the (possibly reflect-padded sub-64) canvas to the original.
@@ -7566,6 +7583,7 @@ pub(crate) fn compute_v2_append_attribution_from_retention_into_bins(
     scratch: &mut PassBScratchF32,
     accum: &mut crate::attribution::BinAccum,
     geometry: Option<&crate::sampling::Geometry>,
+    paint: crate::map_paint::MapPaint,
 ) {
     let logical = accum.logical_dimensions();
     retention_pass_b_all_scales(
@@ -7578,6 +7596,7 @@ pub(crate) fn compute_v2_append_attribution_from_retention_into_bins(
         &mut crate::attribution::AttrSinkF32::Bins(accum),
         geometry,
         logical,
+        paint,
     );
     accum.set_lattice(scratch.lattice.finish());
 }
@@ -7616,6 +7635,7 @@ fn retention_pass_b_all_scales(
     sink: &mut crate::attribution::AttrSinkF32<'_>,
     geometry: Option<&crate::sampling::Geometry>,
     logical: (usize, usize),
+    paint: crate::map_paint::MapPaint,
 ) {
     scratch
         .lattice
@@ -7626,6 +7646,16 @@ fn retention_pass_b_all_scales(
     let n0 = w0 * h0;
     scratch.scale_density.resize(n0, 0.0);
     scratch.win_plane.resize(n0, 0.0);
+    // Research guided painting (`crate::map_paint`): the source-resolution
+    // difference guide, built once per map when that mode is selected.
+    let guide0 =
+        (paint.paint == crate::map_paint::PaintMode::Guided && geometry.is_none()).then(|| {
+            crate::map_paint::difference_guide(
+                [&ret.pyr_src[0][0], &ret.pyr_src[0][1], &ret.pyr_src[0][2]],
+                [&ret.pyr_dst[0][0], &ret.pyr_dst[0][1], &ret.pyr_dst[0][2]],
+                n0,
+            )
+        });
     for scale in 0..n_scales {
         // A selectively omitted cell can have no retained samples. Deriving
         // its coefficients would evaluate 0 * (1 / 0), poisoning an otherwise
@@ -7665,6 +7695,8 @@ fn retention_pass_b_all_scales(
             &mut scratch.spread_out,
             geometry,
             &mut scratch.lattice,
+            guide0.as_deref(),
+            paint,
         );
     }
 }
@@ -7995,6 +8027,10 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
     let layout_mapdev = toggles.mapdev;
     let layout_z1max = toggles.z1max;
     let layout_gmsnative = toggles.gmsnative;
+    // `globaff` (revision 6): the layout flag sets the width; `compute.globaff`
+    // decides whether the strip moment sums run.
+    let layout_globaff = toggles.globaff;
+    let globaff_on = compute.globaff;
     // Only read below under `threads` (the `fuse_channels` derivation a few
     // lines down); the `not(threads)` arm hardcodes `fuse_channels = false`
     // without it, so `--no-default-features --features feature-regime-v2`
@@ -8048,6 +8084,18 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
     assert!(
         !layout_gmsnative || layout_z1max,
         "gmsnative requires the z1max layout (f1790 sits after f1789)"
+    );
+    assert!(
+        !layout_globaff || layout_gmsnative,
+        "globaff requires the gmsnative layout (f1867 sits after f1866)"
+    );
+    assert!(
+        !globaff_on || (layout_globaff && compute.formula_revision.computes_globaff()),
+        "globaff is computed only at formula revision 6, into its own layout"
+    );
+    assert!(
+        !globaff_on || compute.sampling.is_none(),
+        "globaff is defined on the walk's own pyramid, not a sampled one"
     );
     // Route-local derived φ: the SAME weighting mechanism on both routes,
     // pre-composed with each route's own encoding (design §6 — runtime
@@ -8225,8 +8273,15 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
         ref_planes,
         compute.sampling,
         toggles.formula_revision,
-        !compute.full_res_xb && !complete_distorted0,
+        // `globaff` reads every channel's rows at every scale, so the
+        // scale-zero chroma rows stay in the rolling planes.
+        !compute.full_res_xb && !complete_distorted0 && !globaff_on,
     );
+    let mut globaff: Vec<[crate::globaff::GlobAffAccum; 3]> = if globaff_on {
+        vec![Default::default(); n_scales]
+    } else {
+        Vec::new()
+    };
 
     #[cfg(feature = "threads")]
     let mut queued = 0;
@@ -8258,6 +8313,30 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                     );
                     ret.pyr_dst[0][ch][range.clone()].copy_from_slice(rows);
                 }
+            }
+        }
+        // `globaff`: every strip of every scale, all three channels, in
+        // strip order — before the dead-scale skip, which knows nothing of it.
+        if globaff_on {
+            let y1 = info.y0 + info.strip_h;
+            for (ch, acc) in globaff[scale].iter_mut().enumerate() {
+                acc.add_rows(
+                    producer.rows(
+                        crate::feature_v2_stream::Side::Source,
+                        ch,
+                        scale,
+                        info.y0,
+                        y1,
+                    ),
+                    producer.rows(
+                        crate::feature_v2_stream::Side::Distorted,
+                        ch,
+                        scale,
+                        info.y0,
+                        y1,
+                    ),
+                    info.plane_w,
+                );
             }
         }
         let local = compute.at_scale(scale);
@@ -8929,24 +9008,38 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
         0
     };
     let gmsnative_total = if layout_gmsnative { GMSNATIVE_WIDTH } else { 0 };
-    let reserved_tail_total = 0;
-    let mut features = vec![
-        0.0f64;
-        v12_total
-            + append_total
-            + append2_total
-            + csfw_total
-            + reserved_total
-            + gridblk_total
-            + ringbasis_total
-            + tailhist_total
-            + arttype_total
-            + gmsbank_total
-            + mapdev_total
-            + z1max_total
-            + gmsnative_total
-            + reserved_tail_total
-    ];
+    let before_tail = v12_total
+        + append_total
+        + append2_total
+        + csfw_total
+        + reserved_total
+        + gridblk_total
+        + ringbasis_total
+        + tailhist_total
+        + arttype_total
+        + gmsbank_total
+        + mapdev_total
+        + z1max_total
+        + gmsnative_total;
+    // `globaff` sits at its registered base: the reserved slots and the
+    // research palette block before it (f1820..1866) are structural zeros.
+    let (reserved_tail_total, globaff_total) = if layout_globaff {
+        let base =
+            crate::feature_defs::block_base(crate::feature_set_id::ComputeToken::GlobAff, n_scales)
+                .expect("globaff is a registered block")
+                .0;
+        assert!(
+            base >= before_tail,
+            "globaff base {base} precedes the walk tail {before_tail}"
+        );
+        (
+            base - before_tail,
+            n_scales * 3 * crate::globaff::GLOBAFF_PER_CELL,
+        )
+    } else {
+        (0, 0)
+    };
+    let mut features = vec![0.0f64; before_tail + reserved_tail_total + globaff_total];
     let (features_v12, features_tail) = features.split_at_mut(v12_total);
     let (features_app, features_tail2) = features_tail.split_at_mut(append_total);
     let (features_app2, features_tail3) = features_tail2.split_at_mut(append2_total);
@@ -8959,7 +9052,8 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
     let (features_gmsbank, features_tail10) = features_tail9.split_at_mut(gmsbank_total);
     let (features_mapdev, features_tail11) = features_tail10.split_at_mut(mapdev_total);
     let (features_z1max, features_tail12) = features_tail11.split_at_mut(z1max_total);
-    let (features_gmsnative, _reserved_tail) = features_tail12.split_at_mut(gmsnative_total);
+    let (features_gmsnative, features_tail13) = features_tail12.split_at_mut(gmsnative_total);
+    let (_reserved_tail, features_globaff) = features_tail13.split_at_mut(reserved_tail_total);
     let mut prev_grad: [Option<(f64, f64)>; 3] = [None; 3];
 
     #[allow(clippy::needless_range_loop)] // scale derives 3+ offsets across distinct arrays
@@ -9367,6 +9461,18 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
         mapdev: layout_mapdev && compute.mapdev,
         z1max: layout_z1max && compute.z1max,
     };
+    // --- globaff finalize: `(share, explained)` per (scale, channel), in the
+    //     registry's `2·(3·scale + channel) + signal` order. ---
+    if globaff_on {
+        for (scale, cells) in globaff.iter().enumerate() {
+            for (ch, acc) in cells.iter().enumerate() {
+                let (share, explained) = acc.finish();
+                let at = crate::globaff::GLOBAFF_PER_CELL * (3 * scale + ch);
+                features_globaff[at] = share;
+                features_globaff[at + 1] = explained;
+            }
+        }
+    }
     if restore_work.any() {
         assert!(
             restore_side_ok,
@@ -10286,7 +10392,7 @@ fn attr_pass_b_rows(
     // the v2 SSIM signal must read it as such. Hoisted once per call;
     // loop-invariant, so every call site below unswitches on it.
     let direct = crate::ssim_form::active_revision() >= crate::feature_defs::FormulaRevision::Rev3;
-    let ring_hp = active_ring_form() == RingForm::HighPassMu;
+    let ring_hp = process_ring_high_pass();
     let out_off = y0 * width;
     let cross_on = cross.is_some();
     for y in y0..y1 {
@@ -11249,7 +11355,7 @@ fn attr_pass_b_grad_px(
     let mut acc = co.c_gms * g;
     acc += (co.gg_lin + co.gg_quad * g) * g;
     if co.c_ringing != 0.0 {
-        let ring_err = if active_ring_form() == RingForm::HighPassMu {
+        let ring_err = if process_ring_high_pass() {
             ((s_c - m1_c) - (d_c - m2_c)).abs()
         } else {
             (s_c - d_c).abs()
@@ -11306,7 +11412,7 @@ fn attr_pass_b_grad_kernel_generic<T: F32x8Backend + Copy>(
 ) {
     let need_bandvis = co.c_bv_gain != 0.0 || co.c_bv_loss != 0.0;
     let has_ringing = co.c_ringing != 0.0;
-    let ring_hp = active_ring_form() == RingForm::HighPassMu;
+    let ring_hp = process_ring_high_pass();
     let has_banding = co.c_banding != 0.0;
     let zero = V8::<T>::zero_t(token);
     let one = V8::<T>::splat_t(token, 1.0);
@@ -11898,6 +12004,8 @@ fn attr_pass_b_for_scale_f32(
     spread_out: &mut Vec<f32>,
     geometry: Option<&crate::sampling::Geometry>,
     lattice: &mut crate::attribution::LatticeSet,
+    guide0: Option<&[f64]>,
+    paint: crate::map_paint::MapPaint,
 ) {
     let tpb = std::time::Instant::now();
     let (ws, hs) = dims[scale];
@@ -11953,13 +12061,16 @@ fn attr_pass_b_for_scale_f32(
         lattice.put(l);
     }
     // Window spread fused with the window→identity merge (value-exact vs
-    // spread-then-add; parallel is bitwise-invariant per its gate).
-    crate::blur::box_spread_merge_f32(
+    // spread-then-add; parallel is bitwise-invariant per its gate). The
+    // research window modes (`crate::map_paint`) replace the uniform spread.
+    crate::map_paint::merge_window(
+        paint.window,
         &mut win_plane[..n],
         &mut scale_density[..n],
         ws,
         hs,
         BLUR_RADIUS,
+        || crate::map_paint::difference_guide(rplanes, dplanes, n),
         spread_tmp,
         spread_out,
         parallel && n >= crate::blur::SPREAD_PARALLEL_MIN_N,
@@ -11983,7 +12094,14 @@ fn attr_pass_b_for_scale_f32(
                 let (w, h) = geometry.logical_dimensions();
                 accum.add_scale_plane_f32(&projected, w, h, 1);
             } else {
-                accum.add_scale_plane_f32(&scale_density[..n], ws, hs, 1usize << scale);
+                accum.add_scale_plane_painted_f32(
+                    &scale_density[..n],
+                    ws,
+                    hs,
+                    scale,
+                    paint.paint,
+                    guide0,
+                );
             }
         }
     }

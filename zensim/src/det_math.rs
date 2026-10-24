@@ -137,7 +137,8 @@ impl RootForm {
             FormulaRevision::Rev2
             | FormulaRevision::Rev3
             | FormulaRevision::Rev4
-            | FormulaRevision::Rev5 => Self::NestedSqrt,
+            | FormulaRevision::Rev5
+            | FormulaRevision::Rev6 => Self::NestedSqrt,
         }
     }
 }
@@ -336,7 +337,8 @@ impl PowForm {
             FormulaRevision::Rev2
             | FormulaRevision::Rev3
             | FormulaRevision::Rev4
-            | FormulaRevision::Rev5 => Self::PureRust,
+            | FormulaRevision::Rev5
+            | FormulaRevision::Rev6 => Self::PureRust,
         }
     }
 }

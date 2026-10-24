@@ -2652,3 +2652,23 @@ aic2026-jnd-reproduced-suite scored spec peer_images output:
 # Current B intentionally has no JND map; the report owner must agree.
 default-b-verdict-jnd-tests:
     cargo test -p zensim-validate --bin bake_verdict
+
+# By-construction exploration (benchmarks/byconstruction_2026-10-22.md): revision 6 (ringhpm + globaff) and the
+# research map painting modes. Heavy: run through ~/work/zen/scripts/run-heavy.
+byc-rev6-tests:
+    cargo test --release -p zensim --features custom-profiles,feature-regime-v2,training --lib -- globaff map_paint ring_form feature_defs feature_plan research::
+
+# Served (pixel route) against table route for revision-6 research bakes on the mixture images.
+byc-serve-parity bin_dir mixture out +bakes:
+    python3 scripts/byconstruction/serve_parity.py --bin-dir {{quote(bin_dir)}} --mixture {{quote(mixture)}} --out {{quote(out)}} {{ prepend("--bake ", bakes) }}
+
+# Candidate, legacy and judge maps for the map-quality study (zensim-bench `map_dump`).
+byc-map-dump pairs out bake tag window="box" paint="nearest" *flags="":
+    cargo run --release --manifest-path zensim-bench/Cargo.toml --features zen-decode,dvifm-judge --example map_dump -- --pairs {{quote(pairs)}} --out {{quote(out)}} --bake {{quote(bake)}} --tag {{tag}} --window {{window}} --paint {{paint}} {{flags}}
+
+# The workbench module (wasm32 + SIMD128) with the bakes in ZENSIM_WORKBENCH_BAKES; wasm-bindgen-cli 0.2.129.
+byc-workbench-module out="target/zensim-workbench-web" wasm_bindgen="wasm-bindgen":
+    [ "$({{wasm_bindgen}} --version)" = 'wasm-bindgen 0.2.129' ] || { echo 'wasm-bindgen-cli 0.2.129 required' >&2; exit 2; }
+    RUSTFLAGS="-C target-feature=+simd128" cargo build --release --manifest-path zensim-workbench/Cargo.toml --target wasm32-unknown-unknown --lib
+    {{wasm_bindgen}} --target web --out-dir {{out}}/pkg-zensimx zensim-workbench/target/wasm32-unknown-unknown/release/zensim_workbench.wasm
+    cargo run -q --release --manifest-path zensim-workbench/Cargo.toml --example workbench_manifest > {{out}}/extra-modules.json
