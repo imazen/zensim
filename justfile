@@ -2683,9 +2683,19 @@ byc-workbench-check site py="python3":
     cargo run -q --release --manifest-path zensim-workbench/Cargo.toml --example smoke > target/byc-smoke-native.jsonl
     {{py}} zensim-workbench/workbench_check.py {{quote(site)}} target/byc-smoke-native.jsonl
 
-# The workbench module (wasm32 + SIMD128) with the bakes in ZENSIM_WORKBENCH_BAKES; wasm-bindgen-cli 0.2.129.
+# The workbench module (wasm32 + SIMD128) with the bakes in ZENSIM_WORKBENCH_BAKES; wasm-bindgen-cli 0.2.129. The
+# module's menu label names zensim's version and the commit it was built from (`wip on` when the working copy
+# differs), unless ZENSIM_WORKBENCH_LABEL is set.
 byc-workbench-module out="target/zensim-workbench-web" wasm_bindgen="wasm-bindgen":
+    #!/usr/bin/env bash
+    set -euo pipefail
     [ "$({{wasm_bindgen}} --version)" = 'wasm-bindgen 0.2.129' ] || { echo 'wasm-bindgen-cli 0.2.129 required' >&2; exit 2; }
+    version=$(sed -n 's/^version = "\(.*\)"/\1/p' zensim/Cargo.toml | head -1)
+    dirty=$(jj log -r @ --no-graph -T 'if(empty, "", "wip on ")')
+    if [ -z "$dirty" ]; then rev='latest(::@ & ~empty())'; else rev='latest(::@- & ~empty())'; fi
+    commit=$(jj log -r "$rev" --no-graph -T 'commit_id.short(8)')
+    export ZENSIM_WORKBENCH_LABEL="${ZENSIM_WORKBENCH_LABEL:-zensim $version · $dirty$commit (private)}"
+    echo "module label: $ZENSIM_WORKBENCH_LABEL"
     RUSTFLAGS="-C target-feature=+simd128" cargo build --release --manifest-path zensim-workbench/Cargo.toml --target wasm32-unknown-unknown --lib
     {{wasm_bindgen}} --target web --out-dir {{out}}/pkg-zensimx zensim-workbench/target/wasm32-unknown-unknown/release/zensim_workbench.wasm
     cargo run -q --release --manifest-path zensim-workbench/Cargo.toml --example workbench_manifest > {{out}}/extra-modules.json

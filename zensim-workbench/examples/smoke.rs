@@ -19,20 +19,41 @@ fn main() {
             .iter()
             .map(|m| {
                 let (values, _) = zensim_workbench::loop_map_values(
-                    &metric, m, &r, &d, w, h, w as usize * 4, 1.0, 1.0,
+                    &metric,
+                    m,
+                    &r,
+                    &d,
+                    w,
+                    h,
+                    w as usize * 4,
+                    1.0,
+                    1.0,
                 )
                 .expect("map");
-                (m.clone(), serde_json::json!(values.iter().map(|&v| f64::from(v)).sum::<f64>()))
+                (
+                    m.clone(),
+                    serde_json::json!(values.iter().map(|&v| f64::from(v)).sum::<f64>()),
+                )
             })
             .collect();
         // The maps the worker shows: each one's cell values summed.
-        let rgb = |v: &[u8]| -> Vec<[u8; 3]> { v.chunks_exact(4).map(|p| [p[0], p[1], p[2]]).collect() };
+        let rgb = |v: &[u8]| -> Vec<[u8; 3]> {
+            v.as_chunks::<4>()
+                .0
+                .iter()
+                .map(|p| [p[0], p[1], p[2]])
+                .collect()
+        };
         let (rr, dd) = (rgb(&r), rgb(&d));
         let spatial: serde_json::Map<String, serde_json::Value> = zensim_workbench::map_names()
             .iter()
             .map(|m| {
-                let map = zensim_workbench::compute_map(&metric, m, &rr, &dd, w, h).expect("spatial map");
-                (m.clone(), serde_json::json!(map.values().iter().map(|&v| f64::from(v)).sum::<f64>()))
+                let map =
+                    zensim_workbench::compute_map(&metric, m, &rr, &dd, w, h).expect("spatial map");
+                (
+                    m.clone(),
+                    serde_json::json!(map.values().iter().map(|&v| f64::from(v)).sum::<f64>()),
+                )
             })
             .collect();
         println!(

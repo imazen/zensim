@@ -4,7 +4,11 @@
   assemble --base DIR --module PKG --manifest JSON --out DIR
       Copy a workbench site (a mirror of the public site with the extra-module hook, e.g. another private workbench),
       put the module beside its worker.js as pkg-zensimx/, and merge the module's manifest entry into the site's
-      extra-modules.json (entries of other modules are kept; a previous zensimx entry is replaced).
+      extra-modules.json (entries of other modules are kept; a previous zensimx entry is replaced). The workbench
+      lists extra modules in manifest order; zensimx goes first.
+  update --site DIR --module PKG --manifest JSON
+      The same module swap in an assembled site, in place: the previous pkg-zensimx/ and extra-modules.json move
+      beside the site as <site>.replaced-<UTC time>/.
   smoke-compare NATIVE.jsonl WASM.jsonl
       Compare the native and wasm smoke lines (`just byc-workbench-smoke`): every score within 1e-6 and every map sum
       within 1e-4 of the native value (the f32 map kernels may round differently per SIMD tier).
@@ -19,6 +23,7 @@ import argparse
 import json
 import shutil
 import ssl
+import time
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -34,12 +39,35 @@ def assemble(a):
     if "extra-modules.json" not in (assets / "worker.js").read_text():
         raise SystemExit("this worker.js has no extra-module hook")
     shutil.copytree(a.module, assets / "pkg-zensimx")
-    mine = json.loads(Path(a.manifest).read_text())["modules"]
+    modules = merge(assets, a.manifest)
+    print(f"{out}: modules {[m['name'] for m in modules]}")
+
+
+def merge(assets, manifest):
+    """Put the module's manifest entry first in the site's extra-modules.json, keeping other modules' entries."""
+    mine = json.loads(Path(manifest).read_text())["modules"]
     existing = assets / "extra-modules.json"
     modules = json.loads(existing.read_text())["modules"] if existing.exists() else []
-    modules = [m for m in modules if m.get("name") != "zensimx"] + mine
+    modules = mine + [m for m in modules if m.get("name") != "zensimx"]
     existing.write_text(json.dumps({"modules": modules}, indent=2) + "\n")
-    print(f"{out}: modules {[m['name'] for m in modules]}")
+    return modules
+
+
+def update(a):
+    site = Path(a.site)
+    source = json.loads((site / "site-source.json").read_text())
+    assets = site / source.get("asset_prefix", "")
+    if "extra-modules.json" not in (assets / "worker.js").read_text():
+        raise SystemExit("this worker.js has no extra-module hook")
+    kept = site.parent / f"{site.name}.replaced-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}"
+    kept.mkdir()
+    for name in ("pkg-zensimx", "extra-modules.json"):
+        if (assets / name).exists():
+            shutil.copytree(assets / name, kept / name) if (assets / name).is_dir() else shutil.copy2(assets / name, kept)
+    shutil.rmtree(assets / "pkg-zensimx", ignore_errors=True)
+    shutil.copytree(a.module, assets / "pkg-zensimx")
+    modules = merge(assets, a.manifest)
+    print(f"{site}: modules {[m['name'] for m in modules]}; previous files in {kept}")
 
 
 class Isolated(SimpleHTTPRequestHandler):
@@ -98,6 +126,10 @@ def main():
     p.add_argument("--module", required=True)
     p.add_argument("--manifest", required=True)
     p.add_argument("--out", required=True)
+    p = sub.add_parser("update")
+    p.add_argument("--site", required=True)
+    p.add_argument("--module", required=True)
+    p.add_argument("--manifest", required=True)
     p = sub.add_parser("smoke-compare")
     p.add_argument("native")
     p.add_argument("wasm")
@@ -108,7 +140,7 @@ def main():
     p.add_argument("--cert")
     p.add_argument("--key")
     a = ap.parse_args()
-    {"assemble": assemble, "serve": serve, "smoke-compare": smoke_compare}[a.cmd](a)
+    {"assemble": assemble, "update": update, "serve": serve, "smoke-compare": smoke_compare}[a.cmd](a)
 
 
 if __name__ == "__main__":

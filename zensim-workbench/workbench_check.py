@@ -5,7 +5,8 @@ Serves an assembled site (`scripts/byconstruction/workbench_site.py assemble`) o
 workbench's own worker.js: routes every zensimx metric to the module, scores the smoke pair
 (`examples/smoke.rs`, `smoke.mjs`) and reads every map, then compares the score with the native one (within 1e-6)
 and each map's cell sum with the native worker-map sum (within 1e-4; the f32 map kernels may round differently per
-SIMD tier). Then the page: the metric menu lists the module's metrics in their own group.
+SIMD tier). Then the page: the metric menu lists the module's metrics in their own group, first among the extra
+modules, and a `?metric=` link opens the page on a module metric.
 
   workbench_check.py SITE NATIVE_SMOKE.jsonl    (needs Playwright with Chromium; `just byc-workbench-check`)
 
@@ -18,6 +19,7 @@ import threading
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import quote
 
 from playwright.sync_api import sync_playwright
 
@@ -109,6 +111,15 @@ try:
         mine = [values for label, values in groups if label == manifest["label"]]
         if mine != [metrics]:
             diffs.append(f"menu groups: {groups}")
+        extra = [label for label, _ in groups[1:]]
+        if not extra or extra[0] != manifest["label"]:
+            diffs.append(f"the module's group is not the first after the page's own metrics: {[g[0] for g in groups]}")
+        # A link that names a module metric opens the page on it.
+        page.goto(f"http://127.0.0.1:3322/?metric={quote(metrics[0])}")
+        page.wait_for_function("document.querySelectorAll('#metric optgroup').length > 0", timeout=60000)
+        chosen = page.evaluate("document.getElementById('metric').value")
+        if chosen != metrics[0]:
+            diffs.append(f"?metric={metrics[0]} opened {chosen}")
         if errors:
             diffs.append(f"page errors: {errors}")
         browser.close()

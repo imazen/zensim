@@ -7,6 +7,7 @@ use std::fmt::Write as _;
 
 fn main() {
     println!("cargo:rerun-if-env-changed=ZENSIM_WORKBENCH_BAKES");
+    println!("cargo:rerun-if-env-changed=ZENSIM_WORKBENCH_LABEL");
     let spec = std::env::var("ZENSIM_WORKBENCH_BAKES").unwrap_or_default();
     let out = std::path::PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR"));
     let mut table = String::from("pub static BAKES: &[(&str, &[u8], &str)] = &[\n");

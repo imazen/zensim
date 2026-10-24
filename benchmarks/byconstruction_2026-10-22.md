@@ -1570,6 +1570,80 @@ the descriptor adds image-wide mass that butteraugli's local block distances do 
 port reports held-out r 0.51–0.69 for the Haar diffmaps and 0.83 for DVIFM-min on the same encodes; on screenshots
 butteraugli's map agrees with no other map in the study.
 
+### Streaking: dithered gradients, the guide and perceptual integration (2026-10-24)
+
+Owner, 2026-10-24: "i'm still seeing streaking". The workbench's default pair (`maps/demo/`, captured from the page:
+its 768×512 synthetic scene and the default zenjpeg encode at quality 40) shows horizontal lines across the sky in
+every per-pixel map. The error has that shape. The reference sky is a vertical gradient with ±1 dithering; the JPEG
+flattens each 8-row block row to one level (green, column 300, rows 0–23: reference `167 167 167 168 167 168 168 168
+168 169 168 169 168 169 169 170 169 170 170 170 170 170 170 171`, distorted `167`×8, `169`×8, `170`×8). Over the top
+32 rows, the row means of |error| vary with a coefficient of variation of 0.396 and the column means with 0.035. The
+block steps are visible banding; the dither is not. Butteraugli's map shows the same horizontal banding.
+
+The per-pixel map draws the rows at twice the error's own contrast (row-mean CV over the same band; Tga, exact split,
+centred window, guided paint):
+
+| Map | Row-mean CV | × the error's |
+|---|---|---|
+| σ 0, squared guide (`diffmap_px`) | 0.832 | 2.10 |
+| σ 0, absolute guide | 0.682 | 1.72 |
+| σ 1.5, squared guide | 0.497 | 1.26 |
+| σ 3, squared guide (`diffmap`) | 0.277 | 0.70 |
+| σ 3, absolute guide | 0.264 | 0.67 |
+
+Two changes, both research map modes (nothing in the score path reads them):
+
+- **Perceptual integration** (`ZENSIM_MAP_SMOOTH=<σ>`, `BakeScorer::with_map_smooth`): after painting, a separable
+  Gaussian scatter of the per-pixel map, each pixel's weights renormalized over its in-bounds neighbours (radius
+  ⌈3σ⌉), so the map's total is unchanged (`map_paint::tests::smoothing_conserves_mass_and_zero_is_identity`).
+- **Guide norm** (`ZENSIM_MAP_GUIDE=sq|abs`, `BakeScorer::with_map_guide`): the guided window and paint weigh a pixel
+  by its squared difference (the default) or its absolute difference. The squared guide accounts for part of the
+  exaggeration; with the absolute guide the per-pixel map still shows 1.72×, so the rest is not in the paint.
+
+Map study (the 150 pairs, 60 repaired images and judges of "Map study after the fixes"; same statistics):
+
+| Map | butteraugli | SSIMULACRA2 | DVIFM 0.3 | Mass where equal | Leak median / p90 |
+|---|---|---|---|---|---|
+| Tga, σ 0 | 0.696 | 0.714 | 0.257 | 0.04% | 0.44 / 0.67 |
+| Tga, σ 0, absolute guide | 0.694 | 0.716 | 0.263 | 0.03% | 0.43 / 0.67 |
+| Tga, σ 0.75 | 0.700 | 0.717 | 0.263 | 0.27% | 0.44 / 0.67 |
+| Tga, σ 1.5 | 0.707 | 0.721 | 0.263 | 0.40% | 0.44 / 0.67 |
+| Tga, σ 1.5, absolute guide | 0.706 | 0.721 | 0.263 | 0.41% | 0.44 / 0.67 |
+| Tga, σ 3 | **0.716** | 0.728 | 0.268 | 0.50% | 0.44 / **0.66** |
+| Tga, σ 3, absolute guide | 0.715 | **0.729** | 0.268 | 0.51% | 0.44 / **0.66** |
+| B, σ 0 | 0.697 | 0.710 | 0.260 | 0.05% | 0.48 / 0.74 |
+| B, σ 0, absolute guide | 0.697 | 0.710 | 0.255 | 0.05% | 0.48 / 0.73 |
+| B, σ 1.5 | 0.711 | 0.713 | 0.268 | 0.38% | 0.48 / 0.73 |
+| B, σ 3 | **0.718** | 0.723 | 0.268 | 0.48% | 0.48 / 0.72 |
+| B, σ 3, absolute guide | 0.717 | **0.724** | **0.269** | 0.49% | 0.48 / 0.72 |
+
+- **σ 3 raises agreement with all three judges** (Tga +0.020 / +0.014 / +0.011; B +0.021 / +0.014 / +0.008) and
+  keeps locality (leak p90 0.66 against 0.67). Butteraugli's and SSIMULACRA2's maps are smooth themselves, so part
+  of the gain is shared smoothness rather than better placement. Mass on unchanged pixels rises tenfold (0.04% to
+  0.50%), as an integration that reaches 9 px from a change must.
+- **The guide norm changes no judged statistic** by more than 0.006. It stays a research knob; the squared guide
+  stays the default.
+- The integrated map also agrees better with butteraugli's block distances in the JPEG XL loop calibration (below):
+  held-out r 0.653 against 0.495 (Tga), 0.681 against 0.457 (M64a), 0.491 against 0.281 (B).
+
+**Workbench (second build).** The module's metrics are named by arm and served revision: `zensim-Tga@rev6`,
+`zensim-M64a-noKADID@rev6` (M64a's KADID-held-out fold cell, the only stamped M64a bake; `b8555871…`) and
+`zensim-B@rev5`. Its menu group names the zensim version and the commit the module was built from (`just
+byc-workbench-module` sets `ZENSIM_WORKBENCH_LABEL`), and comes first among the extra modules
+(`workbench_site.py update` swaps a built module into the served site in place). Maps: `diffmap` (σ 3, the default),
+`diffmap_px` (the same map at σ 0), `removal` and `blocks8`. The page's own "zensim" entry is zenmetrics' built-in
+metric (zensim 0.3.0 from its main checkout; its B map is the legacy basic-plane diffmap), not this module. Loop
+defaults by the method above (`loop_calibration_2026-10-24c.tsv`; fit r / held-out r):
+
+| Map | Tga scale / exponent | Tga r | M64a scale / exponent | M64a r | B scale / exponent | B r |
+|---|---|---|---|---|---|---|
+| diffmap (σ 3) | 0.1330 / 0.6 | 0.809 / 0.653 | 0.1372 / 0.6 | 0.806 / 0.681 | 0.1303 / 0.6 | 0.748 / 0.491 |
+| diffmap_px | 0.1412 / 0.4 | 0.672 / 0.495 | 0.1450 / 0.4 | 0.651 / 0.457 | 0.1748 / 0.35 | 0.593 / 0.281 |
+| removal | 0.1500 / 0.5 | 0.601 / 0.512 | 0.1506 / 0.5 | 0.533 / 0.396 | 0.1741 / 0.45 | 0.584 / 0.331 |
+| blocks8 | 0.1553 / 0.6 | 0.771 / 0.611 | 0.1591 / 0.6 | 0.782 / 0.642 | 0.2028 / 0.5 | 0.707 / 0.438 |
+
+`diffmap_px` reproduces the first build's `diffmap` fits exactly (the same map), a check on the calibration.
+
 ### Formula revision 7: the batch (2026-10-24, in progress)
 
 Owner, 2026-10-24: "let's do a revision 7 - but also figure out what else we can batch with it." Every item changes

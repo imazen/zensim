@@ -23,6 +23,10 @@ const EXPONENTS: [f64; 22] = [
     2.0, 2.5, 3.0, 4.0,
 ];
 const FLOOR: f64 = 0.05;
+
+/// One pair: its set (`fit` or `hold`), the map's local error at scale 1 and
+/// exponent 1, butteraugli's block distances, width and height.
+type Pair<'a> = (&'a str, Vec<f32>, Vec<f32>, usize, usize);
 const K_TILE_NORM: f64 = 1.2;
 
 fn tile_norms(values: &[f32], width: usize, height: usize, exponent: f64) -> Vec<f64> {
@@ -107,7 +111,7 @@ fn main() {
     for metric in &metrics {
         for map in zensim_workbench::map_names() {
             // Per pair: the map's local error (scale 1, exponent 1) and butteraugli's block distances.
-            let pairs: Vec<(&str, Vec<f32>, Vec<f32>, usize, usize)> = rows
+            let pairs: Vec<Pair> = rows
                 .iter()
                 .map(|(idx, set, w, h)| {
                     let r = read(dir.join(format!("{idx}.ref.rgba")));

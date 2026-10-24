@@ -2,13 +2,16 @@
 //! `extra-modules.json` hook): every embedded bake as a metric, with its score,
 //! its spatial maps and JPEG XL loop steering maps.
 //!
-//! The bakes are named at build time (`ZENSIM_WORKBENCH_BAKES=name=path;…`,
-//! see `build.rs`). A revision-6 bake (`ringhpm` + `globaff`) serves through
-//! the same `BakeScorer` owner as every other bake. The maps are the bake's
-//! attribution map (`BakeScorer::compute_with_ref_and_attribution`) under the
-//! research painting modes of `benchmarks/byconstruction_2026-10-22.md`
-//! ("Maps"); each value is the map's density on its cell grid, negative
-//! values (score-raising features) clamped to zero for display.
+//! The bakes are named at build time (`ZENSIM_WORKBENCH_BAKES=name=path;…`, see
+//! `build.rs`), by convention `zensim-<arm>@rev<N>`: the arm and the formula
+//! revision it serves. The menu group names the zensim version and commit the
+//! module was built from (`ZENSIM_WORKBENCH_LABEL`). A revision-6 bake
+//! (`ringhpm` + `globaff`) serves through the same `BakeScorer` owner as every
+//! other bake. The maps are the bake's attribution map
+//! (`BakeScorer::compute_with_ref_and_attribution`) under the research painting
+//! modes of `benchmarks/byconstruction_2026-10-22.md` ("Maps"); each value is
+//! the map's density on its cell grid, negative values (score-raising features)
+//! clamped to zero for display.
 //!
 //! The module and its weights are private when the bakes are: serve them on
 //! the LAN only. Exploration record: `benchmarks/byconstruction_2026-10-22.md`.
@@ -21,20 +24,28 @@ use zensim::{BakeScorer, Fused944Session, RgbSlice};
 include!(concat!(env!("OUT_DIR"), "/bakes.rs"));
 
 /// The maps every metric publishes: `(name, window mode, paint mode, split,
-/// bin)` (`zensim`'s research map modes). `diffmap` (first) is the one the
-/// workbench shows by default: centred window, guided paint and the exact
-/// split, the best balance in the map study (block agreement with butteraugli
-/// and SSIMULACRA2, mass where the images are equal, locality;
-/// `benchmarks/byconstruction_2026-10-22.md`, "Map study after the fixes").
-pub const MAPS: &[(&str, &str, &str, &str, usize)] = &[
-    ("diffmap", "center", "guided", "exact", 1),
-    // The exact split with today's uniform window spread.
-    ("exact_box", "box", "nearest", "exact", 1),
+/// smoothing σ in source pixels, bin)` (`zensim`'s research map modes).
+/// `diffmap` (first) is the one the workbench shows by default: centred
+/// window, guided paint and the exact split, the best balance in the map
+/// study, integrated over σ = 3 px so a row-dithered gradient's error does
+/// not show as one stripe per row (`benchmarks/byconstruction_2026-10-22.md`,
+/// "Map study after the fixes" and "Streaking").
+pub const MAPS: &[(&str, &str, &str, &str, f32, usize)] = &[
+    ("diffmap", "center", "guided", "exact", 3.0, 1),
+    // The same map per pixel, unintegrated.
+    ("diffmap_px", "center", "guided", "exact", 0.0, 1),
     // Today's map: removal split, uniform window spread.
-    ("removal", "box", "nearest", "repair", 1),
+    ("removal", "box", "nearest", "repair", 0.0, 1),
     // 8×8 blocks for the JPEG XL loop.
-    ("blocks8", "center", "nearest", "exact", 8),
+    ("blocks8", "center", "nearest", "exact", 0.0, 8),
 ];
+
+/// The module's menu group: the zensim version and source this module was
+/// built from (`ZENSIM_WORKBENCH_LABEL` at build time).
+pub const MODULE_LABEL: &str = match option_env!("ZENSIM_WORKBENCH_LABEL") {
+    Some(label) => label,
+    None => "zensim candidates (private module)",
+};
 
 /// `"zensimx"`.
 #[wasm_bindgen]
@@ -258,7 +269,7 @@ pub fn compute_map(
     width: u32,
     height: u32,
 ) -> Result<SpatialMap, String> {
-    let &(name, window, paint, split, bin) = MAPS
+    let &(name, window, paint, split, smooth, bin) = MAPS
         .iter()
         .find(|m| m.0 == map)
         .ok_or_else(|| format!("no map named {map} (maps: {})", map_names().join(", ")))?;
@@ -272,6 +283,7 @@ pub fn compute_map(
         .map_err(|e| e.to_string())?
         .with_parallel(false)
         .with_map_paint(window, paint, split)
+        .and_then(|s| s.with_map_smooth(smooth))
         .map_err(|e| e.to_string())?;
     let pre = scorer
         .precompute_reference(&rs)
@@ -446,18 +458,24 @@ pub fn loop_map(
 /// `(bake SHA-256 prefix, map, scale, exponent, r)`: fitted by zenmetrics'
 /// method on its calibration encodes of the CID22-512 training images, with
 /// `r` the log-space correlation of block distances with butteraugli's on the
-/// held-out gb82 screenshots (`examples/loop_calibrate.rs`, 2026-10-24; record
+/// held-out gb82 screenshots (`examples/loop_calibrate.rs`, 2026-10-24, file
+/// `loop_calibration_2026-10-24c.tsv`; record
 /// `benchmarks/byconstruction_2026-10-22.md`). A bake or map without an entry
 /// gets scale 1, exponent 0.5 and no `r`.
 pub const LOOP_DEFAULTS: &[(&str, &str, f64, f64, f64)] = &[
     // The revision-6 Tga candidate (maps with the globaff term).
-    ("5ece9e45", "diffmap", 1.411546e-1, 0.4, 0.4948),
-    ("5ece9e45", "exact_box", 1.792990e-1, 0.4, 0.5354),
+    ("5ece9e45", "diffmap", 1.329536e-1, 0.6, 0.6532),
+    ("5ece9e45", "diffmap_px", 1.411546e-1, 0.4, 0.4948),
     ("5ece9e45", "removal", 1.499584e-1, 0.5, 0.5125),
     ("5ece9e45", "blocks8", 1.553179e-1, 0.6, 0.6112),
+    // M64a, the strictly monotone max-pair arm (its KADID-held-out fold cell, revision 6).
+    ("b8555871", "diffmap", 1.372091e-1, 0.6, 0.6810),
+    ("b8555871", "diffmap_px", 1.449550e-1, 0.4, 0.4570),
+    ("b8555871", "removal", 1.506346e-1, 0.5, 0.3960),
+    ("b8555871", "blocks8", 1.590695e-1, 0.6, 0.6422),
     // B (diff+frag-820, revision 5).
-    ("89cb4861", "diffmap", 1.748248e-1, 0.35, 0.2805),
-    ("89cb4861", "exact_box", 1.750633e-1, 0.4, 0.3711),
+    ("89cb4861", "diffmap", 1.302887e-1, 0.6, 0.4909),
+    ("89cb4861", "diffmap_px", 1.748248e-1, 0.35, 0.2805),
     ("89cb4861", "removal", 1.740943e-1, 0.45, 0.3308),
     ("89cb4861", "blocks8", 2.027928e-1, 0.5, 0.4378),
 ];
@@ -491,7 +509,7 @@ pub fn manifest_entry(url: &str) -> serde_json::Value {
         .collect();
     serde_json::json!({
         "name": "zensimx",
-        "label": "zensim by-construction candidates (private module)",
+        "label": MODULE_LABEL,
         "url": url,
         "metrics": metrics,
         "loopDefaults": serde_json::from_str::<serde_json::Value>(&loop_map_defaults()).expect("defaults json"),
