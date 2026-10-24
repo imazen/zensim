@@ -465,6 +465,7 @@ pub(crate) mod feature_plan;
 // benchmarks/fold_mt_scaling_2026-08-31.md
 pub(crate) mod fold_timing;
 // A clock for the attribution path's timing counters that also runs in wasm.
+#[cfg(feature = "custom-profiles")]
 pub(crate) mod perf_clock;
 
 // The fold-backed scoring engine (benchmarks/fold_engine_2026-08-31.md):
