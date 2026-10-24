@@ -1960,6 +1960,19 @@ The changes, in order:
     further; `rev7/rev7band_accuracy/`). Paired (`rev7_vpanel_vs_band`): v4x −11.56% / −4.66% / −4.04%, v3 −6.98% /
     −2.32% / −1.46%.
 
+**Cumulative after 13** (paired, 8 rounds, one thread; `rev7_bad544a3_vs_f96d7218/grid.tsv` and, one `f96d7218`
+binary with B's revision-6 against its revision-7 stamp, `rev6_vs_rev7_f96d7218/grid.tsv`):
+
+| Tier | Comparison | 256² photo | 1024² plot | 1507×2048 photo |
+|---|---|---|---|---|
+| v4x | revision 7, `bad544a3` → `f96d7218` | 1.356 → 0.872 ms, −35.79% | 15.57 → 10.86 ms, −30.36% | 43.10 → 31.21 ms, −27.43% |
+| v3 | revision 7, `bad544a3` → `f96d7218` | 1.660 → 1.110 ms, −33.16% | 21.12 → 15.60 ms, −26.16% | 59.91 → 43.98 ms, −26.58% |
+| v4x | revision 6 → 7, `f96d7218` | 1.225 → 0.874 ms, −28.73% | 16.55 → 10.87 ms, −34.44% | 47.59 → 31.17 ms, −34.34% |
+| v3 | revision 6 → 7, `f96d7218` | 1.550 → 1.111 ms, −28.30% | 22.64 → 15.65 ms, −30.80% | 64.62 → 43.94 ms, −31.97% |
+
+The bit-identical steps (2, 5–8, 10–12) also speed up revisions 5 and 6, so the second pair of rows is revision 7's own
+margin today. 95% intervals are in the grids (within 1.5 points of each median; within 0.6 for the revision-6 rows).
+
 **Revision 7 against revision 6 now** (B's 55 dumps, one binary, the revision-6 and revision-7 stamps): 22,190 of
 39,600 feature values move, by a median 1.1e-6 relative (90th percentile 1.7e-5, 99th 2.3e-4, largest 4.0e-3 on the
 97×63 pair's slot 664, 5.733e-6 → 5.710e-6, an absolute 2.3e-8), and the score by at most 4.0e-5 points (median
