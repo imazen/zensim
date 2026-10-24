@@ -245,6 +245,18 @@ fn bounded_excess_pair_v<V: Vf32>(
     ((a - b).max(zero) / denom, (b - a).max(zero) / denom)
 }
 
+/// [`bounded_excess_pair_v`] for non-negative `a` and `b` (squares), with one
+/// division. At most one of `(a − b).max(0)` and `(b − a).max(0)` is nonzero,
+/// and `b − a` is exactly `−(a − b)`, so `|a − b| / (a + b + c)` selected by
+/// `a > b` (or `b > a`) is that quotient's bits; the other side is the `+0`
+/// that `0 / (a + b + c)` gives for the positive denominator.
+#[inline(always)]
+fn bounded_excess_split_v<V: Vf32>(token: V::Tok, a: V, b: V, c: V) -> (V, V) {
+    let zero = V::zero_t(token);
+    let q = (a - b).abs() / (a + b + c);
+    (V::blend(a.simd_gt(b), q, zero), V::blend(b.simd_gt(a), q, zero))
+}
+
 /// Vectorized [`saturate`] — `max(x,0)/(max(x,0)+c)`. Bounded `[0, 1)`.
 #[inline(always)]
 fn saturate_v<V: Vf32>(token: V::Tok, x: V, c: V) -> V {

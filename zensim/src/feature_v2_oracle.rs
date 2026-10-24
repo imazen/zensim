@@ -1473,7 +1473,7 @@ fn dense_terms32_v<V: Vf32>(
     let mse_i = saturate_v(token, raw_diff * raw_diff, c_mse);
     let hf_src = s - m1;
     let hf_dst = dd - m2;
-    let (hfg, hfl) = bounded_excess_pair_v(token, hf_dst * hf_dst, hf_src * hf_src, c_hf);
+    let (hfg, hfl) = bounded_excess_split_v(token, hf_dst * hf_dst, hf_src * hf_src, c_hf);
     let hfm = bounded_excess_v(token, hf_src.abs(), hf_dst.abs(), c_hf);
     let rae = raw_diff.abs();
     let pj = pjnd_transducer_v(token, rae, act, k_mid, c_pj);
@@ -1510,12 +1510,19 @@ fn dense_terms32_v<V: Vf32>(
         mv[j] = m_w * vals[j];
         iv[j] = i_w * vals[j];
     }
+    // `art_i` and `det_i` are `edge_dissim` or `+0`, never both nonzero, and
+    // `saturate(+0)` is `+0`: one division gives both soft-peak saturations.
+    let sal_edge = saturate_v(token, edge_dissim, c_peak);
+    let sal = [
+        saturate_v(token, d, c_peak),
+        V::blend(gt, sal_edge, zero),
+        V::blend(lt, sal_edge, zero),
+    ];
     let mut kn = [zero; 3];
     let mut kd = [zero; 3];
     for j in 0..3 {
-        let sal = saturate_v(token, vals[j], c_peak);
-        kn[j] = sal * vals[j];
-        kd[j] = sal;
+        kn[j] = sal[j] * vals[j];
+        kd[j] = sal[j];
     }
     (t, art_i, det_i, mse_i, m_w, i_w, mv, iv, kn, kd, act)
 }
@@ -1779,8 +1786,9 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64, const R7: bool>(
                         let lanes = pools32[j].chunk8(off);
                         (f32x8::load_t(token, lanes) + f32x8::load_t(token, &bufs[j])).store(lanes);
                     }
+                    let dv: &mut [f64; 8] = (&mut dvals[i..i + 8]).try_into().unwrap();
                     for l in 0..8 {
-                        dvals[i + l] = bufs[0][l] as f64;
+                        dv[l] = bufs[0][l] as f64;
                     }
                     if (i + 8).is_multiple_of(crate::featcanon::ROW_LANES_FOLD) {
                         for (l32, l) in pools32.iter_mut().zip(pools.iter_mut()) {
@@ -1885,8 +1893,9 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64, const R7: bool>(
                         (f32x16::load_t(token, lanes) + vecs[j]).store(lanes);
                     }
                     let d = vecs[0].to_array();
+                    let dv: &mut [f64; 16] = (&mut dvals[i..i + 16]).try_into().unwrap();
                     for l in 0..16 {
-                        dvals[i + l] = d[l] as f64;
+                        dv[l] = d[l] as f64;
                     }
                     if (i + 16).is_multiple_of(crate::featcanon::ROW_LANES_FOLD) {
                         for (l32, l) in pools32.iter_mut().zip(pools.iter_mut()) {
@@ -1966,8 +1975,9 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64, const R7: bool>(
                         let lanes = pools32[j].chunk8(off);
                         (f32x8::load_t(token, lanes) + f32x8::load_t(token, &bufs[j])).store(lanes);
                     }
+                    let dv: &mut [f64; 8] = (&mut dvals[i..i + 8]).try_into().unwrap();
                     for l in 0..8 {
-                        dvals[i + l] = bufs[0][l] as f64;
+                        dv[l] = bufs[0][l] as f64;
                     }
                     if (i + 8).is_multiple_of(crate::featcanon::ROW_LANES_FOLD) {
                         for (l32, l) in pools32.iter_mut().zip(pools.iter_mut()) {
