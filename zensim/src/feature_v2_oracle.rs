@@ -1844,12 +1844,13 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64>(
                 }};
             }
             let mut c = 0usize;
-            // Sixteen columns per step (two chunks): every term is
-            // element-wise, so each lane computes the eight-wide step's bits;
-            // revision 7 adds the sixteen values to the sixteen f32 lanes in
-            // one vector op (lane `x & 15`, the two chunks' order), and the
-            // other paths split the step back into its two chunks.
-            while steps_sixteen::<Token>() && c + 2 <= full {
+            // Revision 7 on AVX-512 tiers: sixteen columns per step (two
+            // chunks). Every term is element-wise, so each lane computes the
+            // eight-wide step's bits; the sixteen values go to the sixteen f32
+            // row lanes in one vector op (lane `x & 15`, the two chunks'
+            // order), or, with the rev4 bank on, back through the two chunks'
+            // updates. Revisions 5 and 6 keep the eight-wide loop below.
+            while rev7 && steps_sixteen::<Token>() && c + 2 <= full {
                 let i = c * 8;
                 macro_rules! ld16 {
                     ($r:expr) => {

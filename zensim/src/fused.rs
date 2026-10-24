@@ -6085,8 +6085,8 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
                 }};
             }
             let mut c = 0usize;
-            // Sixteen columns per step on AVX-512 tiers (revisions 5 and up).
-            if crate::feature_v2::steps_sixteen::<Token>() && local {
+            // Revision 7: sixteen columns per step on AVX-512 tiers.
+            if rev7 && crate::feature_v2::steps_sixteen::<Token>() {
                 let splats16 = crate::ssim_form::SsimSplats16::new(token, form);
                 let consts16 = (
                     f32x16::splat_t(token, 1.0),

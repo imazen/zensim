@@ -5438,13 +5438,13 @@ fn gradient_block_kernel_canon64_vec<
             let w_actd: &[[f32; 8]] = if BV_DSTACT { win!(act_dst, a0) } else { &[] };
             let (w_m1, w_m2): (&[[f32; 8]], &[[f32; 8]]) =
                 if HPR { (win!(mu1, a0), win!(mu2, a0)) } else { (&[], &[]) };
-            // On AVX-512 tiers the chunks from x = 16 run two at a time,
+            // Revision 7 on AVX-512 tiers: the chunks from x = 16 run two at a time,
             // sixteen columns per step, so element e of a step is lane
             // `(x0 + e) & 15`; the first chunk (x = 8) and an odd last one stay
             // eight-wide. Every term is element-wise and every pool lane adds
             // the same values in the same order, so the bits are unchanged.
             // The gmsbank and rev4 bank paths keep the eight-wide step.
-            let wide = steps_sixteen::<Token>() && !BANK && r4.is_none() && n >= 3;
+            let wide = rev7 && steps_sixteen::<Token>() && !BANK && r4.is_none() && n >= 3;
             let m16 = if wide { (n - 1) / 2 } else { 0 };
             let mut k = 0usize;
             while k < n {
