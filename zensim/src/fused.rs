@@ -4630,55 +4630,77 @@ impl VblurPools<crate::featcanon::Lanes16F32> {
     /// sum, then the difference lane to the distorted sum: the ratio features
     /// then see the small difference summed directly, not recovered by
     /// subtracting two large sums.
-    fn fold_into<P: crate::featcanon::Pool>(&mut self, row: &mut VblurPools<P>) {
-        for (src, dst, rsrc, rdst) in [
-            (
-                &mut self.hf_sq_src,
-                &mut self.hf_sq_dst,
-                &mut row.hf_sq_src,
-                &mut row.hf_sq_dst,
-            ),
-            (
-                &mut self.hf_abs_src,
-                &mut self.hf_abs_dst,
-                &mut row.hf_abs_src,
-                &mut row.hf_abs_dst,
-            ),
-        ] {
-            for l in 0..16 {
-                rsrc.add(l, src.0[l]);
-                rdst.add(l, src.0[l]);
-                rdst.add(l, dst.0[l]);
+    ///
+    /// Only the pools the element step writes under `free` and `ext` are
+    /// folded (the others' lanes stay zero, and so do their sums).
+    fn fold_into<P: crate::featcanon::Pool>(
+        &mut self,
+        row: &mut VblurPools<P>,
+        free: FreeExtrasWork,
+        ext: ExtPoolsWork,
+    ) {
+        if !free.local_only {
+            for (src, dst, rsrc, rdst) in [
+                (
+                    &mut self.hf_sq_src,
+                    &mut self.hf_sq_dst,
+                    &mut row.hf_sq_src,
+                    &mut row.hf_sq_dst,
+                ),
+                (
+                    &mut self.hf_abs_src,
+                    &mut self.hf_abs_dst,
+                    &mut row.hf_abs_src,
+                    &mut row.hf_abs_dst,
+                ),
+            ] {
+                for l in 0..16 {
+                    rsrc.add(l, src.0[l]);
+                    rdst.add(l, src.0[l]);
+                    rdst.add(l, dst.0[l]);
+                }
+                *src = crate::featcanon::Lanes16F32::default();
+                *dst = crate::featcanon::Lanes16F32::default();
             }
-            *src = crate::featcanon::Lanes16F32::default();
-            *dst = crate::featcanon::Lanes16F32::default();
         }
         self.ssim_d.fold_into(&mut row.ssim_d);
         self.ssim_d4.fold_into(&mut row.ssim_d4);
         self.ssim_d2.fold_into(&mut row.ssim_d2);
-        self.ssim_d8.fold_into(&mut row.ssim_d8);
-        self.edge_art.fold_into(&mut row.edge_art);
-        self.edge_art4.fold_into(&mut row.edge_art4);
-        self.edge_art2.fold_into(&mut row.edge_art2);
-        self.edge_art8.fold_into(&mut row.edge_art8);
-        self.edge_det.fold_into(&mut row.edge_det);
-        self.edge_det4.fold_into(&mut row.edge_det4);
-        self.edge_det2.fold_into(&mut row.edge_det2);
-        self.edge_det8.fold_into(&mut row.edge_det8);
+        if !free.local_only && !free.omit_peaks {
+            self.ssim_d8.fold_into(&mut row.ssim_d8);
+        }
+        if !free.omit_edges {
+            self.edge_art.fold_into(&mut row.edge_art);
+            self.edge_art4.fold_into(&mut row.edge_art4);
+            self.edge_art2.fold_into(&mut row.edge_art2);
+            self.edge_det.fold_into(&mut row.edge_det);
+            self.edge_det4.fold_into(&mut row.edge_det4);
+            self.edge_det2.fold_into(&mut row.edge_det2);
+            if !free.omit_peaks {
+                self.edge_art8.fold_into(&mut row.edge_art8);
+                self.edge_det8.fold_into(&mut row.edge_det8);
+            }
+        }
         self.mse.fold_into(&mut row.mse);
-        self.act_sum.fold_into(&mut row.act_sum);
-        self.masked_ssim_d.fold_into(&mut row.masked_ssim_d);
-        self.masked_ssim_d4.fold_into(&mut row.masked_ssim_d4);
-        self.masked_ssim_d2.fold_into(&mut row.masked_ssim_d2);
-        self.masked_art4.fold_into(&mut row.masked_art4);
-        self.masked_det4.fold_into(&mut row.masked_det4);
-        self.masked_mse.fold_into(&mut row.masked_mse);
-        self.iw_ssim_d.fold_into(&mut row.iw_ssim_d);
-        self.iw_ssim_d4.fold_into(&mut row.iw_ssim_d4);
-        self.iw_ssim_d2.fold_into(&mut row.iw_ssim_d2);
-        self.iw_art4.fold_into(&mut row.iw_art4);
-        self.iw_det4.fold_into(&mut row.iw_det4);
-        self.iw_mse.fold_into(&mut row.iw_mse);
+        if ext.on {
+            self.act_sum.fold_into(&mut row.act_sum);
+            if ext.mask {
+                self.masked_ssim_d.fold_into(&mut row.masked_ssim_d);
+                self.masked_ssim_d4.fold_into(&mut row.masked_ssim_d4);
+                self.masked_ssim_d2.fold_into(&mut row.masked_ssim_d2);
+                self.masked_art4.fold_into(&mut row.masked_art4);
+                self.masked_det4.fold_into(&mut row.masked_det4);
+                self.masked_mse.fold_into(&mut row.masked_mse);
+            }
+            if ext.iw {
+                self.iw_ssim_d.fold_into(&mut row.iw_ssim_d);
+                self.iw_ssim_d4.fold_into(&mut row.iw_ssim_d4);
+                self.iw_ssim_d2.fold_into(&mut row.iw_ssim_d2);
+                self.iw_art4.fold_into(&mut row.iw_art4);
+                self.iw_det4.fold_into(&mut row.iw_det4);
+                self.iw_mse.fold_into(&mut row.iw_mse);
+            }
+        }
     }
 }
 
@@ -5663,7 +5685,7 @@ fn fused_vblur_ssim_local<P: crate::featcanon::Pool>(
             if rev7
                 && (x + 1 == chunk_end || (x < chunk_end && (x + 1).is_multiple_of(ROW_LANES_FOLD)))
             {
-                row32.fold_into(&mut row);
+                row32.fold_into(&mut row, free, ext);
             }
         }
         // One fixed-order finish per row per pool.
@@ -6134,7 +6156,7 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
                         }
                     }
                     if rev7 && (x0 + $w).is_multiple_of(crate::featcanon::ROW_LANES_FOLD) {
-                        row32.fold_into(&mut row);
+                        row32.fold_into(&mut row, free, ext);
                     }
                 }};
             }
@@ -6201,7 +6223,7 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
             }
             // The end of the chunks, unless the last chunk already folded.
             if rev7 && full > 0 && !(full * 8).is_multiple_of(crate::featcanon::ROW_LANES_FOLD) {
-                row32.fold_into(&mut row);
+                row32.fold_into(&mut row, free, ext);
             }
             // Scalar tail — the canonical element step verbatim.
             for x in full * 8..width {

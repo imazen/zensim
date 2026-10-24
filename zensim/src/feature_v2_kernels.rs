@@ -3556,8 +3556,9 @@ fn dense_block_kernel_at_revision(
     // era-1/era-2 dispatch byte-for-byte.
     let mode = crate::featcanon::mode(revision);
     if revision >= FormulaRevision::Rev5 && matches!(mode, crate::featcanon::Mode::Canon64) {
-        let acc = incant!(
-            dense_block_kernel_canon64_vec::<crate::featcanon::Lanes16F64>(
+        let acc = if revision.row_lanes() {
+            incant!(
+                dense_block_kernel_canon64_vec::<crate::featcanon::Lanes16F64, true>(
                 src,
                 dst,
                 mu1,
@@ -3570,9 +3571,28 @@ fn dense_block_kernel_at_revision(
                 transducer_bank,
                 r4,
                 revision,
-            ),
-            [v4x, v4, v3, neon, wasm128, scalar]
-        );
+                ),
+                [v4x, v4, v3, neon, wasm128, scalar]
+            )
+        } else {
+            incant!(
+                dense_block_kernel_canon64_vec::<crate::featcanon::Lanes16F64, false>(
+                src,
+                dst,
+                mu1,
+                mu2,
+                ssq,
+                s12,
+                activity,
+                width,
+                height,
+                transducer_bank,
+                r4,
+                revision,
+                ),
+                [v4x, v4, v3, neon, wasm128, scalar]
+            )
+        };
         #[cfg(feature = "oracle")]
         audit_rev5_moments(
             &acc,
@@ -3594,7 +3614,7 @@ fn dense_block_kernel_at_revision(
                 // canon64: the `LanesF64` canonical arm — tier-dispatched;
                 // scalar/wasm128 keep the generic scalar body.
                 return incant!(
-                    dense_block_kernel_canon64_vec::<crate::featcanon::LanesF64>(
+                    dense_block_kernel_canon64_vec::<crate::featcanon::LanesF64, false>(
                         src,
                         dst,
                         mu1,

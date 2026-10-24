@@ -1600,7 +1600,7 @@ const DENSE_ILV: usize = 16;
 
 #[magetypes(define(f32x8, f32x16, f64x8), v4x, v4, v3, -scalar)]
 #[allow(clippy::too_many_arguments)]
-fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64>(
+fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64, const R7: bool>(
     token: Token,
     src: &[f32],
     dst: &[f32],
@@ -1683,7 +1683,10 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64>(
     // central moments of `d` are two-pass per row (`row_moments_canon`'s
     // ops, lane-parallel) with one merge per row. Revisions 5 and 6 keep
     // their bits.
-    let rev7 = revision.row_lanes();
+    // `R7` is `revision.row_lanes()` at compile time, so a revision-7 instance
+    // carries none of the eight-lane and interleave buffers below.
+    let rev7 = R7;
+    debug_assert_eq!(rev7, revision.row_lanes());
     debug_assert!(!rev7 || stable_moments, "revision 7 runs on the sixteen-lane pools");
     let mut dvals = if rev7 { vec![0.0f64; width] } else { Vec::new() };
     let row_moments = |v: &[f64]| -> OnlineMoments {
@@ -1735,6 +1738,8 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64>(
             m4: crate::featcanon::Pool::fin(crate::featcanon::Lanes16F64(s4)),
         }
     };
+    // Revision 7's f32 row lanes; every row's fold clears them.
+    let mut pools32 = [crate::featcanon::Lanes16F32::default(); 29];
     let mut b0 = 0usize;
     while b0 < height {
         let b1 = (b0 + ERA2_BAND_ROWS).min(height);
@@ -1749,7 +1754,6 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64>(
             // the former v3-only dispatch worked around). The tail slices
             // give `dense_elem_canon` the same typed pool refs — zero cost.
             let mut pools = [P::zero(); 29];
-            let mut pools32 = [crate::featcanon::Lanes16F32::default(); 29];
             let mut local = [0.0f64; 16];
             let mut blocks = 0usize;
             let full = width / 8;
@@ -2144,7 +2148,7 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64>(
 /// Scalar-tier siblings of [`dense_block_kernel_canon64_vec`]: scalar and
 /// wasm128 keep the `LanesF64` canonical body.
 #[allow(clippy::too_many_arguments)]
-fn dense_block_kernel_canon64_vec_scalar<P: crate::featcanon::Pool64>(
+fn dense_block_kernel_canon64_vec_scalar<P: crate::featcanon::Pool64, const R7: bool>(
     _token: archmage::ScalarToken,
     src: &[f32],
     dst: &[f32],
@@ -2177,7 +2181,7 @@ fn dense_block_kernel_canon64_vec_scalar<P: crate::featcanon::Pool64>(
 
 /// Wasm128 sibling of [`dense_block_kernel_canon64_vec_scalar`].
 #[allow(clippy::too_many_arguments, dead_code)]
-fn dense_block_kernel_canon64_vec_wasm128<P: crate::featcanon::Pool64>(
+fn dense_block_kernel_canon64_vec_wasm128<P: crate::featcanon::Pool64, const R7: bool>(
     _token: archmage::Wasm128Token,
     src: &[f32],
     dst: &[f32],
@@ -2211,7 +2215,7 @@ fn dense_block_kernel_canon64_vec_wasm128<P: crate::featcanon::Pool64>(
 /// NEON runs the scalar canonical body (2026-10-03): NEON vector `max`/`min` propagate NaN where the canon's `f32::max`/
 /// `f64::max` drop it (the REV4VEC CI aarch64 failure), so only the x86_64 fused tiers run a lane-parallel body.
 #[allow(clippy::too_many_arguments, dead_code)]
-fn dense_block_kernel_canon64_vec_neon<P: crate::featcanon::Pool64>(
+fn dense_block_kernel_canon64_vec_neon<P: crate::featcanon::Pool64, const R7: bool>(
     _token: archmage::NeonToken,
     src: &[f32],
     dst: &[f32],
