@@ -2662,9 +2662,13 @@ byc-rev6-tests:
 byc-serve-parity bin_dir mixture out +bakes:
     python3 scripts/byconstruction/serve_parity.py --bin-dir {{quote(bin_dir)}} --mixture {{quote(mixture)}} --out {{quote(out)}} {{ prepend("--bake ", bakes) }}
 
+# The same against a bake's table-route predictions for a pair list (row order), e.g. AIC2026 public_train.
+byc-serve-parity-pairs bin_dir pairs pred out bake:
+    python3 scripts/byconstruction/serve_parity.py --bin-dir {{quote(bin_dir)}} --pairs {{quote(pairs)}} --pred {{quote(pred)}} --out {{quote(out)}} --bake {{quote(bake)}} --jobs 12
+
 # Candidate, legacy and judge maps for the map-quality study (zensim-bench `map_dump`).
-byc-map-dump pairs out bake tag window="box" paint="nearest" *flags="":
-    cargo run --release --manifest-path zensim-bench/Cargo.toml --features zen-decode,dvifm-judge --example map_dump -- --pairs {{quote(pairs)}} --out {{quote(out)}} --bake {{quote(bake)}} --tag {{tag}} --window {{window}} --paint {{paint}} {{flags}}
+byc-map-dump pairs out bake tag window="box" paint="nearest" split="repair" *flags="":
+    cargo run --release --manifest-path zensim-bench/Cargo.toml --features dvifm-judge --example map_dump -- --pairs {{quote(pairs)}} --out {{quote(out)}} --bake {{quote(bake)}} --tag {{tag}} --window {{window}} --paint {{paint}} --split {{split}} {{flags}}
 
 # The workbench module (wasm32 + SIMD128) with the bakes in ZENSIM_WORKBENCH_BAKES; wasm-bindgen-cli 0.2.129.
 byc-workbench-module out="target/zensim-workbench-web" wasm_bindgen="wasm-bindgen":

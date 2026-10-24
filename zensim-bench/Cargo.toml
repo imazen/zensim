@@ -87,8 +87,10 @@ verify-all = ["verify-avif", "verify-jxl", "verify-webp"]
 # `verify_bitstream_decode` are guaranteed to build the SAME decoders.
 zen-decode = ["verify-all", "dep:serde_json", "dep:sha2", "zenpixels-convert/cms-moxcms"]
 gmsbank-peer = ["zen-decode", "dep:gmsd"]
+# map_dump (research): PNG pairs through the `image` crate, so it builds without the sibling codec checkouts.
+map-dump = ["dep:serde_json"]
 # map_dump's DVIFM 0.3 judge (the sibling dvifmish checkout; research only).
-dvifm-judge = ["zen-decode", "dep:dvifmish"]
+dvifm-judge = ["map-dump", "dep:dvifmish"]
 
 # Test-only: the fixture ENCODERS for `tests/zen_decode_formats.rs`. The gates
 # synthesise their own AVIF / JXL / XYB-JPEG / WebP / PNG fixtures rather than
@@ -301,7 +303,7 @@ required-features = ["zen-decode"]
 # By-construction exploration: candidate/legacy/judge spatial maps for the map-quality study.
 [[example]]
 name = "map_dump"
-required-features = ["zen-decode"]
+required-features = ["map-dump"]
 
 [[example]]
 name = "m3_fixture_gen"

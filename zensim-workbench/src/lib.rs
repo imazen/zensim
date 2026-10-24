@@ -20,14 +20,17 @@ use zensim::{BakeScorer, Fused944Session, RgbSlice};
 
 include!(concat!(env!("OUT_DIR"), "/bakes.rs"));
 
-/// The maps every metric publishes: `(name, window mode, paint mode, bin)`.
-/// `diffmap` (first) is the one the workbench shows by default.
-pub const MAPS: &[(&str, &str, &str, usize)] = &[
-    ("diffmap", "guided", "guided", 1),
-    ("box", "box", "nearest", 1),
-    ("center", "center", "nearest", 1),
-    ("guided", "guided", "nearest", 1),
-    ("blocks8", "guided", "nearest", 8),
+/// The maps every metric publishes: `(name, window mode, paint mode, split,
+/// bin)` (`zensim`'s research map modes). `diffmap` (first) is the one the
+/// workbench shows by default; its modes are provisional until the map study
+/// (`benchmarks/byconstruction_2026-10-22.md`, "Maps") picks them.
+pub const MAPS: &[(&str, &str, &str, &str, usize)] = &[
+    ("diffmap", "guided", "guided", "exact", 1),
+    ("box", "box", "nearest", "repair", 1),
+    ("center", "center", "nearest", "repair", 1),
+    ("guided", "guided", "nearest", "repair", 1),
+    ("exact", "guided", "nearest", "exact", 1),
+    ("blocks8", "guided", "nearest", "exact", 8),
 ];
 
 /// `"zensimx"`.
@@ -252,7 +255,7 @@ pub fn compute_map(
     width: u32,
     height: u32,
 ) -> Result<SpatialMap, String> {
-    let &(name, window, paint, bin) = MAPS
+    let &(name, window, paint, split, bin) = MAPS
         .iter()
         .find(|m| m.0 == map)
         .ok_or_else(|| format!("no map named {map} (maps: {})", map_names().join(", ")))?;
@@ -265,7 +268,7 @@ pub fn compute_map(
     let mut scorer = BakeScorer::new(&m)
         .map_err(|e| e.to_string())?
         .with_parallel(false)
-        .with_map_paint(window, paint)
+        .with_map_paint(window, paint, split)
         .map_err(|e| e.to_string())?;
     let pre = scorer
         .precompute_reference(&rs)

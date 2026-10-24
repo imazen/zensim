@@ -12,17 +12,14 @@
 //!
 //! ```text
 //! map_dump --pairs PAIRS.tsv --out DIR --bake BAKE.bin --tag NAME [--bin 1] [--window box|center|guided]
-//!          [--paint nearest|guided] [--legacy] [--judges]
+//!          [--paint nearest|guided] [--split repair|exact] [--legacy] [--judges]
 //! ```
 //!
 //! `PAIRS.tsv` has a header with `key`, `ref_path`, `dist_path`. Each map is
 //! written to `DIR/<key>.<name>.f32` (row-major little-endian f32: `w × h`, or
 //! the candidate's `ceil(w/bin) × ceil(h/bin)` bin grid), and one JSON object
-//! per pair goes to stdout. Decoding goes through the shared zen decode owner.
-//! No labels are read.
-
-#[path = "shared/zen_decode.rs"]
-mod zen_decode;
+//! per pair goes to stdout. Inputs are PNG files decoded by the `image` crate
+//! (lossless: any conforming decoder gives the same pixels). No labels are read.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -282,7 +279,8 @@ fn main() {
     let mut args = std::env::args().skip(1);
     let (mut pairs, mut out, mut bake, mut tag) = (None, None, None, String::from("attr"));
     let (mut bin, mut legacy, mut judges) = (1usize, false, false);
-    let (mut window, mut paint) = (String::from("box"), String::from("nearest"));
+    let (mut window, mut paint, mut split) =
+        (String::from("box"), String::from("nearest"), String::from("repair"));
     while let Some(a) = args.next() {
         match a.as_str() {
             "--pairs" => pairs = args.next().map(PathBuf::from),
@@ -292,6 +290,7 @@ fn main() {
             "--bin" => bin = args.next().expect("--bin N").parse().expect("bin"),
             "--window" => window = args.next().expect("--window MODE"),
             "--paint" => paint = args.next().expect("--paint MODE"),
+            "--split" => split = args.next().expect("--split MODE"),
             "--legacy" => legacy = true,
             "--judges" => judges = true,
             other => panic!("unknown argument {other}"),
@@ -328,19 +327,19 @@ fn main() {
     let lines: Vec<String> = rows
         .par_iter()
         .map(|p| {
-            let rd = zen_decode::decode_rgb8_path(&p.reference).expect("decode ref");
-            let dd = zen_decode::decode_rgb8_path(&p.distorted).expect("decode dist");
-            let (w, h) = (rd.width as usize, rd.height as usize);
-            assert_eq!((w, h), (dd.width as usize, dd.height as usize), "{}: size mismatch", p.key);
-            let rpx: &[[u8; 3]] = rd.pixels.as_chunks::<3>().0;
-            let dpx: &[[u8; 3]] = dd.pixels.as_chunks::<3>().0;
+            let rd = image::open(&p.reference).expect("decode ref").to_rgb8();
+            let dd = image::open(&p.distorted).expect("decode dist").to_rgb8();
+            let (w, h) = (rd.width() as usize, rd.height() as usize);
+            assert_eq!((w, h), (dd.width() as usize, dd.height() as usize), "{}: size mismatch", p.key);
+            let rpx: &[[u8; 3]] = rd.as_raw().as_chunks::<3>().0;
+            let dpx: &[[u8; 3]] = dd.as_raw().as_chunks::<3>().0;
             let (rs, ds) = (RgbSlice::new(rpx, w, h), RgbSlice::new(dpx, w, h));
             let mut row = serde_json::json!({"key": p.key, "width": w, "height": h});
             if let Some(model) = &model {
                 let mut scorer = BakeScorer::new(model)
                     .expect("bake scorer")
                     .with_parallel(false)
-                    .with_map_paint(&window, &paint)
+                    .with_map_paint(&window, &paint, &split)
                     .expect("paint modes");
                 let pre = scorer.precompute_reference(&rs).expect("reference");
                 let mut session = Fused944Session::new();
@@ -350,7 +349,13 @@ fn main() {
                 let a = att.attribution();
                 let total: f64 = a.density().iter().map(|&v| v as f64).sum::<f64>() * (bin * bin) as f64;
                 write_f32(&out.join(format!("{}.{tag}.f32", p.key)), a.density().iter().copied());
-                row[tag.as_str()] = serde_json::json!({"score": att.result().score(), "window": window, "paint": paint, "grid": [a.grid_width(), a.grid_height()],
+                let sens = att.sensitivities();
+                let (smax_i, smax) = sens
+                    .iter()
+                    .enumerate()
+                    .fold((0usize, 0.0f64), |acc, (i, &v)| if v.abs() > acc.1 { (i, v.abs()) } else { acc });
+                row[tag.as_str()] = serde_json::json!({"score": att.result().score(), "window": window, "paint": paint, "split": split,
+                    "sens_max": smax, "sens_max_id": smax_i, "grid": [a.grid_width(), a.grid_height()],
                     "bin": a.bin(), "mass": total, "unsupported": att.unsupported_feature_ids().len()});
             }
             if legacy {
@@ -379,16 +384,17 @@ fn main() {
                 row["ssim2_raw"] = serde_json::json!(raw);
                 #[cfg(feature = "dvifm-judge")]
                 {
-                    let params = dvifmish::presets::get("port-lap-v0.3").expect("DVIFM 0.3 preset");
+                    // DVIFM 0.3 in port mode: the author's v0.3 Laplacian variant, as the frozen
+                    // 2026-10-20 runtime scored it (`--params` port-lap-v0.3).
+                    let params = dvifmish::port::presets::get("port-lap-v0.3").expect("DVIFM 0.3 port preset");
                     let flat = |px: &[[u8; 3]]| -> Vec<u8> { px.iter().flatten().copied().collect() };
                     let (rf, df) = (flat(rpx), flat(dpx));
                     let ri = dvifmish::Image::new(w, h, &rf).expect("dvifm ref");
                     let di = dvifmish::Image::new(w, h, &df).expect("dvifm dist");
-                    let (score, map) =
-                        dvifmish::score_with_map(&params, &ri, &di, dvifmish::Math::Float).expect("dvifm");
+                    let (score, map) = dvifmish::port::score_with_map(&params, &ri, &di).expect("dvifm");
                     let painted = map.painted(None, None);
                     write_f32(&out.join(format!("{}.dvifm.f32", p.key)), painted.iter().map(|&v| v as f32));
-                    row["dvifm"] = serde_json::json!({"raw": score.raw, "map_total": map.total()});
+                    row["dvifm"] = serde_json::json!({"raw": score.raw, "jnd": score.jnd, "map_total": map.total()});
                 }
             }
             row.to_string()
