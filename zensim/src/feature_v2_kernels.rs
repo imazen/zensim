@@ -5412,11 +5412,76 @@ fn gradient_block_kernel_canon64_vec<
             let (mut r_bv_gain32, mut r_bv_loss32) = ([0.0f32; 16], [0.0f32; 16]);
             // Revision 7's difference pair: `gsrc` and `gdst − gsrc`.
             let (mut r_gsrc32, mut r_gdst32) = ([0.0f32; 16], [0.0f32; 16]);
-            // Lane-aligned head: x = 1..8 scalar (interior starts one
-            // pixel in — the canonical lanes land on chunk lanes only for
-            // x ≡ 0 (mod 8) chunk starts).
+            // Lane-aligned head: x = 1..8 (interior starts one pixel in — the
+            // canonical lanes land on chunk lanes only for x ≡ 0 (mod 8) chunk
+            // starts). Head and tail add in the f64 lanes; without the bank
+            // paths and in rows of at least ten columns they are evaluated as
+            // one eight-wide step each (`edge8!`), whose lanes are the scalar
+            // element's values, added in ascending x.
             let head_end = interior_end.min(8);
-            for x in 1..head_end {
+            let vec_edges = !BANK && r4.is_none() && interior_end >= 9;
+            macro_rules! edge8 {
+                ($xs:expr, $from:expr, $to:expr) => {{
+                    let xs: usize = $xs;
+                    macro_rules! ld8 {
+                        ($pl:expr, $o:expr) => {{
+                            let o: usize = $o;
+                            f32x8::load_t(token, $pl[o..o + 8].try_into().unwrap())
+                        }};
+                    }
+                    let actd = if BV_DSTACT {
+                        ld8!(act_dst, act_row + xs)
+                    } else {
+                        f32x8::zero_t(token)
+                    };
+                    let (m1, m2) = if HPR {
+                        (ld8!(mu1, act_row + xs), ld8!(mu2, act_row + xs))
+                    } else {
+                        (f32x8::zero_t(token), f32x8::zero_t(token))
+                    };
+                    let (gsrc, gdst, g, g2, ring_i, band, bv_gain, bv_loss) =
+                        gradient_terms32_v::<_, BANDVIS, BV_DSTACT, HPR>(
+                            token,
+                            ld8!(src_h, row + xs - 1),
+                            ld8!(src_h, row + xs + 1),
+                            ld8!(src_h, row_u + xs),
+                            ld8!(src_h, row_d + xs),
+                            ld8!(dst_h, row + xs - 1),
+                            ld8!(dst_h, row + xs + 1),
+                            ld8!(dst_h, row_u + xs),
+                            ld8!(dst_h, row_d + xs),
+                            ld8!(src_h, row + xs),
+                            ld8!(dst_h, row + xs),
+                            ld8!(activity, act_row + xs),
+                            actd,
+                            m1,
+                            m2,
+                            bv_lo,
+                            bv_hi,
+                            R7,
+                        );
+                    let (gs, gd, ga, gb) = (gsrc.to_array(), gdst.to_array(), g.to_array(), g2.to_array());
+                    let (ri, ba) = (ring_i.to_array(), band.to_array());
+                    let (bg, bl) = (bv_gain.to_array(), bv_loss.to_array());
+                    for x in $from..$to {
+                        let (l, lane) = (x - xs, x & (P::LANES - 1));
+                        r_gsrc.add(lane, gs[l]);
+                        r_gdst.add(lane, gd[l]);
+                        r_gms.add(lane, ga[l]);
+                        r_gms2.add(lane, gb[l]);
+                        r_ring.add(lane, ri[l]);
+                        r_band.add(lane, ba[l]);
+                        if BANDVIS {
+                            r_bv_gain.add(lane, bg[l]);
+                            r_bv_loss.add(lane, bl[l]);
+                        }
+                    }
+                }};
+            }
+            if vec_edges {
+                edge8!(1, 1, head_end);
+            }
+            for x in 1..if vec_edges { 1 } else { head_end } {
                 gradient_interior_elem_canon::<P, P, BANDVIS, BV_DSTACT, BANK, HPR, R7>(
                     src_h,
                     dst_h,
@@ -5713,8 +5778,12 @@ fn gradient_block_kernel_canon64_vec<
                 );
                 gpool_fold!(pair; r_gsrc, r_gsrc32, r_gdst, r_gdst32);
             }
-            // Scalar tail — the canonical element step verbatim.
-            for x in x0..interior_end {
+            // The tail: one eight-wide step ending at the interior's end, or
+            // the canonical element step per column.
+            if vec_edges && x0 < interior_end {
+                edge8!(interior_end - 8, x0, interior_end);
+            }
+            for x in x0..if vec_edges { x0 } else { interior_end } {
                 gradient_interior_elem_canon::<P, P, BANDVIS, BV_DSTACT, BANK, HPR, R7>(
                     src_h,
                     dst_h,
