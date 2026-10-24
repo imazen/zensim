@@ -11,8 +11,10 @@
 //! before/after bit-identity checks (`scripts/byconstruction/perf_bits.sh`); `--tier` forces a
 //! dispatch tier by disabling archmage tokens process-wide, as `tier_audit_features` does.
 //!
+//! `--read-set` prints the bake's declared feature ids (comma-separated) and exits.
+//!
 //! Usage: byc_score_timing --bake PATH [--size N | --width W --height H | --image PNG]
-//!        [--iters 30] [--warmup 5] [--dump PATH] [--tier v4x|v4|v3|scalar]
+//!        [--iters 30] [--warmup 5] [--dump PATH] [--tier v4x|v4|v3|scalar] [--read-set]
 use std::time::Instant;
 
 use zensim::{BakeScorer, RgbSlice};
@@ -130,6 +132,7 @@ fn from_image(path: &str) -> (Vec<[u8; 3]>, Vec<[u8; 3]>, usize, usize) {
 fn main() {
     let mut args = std::env::args().skip(1);
     let (mut bake, mut iters, mut warmup) = (None, 30usize, 5usize);
+    let mut read_set = false;
     let (mut width, mut height, mut image, mut dump, mut tier) = (
         1024usize,
         None::<usize>,
@@ -151,10 +154,19 @@ fn main() {
             "--image" => image = args.next(),
             "--dump" => dump = args.next(),
             "--tier" => tier = args.next(),
+            "--read-set" => read_set = true,
             other => panic!("unknown argument {other}"),
         }
     }
     let bake = bake.expect("--bake PATH");
+    if read_set {
+        let model = zenpredict::Model::from_bytes(&std::fs::read(&bake).expect("read bake"))
+            .expect("parse bake");
+        let ids = zensim::declared_feature_ids(&model).expect("declared feature ids");
+        let ids: Vec<String> = ids.iter().map(|i| i.to_string()).collect();
+        println!("{}", ids.join(","));
+        return;
+    }
     if let Some(t) = &tier {
         force_tier(t);
     }
