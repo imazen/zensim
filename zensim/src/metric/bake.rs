@@ -50,6 +50,10 @@ pub struct BakeScorer<'a> {
     /// scorer's model never changes, so the cache needs no invalidation.
     /// Composition (members, weights, companion) stays per call in [`Self::plan`].
     model_plan: std::sync::OnceLock<crate::feature_plan::Plan>,
+    /// [`Self::plan`]'s result, built on first use. Unlike `model_plan` it
+    /// depends on the composition, so every change to `members`, `weights` or
+    /// `corruption` resets it ([`Self::reset_plan`]).
+    served_plan: std::sync::OnceLock<crate::feature_plan::Plan>,
 }
 
 #[cfg(feature = "corruption-head")]
@@ -327,6 +331,7 @@ impl<'a> BakeScorer<'a> {
             #[cfg(feature = "corruption-head")]
             corruption: None,
             model_plan: std::sync::OnceLock::new(),
+            served_plan: std::sync::OnceLock::new(),
         })
     }
 
@@ -438,6 +443,7 @@ impl<'a> BakeScorer<'a> {
         let mut scorer = Self::new(first)?;
         scorer.members = rest.iter().map(Self::new).collect::<Result<_, _>>()?;
         scorer.weights = weights.map(<[f64]>::to_vec);
+        scorer.reset_plan();
         scorer.check_servable()?;
         Ok(scorer)
     }
@@ -461,6 +467,7 @@ impl<'a> BakeScorer<'a> {
         let t = deadband.unwrap_or_else(|| head.deadband_score());
         check_deadband(t)?;
         self.corruption = Some(Companion::Tree(head, t));
+        self.reset_plan();
         self.check_servable()?;
         Ok(self)
     }
@@ -480,6 +487,7 @@ impl<'a> BakeScorer<'a> {
     ) -> Result<Self, ZensimError> {
         check_deadband(deadband)?;
         self.corruption = Some(Companion::Linear(Box::new(Self::new(model)?), deadband));
+        self.reset_plan();
         self.check_servable()?;
         Ok(self)
     }
@@ -771,7 +779,24 @@ impl<'a> BakeScorer<'a> {
         }
     }
 
+    /// The served extraction plan: the members' and companion's union,
+    /// widened to an identity row. Cached in `served_plan` (built once per
+    /// composition; it was rebuilt several times per score, which re-derived
+    /// the identity layout over every slot).
     fn plan(&self) -> Result<crate::feature_plan::Plan, ZensimError> {
+        if let Some(plan) = self.served_plan.get() {
+            return Ok(plan.clone());
+        }
+        let plan = self.compose_plan()?;
+        Ok(self.served_plan.get_or_init(|| plan).clone())
+    }
+
+    /// Forget the cached [`Self::plan`] after a change to the composition.
+    fn reset_plan(&mut self) {
+        self.served_plan = std::sync::OnceLock::new();
+    }
+
+    fn compose_plan(&self) -> Result<crate::feature_plan::Plan, ZensimError> {
         use crate::feature_plan::Plan;
         let mut combined: Option<Plan> = None;
         for (i, scorer) in std::iter::once(self).chain(self.members.iter()).enumerate() {
@@ -1671,6 +1696,8 @@ impl<S: ImageSource> SteeringSession<'_, '_, S> {
         // reconstruction. Local probes must never differentiate its threshold.
         #[cfg(feature = "corruption-head")]
         let companion = self.scorer.corruption.take();
+        #[cfg(feature = "corruption-head")]
+        self.scorer.reset_plan();
         let attempted = self.scorer.compute_attribution_input(
             self.source,
             &self.reference,
@@ -1684,6 +1711,7 @@ impl<S: ImageSource> SteeringSession<'_, '_, S> {
         #[cfg(feature = "corruption-head")]
         {
             self.scorer.corruption = companion;
+            self.scorer.reset_plan();
         }
         let mut result = attempted?;
         #[cfg(feature = "corruption-head")]
