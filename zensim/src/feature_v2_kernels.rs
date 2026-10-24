@@ -80,7 +80,7 @@ impl_vf32!(GenericF32x16, F32x16Backend);
 /// `T`'s target features include AVX-512F (v4, v4x), so one register holds
 /// sixteen lanes. v3's sixteen-lane type is two 256-bit halves, and the wider
 /// step measured slower there (B at 2048², revision 7: 80.4 → 84.9 ms).
-const fn steps_sixteen<T: archmage::SimdToken>() -> bool {
+pub(crate) const fn steps_sixteen<T: archmage::SimdToken>() -> bool {
     let f = T::TARGET_FEATURES.as_bytes();
     let pat = b"avx512f";
     let mut i = 0;
@@ -5246,7 +5246,7 @@ fn gradient_terms32_v<
 /// production interior already uses. `gmsbank_pixel_var`, the chroma
 /// pushes and `rev4_grad_pixel` stay scalar per element. `_scalar` and
 /// `_wasm128` keep the scalar canonical body.
-#[magetypes(define(f32x8), v4x, v4, v3, -scalar)]
+#[magetypes(define(f32x8, f32x16), v4x, v4, v3, -scalar)]
 #[allow(clippy::too_many_arguments)]
 fn gradient_block_kernel_canon64_vec<
     P: crate::featcanon::Pool64,
@@ -5438,7 +5438,120 @@ fn gradient_block_kernel_canon64_vec<
             let w_actd: &[[f32; 8]] = if BV_DSTACT { win!(act_dst, a0) } else { &[] };
             let (w_m1, w_m2): (&[[f32; 8]], &[[f32; 8]]) =
                 if HPR { (win!(mu1, a0), win!(mu2, a0)) } else { (&[], &[]) };
-            for k in 0..n {
+            // On AVX-512 tiers the chunks from x = 16 run two at a time,
+            // sixteen columns per step, so element e of a step is lane
+            // `(x0 + e) & 15`; the first chunk (x = 8) and an odd last one stay
+            // eight-wide. Every term is element-wise and every pool lane adds
+            // the same values in the same order, so the bits are unchanged.
+            // The gmsbank and rev4 bank paths keep the eight-wide step.
+            let wide = steps_sixteen::<Token>() && !BANK && r4.is_none() && n >= 3;
+            let m16 = if wide { (n - 1) / 2 } else { 0 };
+            let mut k = 0usize;
+            while k < n {
+                if k == 1 && m16 > 0 {
+                    let span16 = m16 * 16;
+                    macro_rules! win16 {
+                        ($pl:expr, $start:expr) => {{
+                            let w: &[[f32; 16]] =
+                                $pl[$start + 8..$start + 8 + span16].as_chunks::<16>().0;
+                            &w[..m16]
+                        }};
+                    }
+                    let (v_sxl, v_sxr, v_syu, v_syd, v_s) = (
+                        win16!(src_h, c0 - 1),
+                        win16!(src_h, c0 + 1),
+                        win16!(src_h, row_u + head_end),
+                        win16!(src_h, row_d + head_end),
+                        win16!(src_h, c0),
+                    );
+                    let (v_dxl, v_dxr, v_dyu, v_dyd, v_d) = (
+                        win16!(dst_h, c0 - 1),
+                        win16!(dst_h, c0 + 1),
+                        win16!(dst_h, row_u + head_end),
+                        win16!(dst_h, row_d + head_end),
+                        win16!(dst_h, c0),
+                    );
+                    let v_act = win16!(activity, a0);
+                    let v_actd: &[[f32; 16]] = if BV_DSTACT { win16!(act_dst, a0) } else { &[] };
+                    let (v_m1, v_m2): (&[[f32; 16]], &[[f32; 16]]) =
+                        if HPR { (win16!(mu1, a0), win16!(mu2, a0)) } else { (&[], &[]) };
+                    for j in 0..m16 {
+                        let x0 = head_end + 8 + 16 * j;
+                        macro_rules! ld {
+                            ($w:expr) => {
+                                f32x16::load_t(token, &$w[j])
+                            };
+                        }
+                        let actd = if BV_DSTACT { ld!(v_actd) } else { f32x16::zero_t(token) };
+                        let (m1, m2) = if HPR {
+                            (ld!(v_m1), ld!(v_m2))
+                        } else {
+                            (f32x16::zero_t(token), f32x16::zero_t(token))
+                        };
+                        let (gsrc, gdst, g, g2, ring_i, band, bv_gain, bv_loss) =
+                            gradient_terms32_v::<_, BANDVIS, BV_DSTACT, HPR>(
+                                token,
+                                ld!(v_sxl),
+                                ld!(v_sxr),
+                                ld!(v_syu),
+                                ld!(v_syd),
+                                ld!(v_dxl),
+                                ld!(v_dxr),
+                                ld!(v_dyu),
+                                ld!(v_dyd),
+                                ld!(v_s),
+                                ld!(v_d),
+                                ld!(v_act),
+                                actd,
+                                m1,
+                                m2,
+                                bv_lo,
+                                bv_hi,
+                                R7,
+                            );
+                        // f64 lanes: lanes 0..8 then 8..16, each lane one add.
+                        macro_rules! add64 {
+                            ($pool:ident, $v:expr) => {{
+                                let a = ($v).to_array();
+                                for (off, half) in [(0usize, &a[..8]), (8, &a[8..])] {
+                                    let lanes = $pool.chunk8(off);
+                                    for l in 0..8 {
+                                        lanes[l] += half[l] as f64;
+                                    }
+                                }
+                            }};
+                        }
+                        macro_rules! add {
+                            ($pool:ident, $pool32:ident, $v:expr) => {{
+                                if rev7 {
+                                    (f32x16::load_t(token, &$pool32) + $v).store(&mut $pool32);
+                                } else {
+                                    add64!($pool, $v);
+                                }
+                            }};
+                        }
+                        add64!(r_gsrc, gsrc);
+                        add64!(r_gdst, gdst);
+                        add!(r_gms, r_gms32, g);
+                        add!(r_gms2, r_gms232, g2);
+                        add!(r_ring, r_ring32, ring_i);
+                        add!(r_band, r_band32, band);
+                        if BANDVIS {
+                            add!(r_bv_gain, r_bv_gain32, bv_gain);
+                            add!(r_bv_loss, r_bv_loss32, bv_loss);
+                        }
+                        if rev7 && (x0 + 16).is_multiple_of(crate::featcanon::ROW_LANES_FOLD) {
+                            gpool_fold!(
+                                clear;
+                                r_gms, r_gms32; r_gms2, r_gms232;
+                                r_ring, r_ring32; r_band, r_band32; r_bv_gain, r_bv_gain32;
+                                r_bv_loss, r_bv_loss32
+                            );
+                        }
+                    }
+                    k = 1 + 2 * m16;
+                    continue;
+                }
                 let x0 = head_end + 8 * k;
                 let sxl = f32x8::load_t(token, &w_sxl[k]);
                 let sxr = f32x8::load_t(token, &w_sxr[k]);
@@ -5536,6 +5649,7 @@ fn gradient_block_kernel_canon64_vec<
                         r_bv_loss, r_bv_loss32
                     );
                 }
+                k += 1;
             }
             let x0 = head_end + span;
             // The end of the chunks, unless the last chunk already folded.
