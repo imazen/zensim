@@ -4,6 +4,64 @@ pub(crate) mod tests {
     use crate::PixelFormat;
     use crate::source::{RgbSlice, StridedBytes};
 
+    /// Revision 7's blockiness takes lane partials per `STRIP_ROWS` kernel strip, merged in strip order: the
+    /// whole-range form (`blockiness_sparse_rows`, the materialized walks) and the strip walk
+    /// (`blockiness_sparse_strip_wide` over reflected halo windows, as the streaming walk and its parallel jobs
+    /// call it) must give the same bits, for heights that end on and off a strip boundary and widths with and
+    /// without a lattice remainder.
+    #[test]
+    fn rev7_blockiness_strip_partials_match_the_whole_range_form() {
+        if !crate::ssim_form::run_at_revision(
+            "7",
+            "feature_v2::tests::rev7_blockiness_strip_partials_match_the_whole_range_form",
+            "REV7-BLOCKINESS-STRIPS-RAN",
+        ) {
+            return;
+        }
+        println!("REV7-BLOCKINESS-STRIPS-RAN");
+        use crate::featcanon::SumVar;
+        let mut state = 0x2545_f491_4f6c_dd1du64;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 40) as f32 / (1u64 << 24) as f32
+        };
+        for (w, h) in [(77usize, 300usize), (200, 256), (1031, 133), (64, 129), (9, 40)] {
+            let src: Vec<f32> = (0..w * h).map(|_| next()).collect();
+            let dst: Vec<f32> = src.iter().map(|&v| v + (next() - 0.5) * 0.1).collect();
+            let (whole_v, whole_h) = blockiness_sparse_rows(&src, &dst, w, 0, h);
+            let mode = crate::featcanon::mode(FormulaRevision::Rev7);
+            let (mut sv, mut sh) = (SumVar::f64_elems(mode), SumVar::f64_elems(mode));
+            let mut y0 = 0;
+            while y0 < h {
+                let strip_h = STRIP_ROWS.min(h - y0);
+                let wide_h = strip_h + 2 * HALO_P;
+                let (mut sw, mut dw) = (vec![0f32; w * wide_h], vec![0f32; w * wide_h]);
+                for i in 0..wide_h {
+                    let gy = reflect_101(y0 as isize - HALO_P as isize + i as isize, h);
+                    sw[i * w..(i + 1) * w].copy_from_slice(&src[gy * w..(gy + 1) * w]);
+                    dw[i * w..(i + 1) * w].copy_from_slice(&dst[gy * w..(gy + 1) * w]);
+                }
+                blockiness_sparse_strip_wide(
+                    &sw,
+                    &dw,
+                    w,
+                    y0,
+                    strip_h,
+                    FormulaRevision::Rev7,
+                    &mut sv,
+                    &mut sh,
+                );
+                y0 += strip_h;
+            }
+            assert!(matches!(sv, SumVar::L64(_)), "revision 7 runs on the eight-lane sums");
+            assert_eq!(whole_v.fin().to_bits(), sv.fin().to_bits(), "{w}x{h} vertical");
+            assert_eq!(whole_h.fin().to_bits(), sh.fin().to_bits(), "{w}x{h} horizontal");
+            assert!(whole_v.fin() > 0.0 && (h <= 8 || whole_h.fin() > 0.0), "{w}x{h}: terms ran");
+        }
+    }
+
     // Explicit calibration tool; compiled only by calibration_instrument.sh.
     #[cfg(gmsbank_calibration_instrument)]
     include!("gmsbank_calibration_instrument.rs");

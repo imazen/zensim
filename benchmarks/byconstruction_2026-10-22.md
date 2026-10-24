@@ -1977,6 +1977,18 @@ The changes, in order:
     −1.67%. Skipping the three pools with `continue` inside the 29-pool loop instead was 12% slower (it changed the
     loop's code generation); the kernel takes a constant index list.
 
+16. **Blockiness in the parallel strip jobs** (revision 7): with eight or more threads the walk runs strip jobs in
+    parallel batches, but the merge after each batch computed every strip's blockiness on the main thread, because
+    revisions 4–6 keep one running sum across strips. A latency profile at eight threads (`perf record --latency`)
+    put 30.9% of the wall time at one running thread, blockiness 7.8% and the window copies 8.0% of it. Revision 7
+    sums each 128-row kernel strip into its own eight lanes, in the job, and the merge adds them in strip order; the
+    single-thread strip walk and the whole-range form (`blockiness_sparse_rows`, per-128-row partials) do the same,
+    so every path and thread count gives the same bits (`rev7_blockiness_strip_partials_match_the_whole_range_form`
+    compares the two forms at five geometries; a whole-range running sum fails it by one ulp). Revisions 5/6: 110 of
+    110 dumps identical; revision 7: values move by at most 2.0e-15, tiers and 1/8 threads identical. Paired, B,
+    v4x: eight threads (cpus 0–7) −9.38% at 1507×2048 and −10.48% at 1024² (`rev7_raw3_vs_blockpar_t8`); one thread
+    +0.31% / +0.20%, intervals spanning zero (`rev7_raw3_vs_blockpar_t1`).
+
 **Tried and not kept** (after 13): the three opsin cube roots interleaved step by step (bit-identical): −0.06% /
 −0.90% on v4x (`rev7_band_vs_cbrt3`, the 1507×2048 and 1024² cases), noise on v3; the conversion's inner loop runs at
 about two instructions per cycle, but interleaving did not raise it. The activity chain's `|src − mu1|` computed per

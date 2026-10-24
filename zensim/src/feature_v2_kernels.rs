@@ -6496,10 +6496,21 @@ fn blockiness_sparse_rows(
 ) -> (crate::featcanon::SumVar, crate::featcanon::SumVar) {
     // featacc: `Seq` (the production `f64 +=` chain) unless a measurement
     // mode is set — the f64-element rule means `c32` is `Seq` too.
-    let mut sum_v = crate::featcanon::SumVar::f64_elems_meas();
-    let mut sum_h = crate::featcanon::SumVar::f64_elems_meas();
+    use crate::featcanon::{LanesF64, SumVar};
+    let mut sum_v = SumVar::f64_elems_meas();
+    let mut sum_h = SumVar::f64_elems_meas();
     let spread = crate::ssim_form::active_revision().row_lanes();
+    // Revision 7 with the eight-lane sums: lane partials per `STRIP_ROWS`
+    // kernel strip of the plane, added in strip order, as the strip walk
+    // does (`blockiness_sparse_strip_wide`).
+    let partial = spread && matches!(sum_v, SumVar::L64(_));
+    let (mut pv, mut ph) = (SumVar::L64(LanesF64::zero()), SumVar::L64(LanesF64::zero()));
     for y in y0..y1 {
+        let (v, h) = if partial {
+            (&mut pv, &mut ph)
+        } else {
+            (&mut sum_v, &mut sum_h)
+        };
         blockiness_row(
             src,
             dst,
@@ -6507,9 +6518,15 @@ fn blockiness_sparse_rows(
             width,
             y % BLOCK_LATTICE == 0 && y > 0,
             spread,
-            &mut sum_v,
-            &mut sum_h,
+            v,
+            h,
         );
+        if partial && ((y + 1).is_multiple_of(STRIP_ROWS) || y + 1 == y1) {
+            sum_v.merge_from(&pv);
+            sum_h.merge_from(&ph);
+            pv = SumVar::L64(LanesF64::zero());
+            ph = SumVar::L64(LanesF64::zero());
+        }
     }
     (sum_v, sum_h)
 }

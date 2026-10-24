@@ -5113,6 +5113,27 @@ fn rev5_run_jobs(
             job.result.retained_strips = None;
         }
         let cached_source = rev5_cached_window(reference, info, job.ch);
+        // Revision 7: the strip's blockiness lane partials, here in the
+        // parallel job (both branches below); the merge after the batch adds
+        // them in strip order.
+        if local.blockiness && local.formula_revision.row_lanes() {
+            let n = info.plane_w * info.wide_h();
+            let src = cached_source.unwrap_or(&job.scratch.src_wide[..n]);
+            let mode = crate::featcanon::mode(local.formula_revision);
+            let (v, h) = &mut job.result.block[scale];
+            *v = crate::featcanon::SumVar::f64_elems(mode);
+            *h = crate::featcanon::SumVar::f64_elems(mode);
+            blockiness_sparse_strip_wide(
+                src,
+                &job.scratch.dst_wide[..n],
+                info.plane_w,
+                info.y0,
+                info.strip_h,
+                local.formula_revision,
+                v,
+                h,
+            );
+        }
         if let Some(output) = output.as_mut()
             && retained_core_admits(&local)
         {
@@ -5226,16 +5247,22 @@ fn rev5_run_jobs(
         }
         if local.blockiness {
             let (sum_v, sum_h) = &mut total.block[scale];
-            blockiness_sparse_strip_wide(
-                src,
-                dst,
-                info.plane_w,
-                info.y0,
-                info.strip_h,
-                local.formula_revision,
-                sum_v,
-                sum_h,
-            );
+            if local.formula_revision.row_lanes() {
+                let (v, h) = &job.result.block[scale];
+                sum_v.merge_from(v);
+                sum_h.merge_from(h);
+            } else {
+                blockiness_sparse_strip_wide(
+                    src,
+                    dst,
+                    info.plane_w,
+                    info.y0,
+                    info.strip_h,
+                    local.formula_revision,
+                    sum_v,
+                    sum_h,
+                );
+            }
         }
     }
 }
@@ -6149,6 +6176,18 @@ fn blockiness_sparse_strip_wide(
     sum_v: &mut crate::featcanon::SumVar,
     sum_h: &mut crate::featcanon::SumVar,
 ) {
+    use crate::featcanon::{LanesF64, SumVar};
+    let spread = revision.row_lanes();
+    // Revision 7: the strip's own lane partials, added to the running lanes
+    // once, so a strip's terms can be computed apart from the others (in
+    // parallel) and merged in strip order with the same bits.
+    let partial = spread && matches!((&*sum_v, &*sum_h), (SumVar::L64(_), SumVar::L64(_)));
+    let (mut pv, mut ph) = (SumVar::L64(LanesF64::zero()), SumVar::L64(LanesF64::zero()));
+    let (v, h) = if partial {
+        (&mut pv, &mut ph)
+    } else {
+        (&mut *sum_v, &mut *sum_h)
+    };
     for k in 0..strip_h {
         let y = y0 + k;
         blockiness_row(
@@ -6157,10 +6196,14 @@ fn blockiness_sparse_strip_wide(
             (HALO_P + k) * width,
             width,
             y.is_multiple_of(BLOCK_LATTICE) && y > 0,
-            revision.row_lanes(),
-            sum_v,
-            sum_h,
+            spread,
+            v,
+            h,
         );
+    }
+    if partial {
+        sum_v.merge_from(&pv);
+        sum_h.merge_from(&ph);
     }
 }
 
