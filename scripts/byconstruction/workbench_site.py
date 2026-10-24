@@ -5,6 +5,9 @@
       Copy a workbench site (a mirror of the public site with the extra-module hook, e.g. another private workbench),
       put the module beside its worker.js as pkg-zensimx/, and merge the module's manifest entry into the site's
       extra-modules.json (entries of other modules are kept; a previous zensimx entry is replaced).
+  smoke-compare NATIVE.jsonl WASM.jsonl
+      Compare the native and wasm smoke lines (`just byc-workbench-smoke`): every score within 1e-6 and every map sum
+      within 1e-4 of the native value (the f32 map kernels may round differently per SIMD tier).
   serve DIR [--host 0.0.0.0] [--port 3348] [--cert PEM --key PEM]
       Serve DIR cross-origin isolated (COOP/COEP), as the workbench needs. Browsers isolate only secure contexts, so
       other machines need HTTPS with a certificate for the host name.
@@ -63,6 +66,30 @@ def serve(a):
     httpd.serve_forever()
 
 
+def smoke_compare(a):
+    native = [json.loads(line) for line in Path(a.native).read_text().splitlines()]
+    wasm = {r["metric"]: r for r in (json.loads(line) for line in Path(a.wasm).read_text().splitlines())}
+    bad = []
+    for n in native:
+        m = n["metric"]
+        w = wasm.get(m)
+        if w is None:
+            bad.append(f"{m}: missing from wasm")
+            continue
+        for v in n["score"]["values"]:
+            wv = next((x["value"] for x in w["score"]["values"] if x["column"] == v["column"]), None)
+            if wv is None or abs(wv - v["value"]) > 1e-6 * max(1.0, abs(v["value"])):
+                bad.append(f"{m} {v['column']}: native {v['value']} wasm {wv}")
+        for name, s in n["maps"].items():
+            ws = w["maps"].get(name)
+            if ws is None or abs(ws - s) > 1e-4 * max(1.0, abs(s)):
+                bad.append(f"{m} map {name}: native {s} wasm {ws}")
+        print(m, "score", [v["value"] for v in n["score"]["values"]], "maps", n["maps"])
+    if bad:
+        raise SystemExit("\n".join(bad))
+    print(f"{len(native)} metrics agree")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -71,6 +98,9 @@ def main():
     p.add_argument("--module", required=True)
     p.add_argument("--manifest", required=True)
     p.add_argument("--out", required=True)
+    p = sub.add_parser("smoke-compare")
+    p.add_argument("native")
+    p.add_argument("wasm")
     p = sub.add_parser("serve")
     p.add_argument("dir")
     p.add_argument("--host", default="0.0.0.0")
@@ -78,7 +108,7 @@ def main():
     p.add_argument("--cert")
     p.add_argument("--key")
     a = ap.parse_args()
-    {"assemble": assemble, "serve": serve}[a.cmd](a)
+    {"assemble": assemble, "serve": serve, "smoke-compare": smoke_compare}[a.cmd](a)
 
 
 if __name__ == "__main__":

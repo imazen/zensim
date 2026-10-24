@@ -442,19 +442,41 @@ pub fn loop_map(
     Ok(LoopMap { values, score })
 }
 
-/// One map's default placement on butteraugli's scale, `(map, scale, exponent, r)`;
-/// `r` is the held-out log-space correlation of block distances with
-/// butteraugli's on zenmetrics' calibration encodes (`examples/loop_calibrate.rs`).
-pub const LOOP_DEFAULTS: &[(&str, f64, f64, f64)] = &[("diffmap", 1.0, 0.5, f64::NAN)];
+/// Each map's placement on butteraugli's scale for one bake,
+/// `(bake SHA-256 prefix, map, scale, exponent, r)`: fitted by zenmetrics'
+/// method on its calibration encodes of the CID22-512 training images, with
+/// `r` the log-space correlation of block distances with butteraugli's on the
+/// held-out gb82 screenshots (`examples/loop_calibrate.rs`, 2026-10-24; record
+/// `benchmarks/byconstruction_2026-10-22.md`). A bake or map without an entry
+/// gets scale 1, exponent 0.5 and no `r`.
+pub const LOOP_DEFAULTS: &[(&str, &str, f64, f64, f64)] = &[
+    // The revision-6 Tga candidate.
+    ("5ece9e45", "diffmap", 1.421980e-1, 0.4, 0.5177),
+    ("5ece9e45", "exact_box", 1.795247e-1, 0.4, 0.5239),
+    ("5ece9e45", "removal", 1.512383e-1, 0.5, 0.5113),
+    ("5ece9e45", "blocks8", 1.562659e-1, 0.6, 0.6641),
+    // B (diff+frag-820, revision 5).
+    ("89cb4861", "diffmap", 1.748248e-1, 0.35, 0.2805),
+    ("89cb4861", "exact_box", 1.750633e-1, 0.4, 0.3711),
+    ("89cb4861", "removal", 1.740943e-1, 0.45, 0.3308),
+    ("89cb4861", "blocks8", 2.027928e-1, 0.5, 0.4378),
+];
 
-/// The loop defaults, as `[{metric, map, scale, exponent, r}]`.
+/// The loop defaults, as `[{metric, map, scale, exponent, r}]`, one per
+/// embedded bake and map.
 #[wasm_bindgen]
 pub fn loop_map_defaults() -> String {
     serde_json::json!(
         BAKES
             .iter()
-            .flat_map(|b| LOOP_DEFAULTS.iter().map(move |d| serde_json::json!({"metric": b.0, "map": d.0,
-                "scale": d.1, "exponent": d.2, "r": if d.3.is_finite() { serde_json::json!(d.3) } else { serde_json::Value::Null }})))
+            .flat_map(|b| MAPS.iter().map(move |m| {
+                let d = LOOP_DEFAULTS
+                    .iter()
+                    .find(|d| b.2.starts_with(d.0) && d.1 == m.0)
+                    .map_or((1.0, 0.5, f64::NAN), |d| (d.2, d.3, d.4));
+                serde_json::json!({"metric": b.0, "map": m.0, "scale": d.0, "exponent": d.1,
+                    "r": if d.2.is_finite() { serde_json::json!(d.2) } else { serde_json::Value::Null }})
+            }))
             .collect::<Vec<_>>()
     )
     .to_string()

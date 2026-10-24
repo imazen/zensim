@@ -2670,6 +2670,19 @@ byc-serve-parity-pairs bin_dir pairs pred out bake:
 byc-map-dump pairs out bake tag window="box" paint="nearest" split="repair" *flags="":
     cargo run --release --manifest-path zensim-bench/Cargo.toml --features dvifm-judge --example map_dump -- --pairs {{quote(pairs)}} --out {{quote(out)}} --bake {{quote(bake)}} --tag {{tag}} --window {{window}} --paint {{paint}} --split {{split}} {{flags}}
 
+# The built workbench module (PKG = its pkg-zensimx) against the native crate on one synthetic pair: every metric's
+# score and every map's sum; same ZENSIM_WORKBENCH_BAKES as the build.
+byc-workbench-smoke pkg:
+    cargo run -q --release --manifest-path zensim-workbench/Cargo.toml --example smoke > target/byc-smoke-native.jsonl
+    node zensim-workbench/smoke.mjs {{quote(pkg)}} > target/byc-smoke-wasm.jsonl
+    python3 scripts/byconstruction/workbench_site.py smoke-compare target/byc-smoke-native.jsonl target/byc-smoke-wasm.jsonl
+
+# The assembled workbench SITE in headless Chromium against the native smoke values (needs Playwright; PY is a
+# Python with it). Same ZENSIM_WORKBENCH_BAKES as the build.
+byc-workbench-check site py="python3":
+    cargo run -q --release --manifest-path zensim-workbench/Cargo.toml --example smoke > target/byc-smoke-native.jsonl
+    {{py}} zensim-workbench/workbench_check.py {{quote(site)}} target/byc-smoke-native.jsonl
+
 # The workbench module (wasm32 + SIMD128) with the bakes in ZENSIM_WORKBENCH_BAKES; wasm-bindgen-cli 0.2.129.
 byc-workbench-module out="target/zensim-workbench-web" wasm_bindgen="wasm-bindgen":
     [ "$({{wasm_bindgen}} --version)" = 'wasm-bindgen 0.2.129' ] || { echo 'wasm-bindgen-cli 0.2.129 required' >&2; exit 2; }
