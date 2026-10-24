@@ -2745,7 +2745,7 @@ mod featcanon_contract_tests {
                  h: usize,
                  bank: bool,
                  r4: Option<Rev4Dense<'_>>| {
-                    dense_block_kernel_canon64_vec_scalar::<crate::featcanon::LanesF64>(
+                    dense_block_kernel_canon64_vec_scalar::<crate::featcanon::LanesF64, false>(
                         archmage::ScalarToken::summon().expect("infallible"),
                         s,
                         d,
@@ -2777,7 +2777,7 @@ mod featcanon_contract_tests {
                           h: usize,
                           bank: bool,
                           r4: Option<Rev4Dense<'_>>| {
-                        dense_block_kernel_canon64_vec_v3::<crate::featcanon::LanesF64>(
+                        dense_block_kernel_canon64_vec_v3::<crate::featcanon::LanesF64, false>(
                             t,
                             s,
                             d,
@@ -2810,7 +2810,7 @@ mod featcanon_contract_tests {
                           h: usize,
                           bank: bool,
                           r4: Option<Rev4Dense<'_>>| {
-                        dense_block_kernel_canon64_vec_v4::<crate::featcanon::LanesF64>(
+                        dense_block_kernel_canon64_vec_v4::<crate::featcanon::LanesF64, false>(
                             t,
                             s,
                             d,
@@ -2843,7 +2843,7 @@ mod featcanon_contract_tests {
                           h: usize,
                           bank: bool,
                           r4: Option<Rev4Dense<'_>>| {
-                        dense_block_kernel_canon64_vec_v4x::<crate::featcanon::LanesF64>(
+                        dense_block_kernel_canon64_vec_v4x::<crate::featcanon::LanesF64, false>(
                             t,
                             s,
                             d,
