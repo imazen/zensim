@@ -1490,6 +1490,55 @@ summation oracle (`524a04c28`). **Known, frozen eras**: revisions 1–4 finalize
 moments (fixed at revision 5); the append block's deviation pools and global variances use `E[v²] − E[v]²` over f64
 sums.
 
+### Map study after the fixes (2026-10-24)
+
+Owner, 2026-10-24: "I want excellent quality diffmaps, whether for jxl or not, down to per-pixel refinement ... I saw
+much larger streaking on zensim b. Try what dvifm 0.3 uses." Every candidate dump made before the fixes above was
+invalid (moved to `maps/study/invalid-2026-10-24-pre-fix/` with a note). Fresh dumps (`scripts/byconstruction/map_study.sh`,
+`map_dump`, no `ZENSIM_*` map or revision variables): the stamped Tga bake (`5ece9e45…`) and B, over the 150 study pairs
+(72 KADID E21 TRAIN pairs at level 3, 78 JPEG XL d=4 corpus pairs: CID22 training photos, imazen-26 TRAIN
+illustrations, gb82 screen crops) and 60 repaired images (`map_quality.py leak`: a 64-px square of the distorted image
+replaced by the reference, at butteraugli's hottest square and at a fixed one). Judges: butteraugli, SSIMULACRA2's score
+mass and DVIFM 0.3's painted map. Statistics: median over pairs of the SROCC of 16-px block sums; the median share of a
+map's mass on pixels where the two images are equal; the share of a map's change that falls outside a repaired square
+(leak; 0 is perfectly local). Outputs: `/mnt/v/output/zensim/byconstruction-2026-10-22/maps/study/` (`metrics.json`).
+
+| Map | butteraugli | SSIMULACRA2 | DVIFM 0.3 | Mass where equal | Leak median / p90 |
+|---|---|---|---|---|---|
+| B legacy (basic-plane diffmap) | 0.566 | 0.683 | 0.377 | 0.66% | — |
+| B, removal split, box | 0.649 | 0.666 | 0.222 | 0.48% | 0.52 / 0.88 |
+| B, exact split, guided window + paint | **0.703** | 0.706 | 0.261 | 0.04% | 0.48 / 0.89 |
+| B, exact split, centred window + guided paint | 0.697 | 0.710 | 0.260 | 0.05% | 0.48 / 0.74 |
+| Tga, removal split, box | 0.653 | 0.695 | 0.247 | 0.36% | 0.44 / 0.80 |
+| Tga, removal split, guided + guided | 0.659 | 0.694 | 0.245 | 0.04% | 0.44 / 0.81 |
+| Tga, exact split, box | 0.698 | **0.731** | 0.265 | 0.32% | 0.44 / 0.69 |
+| Tga, exact split, centred window | 0.693 | 0.726 | 0.268 | 0.32% | 0.43 / 0.67 |
+| Tga, exact split, guided window | 0.694 | 0.724 | 0.261 | 0.30% | 0.43 / 0.86 |
+| Tga, exact split, guided window + paint | 0.695 | 0.724 | 0.261 | **0.03%** | 0.43 / 0.86 |
+| Tga, exact split, centred window + guided paint | 0.693 | 0.726 | 0.267 | 0.04% | 0.43 / **0.67** |
+
+The judges agree with each other at 0.579 (butteraugli–SSIMULACRA2), 0.168 (butteraugli–DVIFM) and 0.204
+(SSIMULACRA2–DVIFM).
+
+- **The exact split is the lever**: +0.045 to +0.054 against butteraugli and +0.036 to +0.040 against SSIMULACRA2 over
+  the removal split, for both bakes. Window and paint modes move block agreement by less than 0.01.
+- **Guided paint puts a tenth of the mass on unchanged pixels** (0.3% → 0.03–0.05%) at no cost in block agreement:
+  it is the per-pixel refinement. **The centred window leaks least** (p90 0.67 against 0.86 guided).
+- **Against B's legacy map**, the exact maps agree better with butteraugli (+0.13) and SSIMULACRA2 (+0.03 to +0.04)
+  and less with DVIFM (which the other judges barely agree with). By group (butteraugli / SSIMULACRA2), B exact
+  centred+guided against legacy: illustrations 0.56 / 0.60 against 0.45 / 0.50, KADID 0.72 / 0.74 against 0.61 / 0.75,
+  photos 0.79 / 0.72 against 0.60 / 0.65. On screens no map agrees with butteraugli (−0.01 to 0.13); against
+  SSIMULACRA2 they are 0.67–0.74.
+- The workbench module's `diffmap` is now the centred window with guided paint and the exact split; `exact_box`,
+  `removal` (today's map) and `blocks8` (8×8, centred, exact) stay alongside.
+- **Not in Tga's map**: its 24 globaff slots have no integrand (`unsupported: 24` in every record), and one of them has
+  Tga's largest sensitivity (about 6000). Global edits are therefore under-drawn in Tga's map. `explained` has an exact
+  per-pixel share (`mean(e)·e_i/N + (cov(s,e)/var(s))·(s_i − mean(s))·e_i/N`); `share` is homogeneous of degree 0, so
+  its exact shares sum to zero.
+
+Gallery (reference, distorted, B legacy, B removal, B exact centred+guided, Tga removal, Tga exact centred+guided,
+butteraugli, SSIMULACRA2, DVIFM 0.3): `http://dev.lan:3300/zensim/byconstruction-2026-10-22/maps/study/gallery/`.
+
 ### DVIFM 0.3 on the E21 sets and the mixture test (2026-10-23)
 
 Owner request: "eval dvifm 0.3 on kadid and other distortion//corrputions". Scorer: the frozen runtime of the

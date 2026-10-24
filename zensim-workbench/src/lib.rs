@@ -22,15 +22,18 @@ include!(concat!(env!("OUT_DIR"), "/bakes.rs"));
 
 /// The maps every metric publishes: `(name, window mode, paint mode, split,
 /// bin)` (`zensim`'s research map modes). `diffmap` (first) is the one the
-/// workbench shows by default; its modes are provisional until the map study
-/// (`benchmarks/byconstruction_2026-10-22.md`, "Maps") picks them.
+/// workbench shows by default: centred window, guided paint and the exact
+/// split, the best balance in the map study (block agreement with butteraugli
+/// and SSIMULACRA2, mass where the images are equal, locality;
+/// `benchmarks/byconstruction_2026-10-22.md`, "Map study after the fixes").
 pub const MAPS: &[(&str, &str, &str, &str, usize)] = &[
-    ("diffmap", "guided", "guided", "exact", 1),
-    ("box", "box", "nearest", "repair", 1),
-    ("center", "center", "nearest", "repair", 1),
-    ("guided", "guided", "nearest", "repair", 1),
-    ("exact", "guided", "nearest", "exact", 1),
-    ("blocks8", "guided", "nearest", "exact", 8),
+    ("diffmap", "center", "guided", "exact", 1),
+    // The exact split with today's uniform window spread.
+    ("exact_box", "box", "nearest", "exact", 1),
+    // Today's map: removal split, uniform window spread.
+    ("removal", "box", "nearest", "repair", 1),
+    // 8×8 blocks for the JPEG XL loop.
+    ("blocks8", "center", "nearest", "exact", 8),
 ];
 
 /// `"zensimx"`.
