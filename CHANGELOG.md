@@ -184,6 +184,8 @@ None.
 
 ### Fixed
 
+- The candidate attribution map's pass B read the SSIM form from the process revision instead of the bake's: B (revision 5) in a default process read its error-moment plane as a product moment and produced a map summing to about −1.8e19. Pass B now takes the form from the revision its retained planes were computed at. The SSIM deviation-pool polynomials are evaluated centred at the pool mean in every kernel; in raw powers their f32 maps missed the feature by up to 2.2%. Ported from `explore/byconstruction` (`ec9289df`).
+- Attribution maps panicked on `wasm32-unknown-unknown`: the map path's always-on timing counters called `std::time::Instant::now`, which has no clock there. They now read `perf_clock::Instant`, which reads zero without a clock; the counters only report time (`f284de2a` on `explore/byconstruction`).
 - Isolate E34 harvest jobset errors, retain bounded ledger-sync diagnostics and retries, and persist per-jobset installed counts without admitting failed verification (`d9bd4953`, `0dddffd5`).
 
 - Minimal feature builds gate v2 accumulator helpers with their callers; oracle-only builds retain their reduction helper (`83ca5a6d`).

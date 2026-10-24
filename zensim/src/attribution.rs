@@ -3512,7 +3512,7 @@ mod tests {
         let rs = RgbSlice::new(&src, w, h);
         let ds = RgbSlice::new(&dst, w, h);
         let s = vec![-0.5f64; 156];
-        let t = std::time::Instant::now();
+        let t = crate::perf_clock::Instant::now();
         let r = z
             .compute_attribution_density_binned(&rs, &ds, &s, bin)
             .unwrap();
@@ -3530,10 +3530,10 @@ mod tests {
     fn binned_construction_perf_probe() {
         let (w, h) = (4000, 3000);
         let canvas = synth_canvas(w, h);
-        let t = std::time::Instant::now();
+        let t = crate::perf_clock::Instant::now();
         let full = AttributionResult::from_f64_canvas(canvas.clone(), w, h);
         let t_full = t.elapsed();
-        let t = std::time::Instant::now();
+        let t = crate::perf_clock::Instant::now();
         let binned = AttributionResult::from_f64_canvas_binned(canvas, w, h, 8);
         let t_bin = t.elapsed();
         let bytes = |r: &AttributionResult| r.density.len() * 4 + r.sat.len() * 8;
@@ -6274,7 +6274,7 @@ impl crate::metric::Zensim {
         let width = distorted.width();
         let height = distorted.height();
         let perf_log = std::env::var("ZENSIM_ATTR_PERF").as_deref() == Ok("1");
-        let t_sat0 = std::time::Instant::now();
+        let t_sat0 = crate::perf_clock::Instant::now();
         let trimmed = fb.trim_to(width, height);
         let attr = AttributionResult::from_density(trimmed, width, height);
         if perf_log {
@@ -6426,7 +6426,7 @@ impl crate::metric::Zensim {
         let height = distorted.height();
         let (_, comp_pw, comp_h) = precomputed.scale(0);
 
-        let t_all = std::time::Instant::now();
+        let t_all = crate::perf_clock::Instant::now();
         let combine_ms = std::cell::Cell::new(0.0f64);
         let mut local_scratch = BasicMapScratch::default();
         let work = map_scratch.unwrap_or(&mut local_scratch);
@@ -6451,7 +6451,7 @@ impl crate::metric::Zensim {
                             sw: usize,
                             sh: usize,
                             retained_hf: Option<[(f64, f64); 3]>| {
-            let t_c = std::time::Instant::now();
+            let t_c = crate::perf_clock::Instant::now();
             let n = sw * sh;
             let n_f = n as f64;
             if let Some(output) = max_removals.as_deref_mut() {
@@ -6862,7 +6862,7 @@ impl crate::metric::Zensim {
 
         let (_, comp_pw, comp_h) = precomputed.scale(0);
         let perf_log = std::env::var("ZENSIM_ATTR_PERF").as_deref() == Ok("1");
-        let t_all = std::time::Instant::now();
+        let t_all = crate::perf_clock::Instant::now();
         let tail_ms = std::cell::Cell::new(0.0f64);
         // Session-owned scratch: no per-iteration allocation/page-fault
         // cost on the single-pass path. The canvas accumulates across
@@ -6894,7 +6894,7 @@ impl crate::metric::Zensim {
                         winp: &mut [f32],
                         sw: usize,
                         sh: usize| {
-            let t_c = std::time::Instant::now();
+            let t_c = crate::perf_clock::Instant::now();
             let n = sw * sh;
             let n_f = n as f64;
             // Post-scale tail — Canvas arm IDENTICAL to the fresh path
@@ -7002,7 +7002,7 @@ impl crate::metric::Zensim {
         session.coeffs = next_coeffs;
 
         let t_pipe = t_all.elapsed().as_secs_f64() * 1e3;
-        let t_sat0 = std::time::Instant::now();
+        let t_sat0 = crate::perf_clock::Instant::now();
         let attr = match bins {
             None => {
                 // Trim into the recycled density buffer (fresh alloc when
@@ -7113,7 +7113,7 @@ impl crate::metric::Zensim {
         validate_pair(source, distorted)?;
         // ZENSIM_ATTR_PERF=1: coarse section timing (perf lever triage).
         let perf_log = std::env::var("ZENSIM_ATTR_PERF").as_deref() == Ok("1");
-        let t0 = std::time::Instant::now();
+        let t0 = crate::perf_clock::Instant::now();
         // 1) Folded-944 extraction with retention — exact features.
         let v2res = crate::feature_v2::compute_folded944_streaming_with_retention(
             source,
@@ -7143,7 +7143,7 @@ impl crate::metric::Zensim {
             ));
         }
         // 2) Fused v1 walk — basic-block canvas + the map-profile result.
-        let t1 = std::time::Instant::now();
+        let t1 = crate::perf_clock::Instant::now();
         let fb = self.fused_basic_canvas(precomputed, distorted, s, None)?;
         let t_v1 = t1.elapsed();
         let width = distorted.width();
@@ -7159,7 +7159,7 @@ impl crate::metric::Zensim {
         // Appendix P lever 1: fully-f32 canvas assembly — the f32 basic
         // canvas plus the f32 pass-B retention density, one f64 conversion
         // at the SAT build (`from_density`, the C3a entry's own shape).
-        let t2 = std::time::Instant::now();
+        let t2 = crate::perf_clock::Instant::now();
         let mut canvas: Vec<f32> = fb.trim_to(width, height);
         let mut lattice = Vec::new();
         if !s_v2.is_empty() || s_append.is_some() || s_append2.is_some() {
@@ -7180,7 +7180,7 @@ impl crate::metric::Zensim {
             lattice = v2_lattice;
         }
         let t_pass_b = t2.elapsed();
-        let t3 = std::time::Instant::now();
+        let t3 = crate::perf_clock::Instant::now();
         let out = AttributionResult::from_density(canvas, width, height).with_lattice(lattice);
         if perf_log {
             eprintln!(

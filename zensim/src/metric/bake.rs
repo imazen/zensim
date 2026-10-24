@@ -4556,6 +4556,100 @@ mod revision_contract_tests {
         }
     }
 
+    /// The attribution map of a declared-revision bake is the same in every
+    /// process. Its retained planes come from the bake's revision, so pass B
+    /// must read them in that revision's form: the `s12` plane as the direct
+    /// error moment (Rev3+). Pass B used to take it from the process revision,
+    /// so the shipped B bake (Rev5) in a default process read `s12` as a
+    /// product moment and its SSIM deviation pools amplified the resulting `d`
+    /// to a map summing to about -1.8e19 (found on `explore/byconstruction`).
+    #[test]
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    fn attribution_maps_serve_the_declared_revision_in_every_process() {
+        const MARK: &str = "ATTRIBUTION-DECLARED-BITS ";
+        let path = "metric::bake::revision_contract_tests::attribution_maps_serve_the_declared_revision_in_every_process";
+        if std::env::var("ZENSIM_ATTRIBUTION_REVISION_CHILD").is_err() {
+            let mut expected: Option<Vec<String>> = None;
+            for process in ["1", "5"] {
+                let out = std::process::Command::new(std::env::current_exe().unwrap())
+                    .args([path, "--exact", "--nocapture", "--test-threads=1"])
+                    .env("ZENSIM_FORMULA_REV", process)
+                    .env("ZENSIM_ATTRIBUTION_REVISION_CHILD", "1")
+                    .env_remove("ZENSIM_RING_FORM")
+                    .output()
+                    .unwrap();
+                let stdout = String::from_utf8_lossy(&out.stdout);
+                assert!(
+                    out.status.success(),
+                    "{stdout}\n{}",
+                    String::from_utf8_lossy(&out.stderr)
+                );
+                let lines: Vec<_> = stdout
+                    .lines()
+                    .filter_map(|l| l.find(MARK).map(|i| l[i..].to_owned()))
+                    .collect();
+                assert_eq!(lines.len(), 1, "child at revision {process}: {stdout}");
+                if let Some(expected) = &expected {
+                    assert_eq!(
+                        &lines, expected,
+                        "ZENSIM_FORMULA_REV={process} changed an attribution map; the \
+                         process revision must not reach a declared-revision bake"
+                    );
+                } else {
+                    expected = Some(lines);
+                }
+            }
+            return;
+        }
+        let (w, h) = (131usize, 101usize);
+        let (src, mut dst) = pair(w, h);
+        // A 3x3 box blur of the source: smooth, real structure loss, with a
+        // ringing-like residual at every edge.
+        for y in 0..h {
+            for x in 0..w {
+                let mut acc = [0u32; 3];
+                for dy in 0..3 {
+                    for dx in 0..3 {
+                        let yy = (y + dy).saturating_sub(1).min(h - 1);
+                        let xx = (x + dx).saturating_sub(1).min(w - 1);
+                        for (c, a) in acc.iter_mut().enumerate() {
+                            *a += u32::from(src[yy * w + xx][c]);
+                        }
+                    }
+                }
+                dst[y * w + x] = acc.map(|a| (a / 9) as u8);
+            }
+        }
+        let (rs, ds) = (RgbSlice::new(&src, w, h), RgbSlice::new(&dst, w, h));
+        let shipped = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/weights/b_sdr_diff_frag_820_rev5_2026-10-19.bin"
+        ))
+        .unwrap();
+        let name = "shipped-b-rev5";
+        let model = zenpredict::Model::from_bytes(&shipped).unwrap();
+        let mut scorer = crate::BakeScorer::new(&model).unwrap().with_parallel(false);
+        let pre = scorer.precompute_reference(&rs).unwrap();
+        let mut session = crate::Fused944Session::new();
+        let att = scorer
+            .compute_with_ref_and_attribution(&rs, &pre, &ds, None, &mut session, 1)
+            .unwrap();
+        let density = att.attribution().density();
+        let total: f64 = density.iter().map(|&v| f64::from(v)).sum();
+        assert!(
+            density.iter().all(|v| v.is_finite()) && total.abs() < 1e4,
+            "{name}: map total {total:e} is not a bounded attribution"
+        );
+        let hash = density.iter().fold(0xcbf2_9ce4_8422_2325u64, |h, v| {
+            (h ^ u64::from(v.to_bits())).wrapping_mul(0x0000_0100_0000_01b3)
+        });
+        println!(
+            "{MARK}{name} {} {hash:016x} {}",
+            att.result().score().to_bits(),
+            total.to_bits()
+        );
+    }
+
     #[test]
     #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
     fn prepared_worker_refuses_incomplete_contracts_before_use() {
@@ -4630,3 +4724,4 @@ mod steerfix_packet;
 #[cfg(steerfix_instrument)]
 #[path = "mapperf_audit.rs"]
 mod mapperf_audit;
+
