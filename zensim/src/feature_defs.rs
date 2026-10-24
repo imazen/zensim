@@ -508,7 +508,10 @@ pub enum FormulaRevision {
     ///   lanes (`x & 15`) and fold every lane into its f64 lane at the end
     ///   of the chunks and after every 4,096th column, instead of adding
     ///   every column in f64; the remaining columns add in f64 as before.
-    ///   Pools whose features difference or ratio two large sums (v1
+    ///   The f64 lanes live for a band of 32 rows (dense) or for the call
+    ///   (fused SSIM, gradient: a 128-row strip) and are finished once there
+    ///   instead of once per row. Pools whose features difference or ratio
+    ///   two large sums (v1
     ///   variance, texture and contrast terms, the edge-width change, the
     ///   band-lifetime raw moments) keep f64 lanes.
     /// * **Central moments per row.** The SSIM deviation moments are
@@ -1433,19 +1436,24 @@ const REV_ROWLANES: Revision = Revision {
     status: RevisionStatus::Proposed,
     note: "rev7: the dense, fused-SSIM and gradient pools add the columns of \
            each row's complete 8-column chunks to sixteen f32 lanes (`x & 15`, \
-           ascending x), folded into the f64 lanes at the end of the chunks and \
+           ascending x), folded into f64 lanes at the end of the chunks and \
            after every 4,096th column, except pools whose features difference \
-           or ratio two large sums (f64, as before); the SSIM deviation moments \
-           are two-pass per row with one Chan/Pébay merge per row; the three \
-           subtractive forms become their exact cancellation-free equivalents. \
-           MEASURED (byconstruction record, \"Formula revision 7 \
-           implemented\"): against revision 6 on 110 dumps, features move by \
-           a median 1.6e-8 relative (largest 4.1e-3, an absolute 2.4e-8) and \
-           scores by at most 7.1e-6 points; against the exact f64 oracle the \
-           worst per-feature median error falls from 5.10e-5 to 4.93e-5; \
-           21.6% faster at 2048² v4x and 23.9% at v3 (B). Registered as \
-           moving every live slot (an arithmetic era); tier-identical by the \
-           same fixed order.",
+           or ratio two large sums (f64, as before); the f64 lanes live for a \
+           32-row band (dense) or the call (fused SSIM, gradient) and finish \
+           once there; the v1 HF and edge-width sums add source sums plus \
+           differences; the SSIM deviation moments are two-pass per row with \
+           one Chan/Pébay merge per row; the three subtractive forms become \
+           their exact cancellation-free equivalents; the opsin cube root \
+           takes one division (`cbrt_newton_f32`). MEASURED (byconstruction \
+           record, \"Revision 7 speed after the implementation\"): against \
+           revision 6 on B's 55 dumps, 22,190 of 39,600 feature values move, \
+           by a median 1.1e-6 relative (largest 4.0e-3, an absolute 2.3e-8), \
+           and the score by at most 4.0e-5 points; against the exact f64 \
+           oracle (93 near-identical pairs) the per-feature median error's \
+           p90 falls from 2.80e-6 to 2.39e-6 and its worst feature rises from \
+           5.10e-5 to 5.91e-5 (`peaks_ssim_max_s3_b`, the cube root's error \
+           pattern). Registered as moving every live slot (an arithmetic era); \
+           tier-identical by the same fixed order.",
 };
 
 pub(crate) const ARITHMETIC_REVISIONS: &[(Defect, Revision)] = &[

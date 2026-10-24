@@ -4601,6 +4601,48 @@ impl<P: crate::featcanon::Pool> VblurPools<P> {
             iw_mse: P::zero(),
         }
     }
+    /// Add each pool's finished sum to `acc`, in the fixed order every body
+    /// uses: once per row, or at revision 7 once per call.
+    fn finish_into(&self, acc: &mut StripChannelAccum, free: FreeExtrasWork, ext: ExtPoolsWork) {
+        acc.ssim_d += self.ssim_d.fin();
+        acc.ssim_d4 += self.ssim_d4.fin();
+        acc.ssim_d2 += self.ssim_d2.fin();
+        acc.edge_art += self.edge_art.fin();
+        acc.edge_art4 += self.edge_art4.fin();
+        acc.edge_art2 += self.edge_art2.fin();
+        acc.edge_det += self.edge_det.fin();
+        acc.edge_det4 += self.edge_det4.fin();
+        acc.edge_det2 += self.edge_det2.fin();
+        acc.mse += self.mse.fin();
+        if !free.local_only {
+            acc.ssim_d8 += self.ssim_d8.fin();
+            acc.edge_art8 += self.edge_art8.fin();
+            acc.edge_det8 += self.edge_det8.fin();
+            acc.hf_sq_src += self.hf_sq_src.fin();
+            acc.hf_sq_dst += self.hf_sq_dst.fin();
+            acc.hf_abs_src += self.hf_abs_src.fin();
+            acc.hf_abs_dst += self.hf_abs_dst.fin();
+        }
+        if ext.on {
+            acc.act_sum += self.act_sum.fin();
+            if ext.mask {
+                acc.masked_ssim_d += self.masked_ssim_d.fin();
+                acc.masked_ssim_d4 += self.masked_ssim_d4.fin();
+                acc.masked_ssim_d2 += self.masked_ssim_d2.fin();
+                acc.masked_art4 += self.masked_art4.fin();
+                acc.masked_det4 += self.masked_det4.fin();
+                acc.masked_mse += self.masked_mse.fin();
+            }
+            if ext.iw {
+                acc.iw_ssim_d += self.iw_ssim_d.fin();
+                acc.iw_ssim_d4 += self.iw_ssim_d4.fin();
+                acc.iw_ssim_d2 += self.iw_ssim_d2.fin();
+                acc.iw_art4 += self.iw_art4.fin();
+                acc.iw_det4 += self.iw_det4.fin();
+                acc.iw_mse += self.iw_mse.fin();
+            }
+        }
+    }
 }
 
 /// The band-lifetime accumulators (raw moments + bounded error + luma bins):
@@ -5619,14 +5661,19 @@ fn fused_vblur_ssim_local<P: crate::featcanon::Pool>(
 
     // `localwin` rows: only the inner range produces outputs — nothing below
     // or above feeds a recurrence, so those rows are never visited.
+    // Revision 7: the row pools' f64 lanes live for the whole call (each row's
+    // f32 row lanes fold into them, and every fold clears the row lanes), and
+    // each pool finishes once, after the last row.
+    let mut call_row = VblurPools::<P>::zero();
+    let mut row32 = VblurPools::<crate::featcanon::Lanes16F32>::zero();
     for y in inner_start..inner_end {
         for k in 0..diam {
             rb[k] =
                 crate::featcanon::tap_mirror(y as isize + k as isize - r as isize, height) * width;
         }
         let base = y * width;
-        let mut row = VblurPools::<P>::zero();
-        let mut row32 = VblurPools::<crate::featcanon::Lanes16F32>::zero();
+        let mut fresh = VblurPools::<P>::zero();
+        let row = if rev7 { &mut call_row } else { &mut fresh };
         for x in 0..width {
             let mut win_at = |plane: &[f32]| -> f32 {
                 if plane.is_empty() {
@@ -5673,7 +5720,7 @@ fn fused_vblur_ssim_local<P: crate::featcanon::Pool>(
                 sd_out,
                 ssq_out,
                 s12_out,
-                &mut row,
+                &mut *row,
                 if rev7 && x < chunk_end {
                     Some(&mut row32)
                 } else {
@@ -5685,49 +5732,18 @@ fn fused_vblur_ssim_local<P: crate::featcanon::Pool>(
             if rev7
                 && (x + 1 == chunk_end || (x < chunk_end && (x + 1).is_multiple_of(ROW_LANES_FOLD)))
             {
-                row32.fold_into(&mut row, free, ext);
+                row32.fold_into(&mut *row, free, ext);
             }
         }
-        // One fixed-order finish per row per pool.
-        acc.ssim_d += row.ssim_d.fin();
-        acc.ssim_d4 += row.ssim_d4.fin();
-        acc.ssim_d2 += row.ssim_d2.fin();
-        acc.edge_art += row.edge_art.fin();
-        acc.edge_art4 += row.edge_art4.fin();
-        acc.edge_art2 += row.edge_art2.fin();
-        acc.edge_det += row.edge_det.fin();
-        acc.edge_det4 += row.edge_det4.fin();
-        acc.edge_det2 += row.edge_det2.fin();
-        acc.mse += row.mse.fin();
-        if !free.local_only {
-            acc.ssim_d8 += row.ssim_d8.fin();
-            acc.edge_art8 += row.edge_art8.fin();
-            acc.edge_det8 += row.edge_det8.fin();
-            acc.hf_sq_src += row.hf_sq_src.fin();
-            acc.hf_sq_dst += row.hf_sq_dst.fin();
-            acc.hf_abs_src += row.hf_abs_src.fin();
-            acc.hf_abs_dst += row.hf_abs_dst.fin();
-        }
-        if ext.on {
-            acc.act_sum += row.act_sum.fin();
-            if ext.mask {
-                acc.masked_ssim_d += row.masked_ssim_d.fin();
-                acc.masked_ssim_d4 += row.masked_ssim_d4.fin();
-                acc.masked_ssim_d2 += row.masked_ssim_d2.fin();
-                acc.masked_art4 += row.masked_art4.fin();
-                acc.masked_det4 += row.masked_det4.fin();
-                acc.masked_mse += row.masked_mse.fin();
-            }
-            if ext.iw {
-                acc.iw_ssim_d += row.iw_ssim_d.fin();
-                acc.iw_ssim_d4 += row.iw_ssim_d4.fin();
-                acc.iw_ssim_d2 += row.iw_ssim_d2.fin();
-                acc.iw_art4 += row.iw_art4.fin();
-                acc.iw_det4 += row.iw_det4.fin();
-                acc.iw_mse += row.iw_mse.fin();
-            }
+        // One fixed-order finish per pool: per row, or at revision 7 after
+        // the last row.
+        if !rev7 {
+            row.finish_into(&mut acc, free, ext);
         }
         if y + 1 == inner_end {
+            if rev7 {
+                call_row.finish_into(&mut acc, free, ext);
+            }
             if free.raw_moments {
                 acc.sum_s += band.fm_s.fin();
                 acc.sum_d += band.fm_d.fin();
@@ -5896,6 +5912,11 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
             }
         }};
     }
+    // Revision 7: the row pools' f64 lanes live for the whole call (each row's
+    // f32 row lanes fold into them, and every fold clears the row lanes), and
+    // each pool finishes once, after the last row.
+    let mut call_row = VblurPools::<P>::zero();
+    let mut row32 = VblurPools::<crate::featcanon::Lanes16F32>::zero();
     for y in if local {
         inner_start..inner_end
     } else {
@@ -5903,8 +5924,8 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
     } {
         if y >= inner_start && y < inner_end {
             let base = y * width;
-            let mut row = VblurPools::<P>::zero();
-            let mut row32 = VblurPools::<crate::featcanon::Lanes16F32>::zero();
+            let mut fresh = VblurPools::<P>::zero();
+            let row = if rev7 { &mut call_row } else { &mut fresh };
             let [wm1, wm2, wsq, ws12, wact] = win.f64_states().unwrap_or([&[]; 5]);
             // Provable-length slices: `x0 + 8 <= full * 8` is then literal,
             // so `narrow`'s window reads and the plane loads compile with
@@ -6156,7 +6177,7 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
                         }
                     }
                     if rev7 && (x0 + $w).is_multiple_of(crate::featcanon::ROW_LANES_FOLD) {
-                        row32.fold_into(&mut row, free, ext);
+                        row32.fold_into(&mut *row, free, ext);
                     }
                 }};
             }
@@ -6223,7 +6244,7 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
             }
             // The end of the chunks, unless the last chunk already folded.
             if rev7 && full > 0 && !(full * 8).is_multiple_of(crate::featcanon::ROW_LANES_FOLD) {
-                row32.fold_into(&mut row, free, ext);
+                row32.fold_into(&mut *row, free, ext);
             }
             // Scalar tail — the canonical element step verbatim.
             for x in full * 8..width {
@@ -6253,53 +6274,21 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
                     sd_out,
                     ssq_out,
                     s12_out,
-                    &mut row,
+                    &mut *row,
                     None,
                     &mut band,
                     &mut acc,
                 );
             }
-            // One fixed-order finish per row per pool — same order as the
-            // scalar body.
-            acc.ssim_d += row.ssim_d.fin();
-            acc.ssim_d4 += row.ssim_d4.fin();
-            acc.ssim_d2 += row.ssim_d2.fin();
-            acc.edge_art += row.edge_art.fin();
-            acc.edge_art4 += row.edge_art4.fin();
-            acc.edge_art2 += row.edge_art2.fin();
-            acc.edge_det += row.edge_det.fin();
-            acc.edge_det4 += row.edge_det4.fin();
-            acc.edge_det2 += row.edge_det2.fin();
-            acc.mse += row.mse.fin();
-            if !free.local_only {
-                acc.ssim_d8 += row.ssim_d8.fin();
-                acc.edge_art8 += row.edge_art8.fin();
-                acc.edge_det8 += row.edge_det8.fin();
-                acc.hf_sq_src += row.hf_sq_src.fin();
-                acc.hf_sq_dst += row.hf_sq_dst.fin();
-                acc.hf_abs_src += row.hf_abs_src.fin();
-                acc.hf_abs_dst += row.hf_abs_dst.fin();
-            }
-            if ext.on {
-                acc.act_sum += row.act_sum.fin();
-                if ext.mask {
-                    acc.masked_ssim_d += row.masked_ssim_d.fin();
-                    acc.masked_ssim_d4 += row.masked_ssim_d4.fin();
-                    acc.masked_ssim_d2 += row.masked_ssim_d2.fin();
-                    acc.masked_art4 += row.masked_art4.fin();
-                    acc.masked_det4 += row.masked_det4.fin();
-                    acc.masked_mse += row.masked_mse.fin();
-                }
-                if ext.iw {
-                    acc.iw_ssim_d += row.iw_ssim_d.fin();
-                    acc.iw_ssim_d4 += row.iw_ssim_d4.fin();
-                    acc.iw_ssim_d2 += row.iw_ssim_d2.fin();
-                    acc.iw_art4 += row.iw_art4.fin();
-                    acc.iw_det4 += row.iw_det4.fin();
-                    acc.iw_mse += row.iw_mse.fin();
-                }
+            // One fixed-order finish per pool: per row, or at revision 7 after
+            // the last row.
+            if !rev7 {
+                row.finish_into(&mut acc, free, ext);
             }
             if y + 1 == inner_end {
+                if rev7 {
+                    call_row.finish_into(&mut acc, free, ext);
+                }
                 if free.raw_moments {
                     acc.sum_s += band.fm_s.fin();
                     acc.sum_d += band.fm_d.fin();

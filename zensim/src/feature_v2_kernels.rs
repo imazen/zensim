@@ -4963,6 +4963,27 @@ fn gradient_interior_elem_canon<
     }
 }
 
+/// Add the gradient kernel's eight interior pools' finished sums to `acc`
+/// (`[gms, gms2, ring, band, gsrc, gdst, bv_gain, bv_loss]`), in the fixed
+/// order: once per row, or at revision 7 once per call.
+#[inline(always)]
+fn gradient_pools_finish<P: crate::featcanon::Pool, const BANDVIS: bool>(
+    acc: &mut GradientAccum,
+    pools: &[P; 8],
+) {
+    let [gms, gms2, ring, band, gsrc, gdst, bv_gain, bv_loss] = *pools;
+    acc.sum_gms += gms.fin();
+    acc.sum_gms2 += gms2.fin();
+    acc.sum_ringing += ring.fin();
+    acc.sum_banding += band.fin();
+    acc.sum_grad_src += gsrc.fin();
+    acc.sum_grad_dst += gdst.fin();
+    if BANDVIS {
+        acc.sum_bv_gain += bv_gain.fin();
+        acc.sum_bv_loss += bv_loss.fin();
+    }
+}
+
 /// `Pool`-generic scalar gradient kernel — f32 elements in the SIMD op
 /// order, per-row canonical pools, f64 borders.
 #[allow(clippy::too_many_arguments)]
@@ -4994,6 +5015,9 @@ fn gradient_block_kernel_canon<
     let mut bank_acc: [GmsBankCellVar; 5] = std::array::from_fn(|_| GmsBankCellVar::for_mode(mode));
     let mut chroma_acc: [GmsBankCellVar; 5] =
         std::array::from_fn(|_| GmsBankCellVar::for_mode(mode));
+    // Revision 7: the interior pools' f64 lanes live for the whole call (each
+    // row's f32 row lanes fold into them) and finish once, after the last row.
+    let mut call_pools = [P::zero(); 8];
     for y in 0..height {
         let row = (y + 1) * width;
         let row_u = y * width;
@@ -5024,14 +5048,18 @@ fn gradient_block_kernel_canon<
         );
         if width > 2 {
             let interior_end = width - 1;
-            let mut r_gms = P::zero();
-            let mut r_gms2 = P::zero();
-            let mut r_ring = P::zero();
-            let mut r_band = P::zero();
-            let mut r_gsrc = P::zero();
-            let mut r_gdst = P::zero();
-            let mut r_bv_gain = P::zero();
-            let mut r_bv_loss = P::zero();
+            // `[gms, gms2, ring, band, gsrc, gdst, bv_gain, bv_loss]`.
+            let mut fresh = [P::zero(); 8];
+            let [
+                r_gms,
+                r_gms2,
+                r_ring,
+                r_band,
+                r_gsrc,
+                r_gdst,
+                r_bv_gain,
+                r_bv_loss,
+            ] = if R7 { &mut call_pools } else { &mut fresh };
             // Revision 7: the vector kernel's chunk columns (`head_end` to
             // `chunk_end`) add the six non-cancelling pools in f32 row lanes
             // (`crate::featcanon::Lanes16F32`), folded every `ROW_LANES_FOLD`
@@ -5081,16 +5109,16 @@ fn gradient_block_kernel_canon<
                     );
                     if (x + 1).is_multiple_of(crate::featcanon::ROW_LANES_FOLD) || x + 1 == chunk_end {
                         let [q_gms, q_gms2, q_ring, q_band, q_bvg, q_bvl, q_gsrc, q_gdst] = &mut q32;
-                        q_gms.fold_into(&mut r_gms);
-                        q_gms2.fold_into(&mut r_gms2);
-                        q_ring.fold_into(&mut r_ring);
-                        q_band.fold_into(&mut r_band);
-                        q_bvg.fold_into(&mut r_bv_gain);
-                        q_bvl.fold_into(&mut r_bv_loss);
+                        q_gms.fold_into(&mut *r_gms);
+                        q_gms2.fold_into(&mut *r_gms2);
+                        q_ring.fold_into(&mut *r_ring);
+                        q_band.fold_into(&mut *r_band);
+                        q_bvg.fold_into(&mut *r_bv_gain);
+                        q_bvl.fold_into(&mut *r_bv_loss);
                         // The difference pair: the source lanes to both sums.
-                        q_gsrc.add_into(&mut r_gsrc);
-                        q_gsrc.fold_into(&mut r_gdst);
-                        q_gdst.fold_into(&mut r_gdst);
+                        q_gsrc.add_into(&mut *r_gsrc);
+                        q_gsrc.fold_into(&mut *r_gdst);
+                        q_gdst.fold_into(&mut *r_gdst);
                     }
                     continue;
                 }
@@ -5113,26 +5141,19 @@ fn gradient_block_kernel_canon<
                     &mut bank_row,
                     &mut chroma_row,
                     &mut r4,
-                    &mut r_gsrc,
-                    &mut r_gdst,
-                    &mut r_gms,
-                    &mut r_gms2,
-                    &mut r_ring,
-                    &mut r_band,
-                    &mut r_bv_gain,
-                    &mut r_bv_loss,
+                    &mut *r_gsrc,
+                    &mut *r_gdst,
+                    &mut *r_gms,
+                    &mut *r_gms2,
+                    &mut *r_ring,
+                    &mut *r_band,
+                    &mut *r_bv_gain,
+                    &mut *r_bv_loss,
                     false,
                 );
             }
-            acc.sum_gms += r_gms.fin();
-            acc.sum_gms2 += r_gms2.fin();
-            acc.sum_ringing += r_ring.fin();
-            acc.sum_banding += r_band.fin();
-            acc.sum_grad_src += r_gsrc.fin();
-            acc.sum_grad_dst += r_gdst.fin();
-            if BANDVIS {
-                acc.sum_bv_gain += r_bv_gain.fin();
-                acc.sum_bv_loss += r_bv_loss.fin();
+            if !R7 {
+                gradient_pools_finish::<P, BANDVIS>(&mut acc, &fresh);
             }
         }
         gradient_border_pixel::<BANDVIS, BV_DSTACT, BANK, HPR, R7>(
@@ -5161,6 +5182,9 @@ fn gradient_block_kernel_canon<
                 sum.merge_var(row);
             }
         }
+    }
+    if R7 && width > 2 {
+        gradient_pools_finish::<P, BANDVIS>(&mut acc, &call_pools);
     }
     if BANK {
         for (dst, src) in acc.bank.iter_mut().zip(&bank_acc) {
@@ -5381,6 +5405,9 @@ fn gradient_block_kernel_canon64_vec<
             }
         }};
     }
+    // Revision 7: the interior pools' f64 lanes live for the whole call (each
+    // row's f32 row lanes fold into them) and finish once, after the last row.
+    let mut call_pools = [P::zero(); 8];
     for y in 0..height {
         let row = (y + 1) * width;
         let row_u = y * width;
@@ -5411,14 +5438,18 @@ fn gradient_block_kernel_canon64_vec<
         );
         if width > 2 {
             let interior_end = width - 1;
-            let mut r_gms = P::zero();
-            let mut r_gms2 = P::zero();
-            let mut r_ring = P::zero();
-            let mut r_band = P::zero();
-            let mut r_gsrc = P::zero();
-            let mut r_gdst = P::zero();
-            let mut r_bv_gain = P::zero();
-            let mut r_bv_loss = P::zero();
+            // `[gms, gms2, ring, band, gsrc, gdst, bv_gain, bv_loss]`.
+            let mut fresh = [P::zero(); 8];
+            let [
+                r_gms,
+                r_gms2,
+                r_ring,
+                r_band,
+                r_gsrc,
+                r_gdst,
+                r_bv_gain,
+                r_bv_loss,
+            ] = if R7 { &mut call_pools } else { &mut fresh };
             let (mut r_gms32, mut r_gms232, mut r_ring32, mut r_band32) =
                 ([0.0f32; 16], [0.0f32; 16], [0.0f32; 16], [0.0f32; 16]);
             let (mut r_bv_gain32, mut r_bv_loss32) = ([0.0f32; 16], [0.0f32; 16]);
@@ -5513,14 +5544,14 @@ fn gradient_block_kernel_canon64_vec<
                     &mut bank_row,
                     &mut chroma_row,
                     &mut r4,
-                    &mut r_gsrc,
-                    &mut r_gdst,
-                    &mut r_gms,
-                    &mut r_gms2,
-                    &mut r_ring,
-                    &mut r_band,
-                    &mut r_bv_gain,
-                    &mut r_bv_loss,
+                    &mut *r_gsrc,
+                    &mut *r_gdst,
+                    &mut *r_gms,
+                    &mut *r_gms2,
+                    &mut *r_ring,
+                    &mut *r_band,
+                    &mut *r_bv_gain,
+                    &mut *r_bv_loss,
                     false,
                 );
             }
@@ -5815,26 +5846,19 @@ fn gradient_block_kernel_canon64_vec<
                     &mut bank_row,
                     &mut chroma_row,
                     &mut r4,
-                    &mut r_gsrc,
-                    &mut r_gdst,
-                    &mut r_gms,
-                    &mut r_gms2,
-                    &mut r_ring,
-                    &mut r_band,
-                    &mut r_bv_gain,
-                    &mut r_bv_loss,
+                    &mut *r_gsrc,
+                    &mut *r_gdst,
+                    &mut *r_gms,
+                    &mut *r_gms2,
+                    &mut *r_ring,
+                    &mut *r_band,
+                    &mut *r_bv_gain,
+                    &mut *r_bv_loss,
                     false,
                 );
             }
-            acc.sum_gms += r_gms.fin();
-            acc.sum_gms2 += r_gms2.fin();
-            acc.sum_ringing += r_ring.fin();
-            acc.sum_banding += r_band.fin();
-            acc.sum_grad_src += r_gsrc.fin();
-            acc.sum_grad_dst += r_gdst.fin();
-            if BANDVIS {
-                acc.sum_bv_gain += r_bv_gain.fin();
-                acc.sum_bv_loss += r_bv_loss.fin();
+            if !R7 {
+                gradient_pools_finish::<P, BANDVIS>(&mut acc, &fresh);
             }
         }
         gradient_border_pixel::<BANDVIS, BV_DSTACT, BANK, HPR, R7>(
@@ -5863,6 +5887,9 @@ fn gradient_block_kernel_canon64_vec<
                 sum.merge_var(row);
             }
         }
+    }
+    if R7 && width > 2 {
+        gradient_pools_finish::<P, BANDVIS>(&mut acc, &call_pools);
     }
     if BANK {
         for (dst, src) in acc.bank.iter_mut().zip(&bank_acc) {

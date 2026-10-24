@@ -527,7 +527,8 @@ impl Pool for Lanes16F64 {
 /// `(x + 1) % ROW_LANES_FOLD == 0` and at the end of the chunks. The row's
 /// tail columns add to the f64 lanes directly. One f32 add per term replaces a
 /// conversion and an f64 add, and no f32 lane takes more than 256 terms
-/// between folds.
+/// between folds. The f64 lanes live for a dense band of 32 rows, or for a
+/// fused-SSIM or gradient call, and are finished once there.
 #[derive(Debug, Clone, Copy, Default)]
 #[repr(align(64))]
 pub(crate) struct Lanes16F32(pub [f32; 16]);

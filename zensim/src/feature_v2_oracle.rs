@@ -1260,7 +1260,8 @@ fn dense_block_kernel_canon<P: crate::featcanon::Pool>(
     // Revision 7's row lanes (`crate::featcanon::Lanes16F32`): the columns of
     // the row's complete eight-column chunks add in f32 lanes, folded into the
     // f64 pools every `ROW_LANES_FOLD` columns and at the end of the chunks;
-    // the central moments are two-pass per row.
+    // the f64 pools live for the band and finish once per band; the central
+    // moments are two-pass per row.
     let rev7 = revision.row_lanes();
     let chunk_end = (width / 8) * 8;
     let mut dvals = if rev7 { vec![0.0f64; width] } else { Vec::new() };
@@ -1269,15 +1270,31 @@ fn dense_block_kernel_canon<P: crate::featcanon::Pool>(
     while b0 < height {
         let b1 = (b0 + ERA2_BAND_ROWS).min(height);
         let mut band = [0.0f64; 35];
+        // Revision 7: the f64 lanes live for the whole band (each row's row
+        // lanes fold into them), and each pool is finished once per band.
+        let mut band_pools = [P::zero(); 29];
         for y in b0..b1 {
             let row = y * width;
-            let mut r = [P::zero(); 13];
-            let mut p_mw = P::zero();
-            let mut p_iw = P::zero();
-            let mut p_m = [P::zero(); 4];
-            let mut p_i = [P::zero(); 4];
-            let mut p_kn = [P::zero(); 3];
-            let mut p_kd = [P::zero(); 3];
+            // `[r 0..13 | mw | iw | m 0..4 | i 0..4 | kn 0..3 | kd 0..3]`, the
+            // vector body's layout.
+            let mut row_pools = [P::zero(); 29];
+            let pools = if rev7 {
+                &mut band_pools
+            } else {
+                &mut row_pools
+            };
+            let (r, rest) = pools.split_at_mut(13);
+            let (mw_iw, rest) = rest.split_at_mut(2);
+            let (p_m, rest) = rest.split_at_mut(4);
+            let (p_i, rest) = rest.split_at_mut(4);
+            let (p_kn, p_kd) = rest.split_at_mut(3);
+            let (p_mw, p_iw) = mw_iw.split_at_mut(1);
+            let r: &mut [P; 13] = r.try_into().unwrap();
+            let (p_mw, p_iw) = (&mut p_mw[0], &mut p_iw[0]);
+            let (p_m, p_i): (&mut [P; 4], &mut [P; 4]) =
+                (p_m.try_into().unwrap(), p_i.try_into().unwrap());
+            let (p_kn, p_kd): (&mut [P; 3], &mut [P; 3]) =
+                (p_kn.try_into().unwrap(), p_kd.try_into().unwrap());
             let mut local = [0.0f64; 16];
             let mut r32 = [Lanes16F32::default(); 13];
             let (mut p_mw32, mut p_iw32) = (Lanes16F32::default(), Lanes16F32::default());
@@ -1311,8 +1328,8 @@ fn dense_block_kernel_canon<P: crate::featcanon::Pool>(
                         for (l32, l) in r32.iter_mut().zip(r.iter_mut()) {
                             l32.fold_into(l);
                         }
-                        p_mw32.fold_into(&mut p_mw);
-                        p_iw32.fold_into(&mut p_iw);
+                        p_mw32.fold_into(p_mw);
+                        p_iw32.fold_into(p_iw);
                         for (l32, l) in p_m32.iter_mut().zip(p_m.iter_mut()) {
                             l32.fold_into(l);
                         }
@@ -1341,13 +1358,13 @@ fn dense_block_kernel_canon<P: crate::featcanon::Pool>(
                         direct,
                         forms7,
                         &mut r4,
-                        &mut r,
-                        &mut p_mw,
-                        &mut p_iw,
-                        &mut p_m,
-                        &mut p_i,
-                        &mut p_kn,
-                        &mut p_kd,
+                        r,
+                        p_mw,
+                        p_iw,
+                        p_m,
+                        p_i,
+                        p_kn,
+                        p_kd,
                     )
                 };
                 if rev7 {
@@ -1362,22 +1379,12 @@ fn dense_block_kernel_canon<P: crate::featcanon::Pool>(
             }
             if rev7 {
                 acc.central.merge(row_moments_canon(&dvals));
+            } else {
+                dense_band_add(&mut band, &row_pools);
             }
-            for j in 0..13 {
-                band[j] += r[j].fin();
-            }
-            for j in 0..3 {
-                band[13 + j * 2] += p_kn[j].fin();
-                band[14 + j * 2] += p_kd[j].fin();
-            }
-            let mw_row = p_mw.fin();
-            let iw_row = p_iw.fin();
-            for j in 0..4 {
-                band[19 + j * 2] += p_m[j].fin();
-                band[20 + j * 2] += mw_row;
-                band[27 + j * 2] += p_i[j].fin();
-                band[28 + j * 2] += iw_row;
-            }
+        }
+        if rev7 {
+            dense_band_add(&mut band, &band_pools);
         }
         let s = &mut acc;
         s.sum_d += band[0];
@@ -1605,6 +1612,28 @@ fn dense_elem_canon<P: crate::featcanon::Pool>(
 /// updates (even, so a block starts on lanes 0..8; see the kernel below).
 const DENSE_ILV: usize = 16;
 
+/// Add the 29 dense pools' finished sums to a band's 35 sums (`[r 0..13 | kn,kd
+/// pairs | m,mw pairs | i,iw pairs]`; the mean-weight and importance-weight
+/// sums are each the denominator of four weighted pools).
+#[inline(always)]
+fn dense_band_add<P: crate::featcanon::Pool>(band: &mut [f64; 35], pools: &[P; 29]) {
+    for j in 0..13 {
+        band[j] += pools[j].fin();
+    }
+    for j in 0..3 {
+        band[13 + j * 2] += pools[23 + j].fin();
+        band[14 + j * 2] += pools[26 + j].fin();
+    }
+    let mw = pools[13].fin();
+    let iw = pools[14].fin();
+    for j in 0..4 {
+        band[19 + j * 2] += pools[15 + j].fin();
+        band[20 + j * 2] += mw;
+        band[27 + j * 2] += pools[19 + j].fin();
+        band[28 + j * 2] += iw;
+    }
+}
+
 #[magetypes(define(f32x8, f32x16, f64x8), v4x, v4, v3, -scalar)]
 #[allow(clippy::too_many_arguments)]
 fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64, const R7: bool>(
@@ -1686,10 +1715,10 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64, const R7: bool>(
     };
     // Revision 7 (`rowlanes`, `crate::featcanon::Lanes16F32`): the 29 pools
     // add each complete chunk's columns in f32 row lanes, folded into the f64
-    // lanes every `ROW_LANES_FOLD` columns and before the tail, and the
-    // central moments of `d` are two-pass per row (`row_moments_canon`'s
-    // ops, lane-parallel) with one merge per row. Revisions 5 and 6 keep
-    // their bits.
+    // lanes every `ROW_LANES_FOLD` columns and before the tail (the f64 lanes
+    // live for the band, finished once per band), and the central moments of
+    // `d` are two-pass per row (`row_moments_canon`'s ops, lane-parallel)
+    // with one merge per row. Revisions 5 and 6 keep their bits.
     // `R7` is `revision.row_lanes()` at compile time, so a revision-7 instance
     // carries none of the eight-lane and interleave buffers below.
     let rev7 = R7;
@@ -1751,6 +1780,9 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64, const R7: bool>(
     while b0 < height {
         let b1 = (b0 + ERA2_BAND_ROWS).min(height);
         let mut band = [0.0f64; 35];
+        // Revision 7: the f64 lanes live for the whole band (each row's row
+        // lanes fold into them), and each pool is finished once per band.
+        let mut band_pools = [P::zero(); 29];
         for y in b0..b1 {
             let row = y * width;
             // One flat accumulator row: `[r 0..13 | mw | iw | m 0..4 |
@@ -1760,7 +1792,8 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64, const R7: bool>(
             // fuse into `vgatherqpd`/`vscatterqpd` (the 4.3x regression
             // the former v3-only dispatch worked around). The tail slices
             // give `dense_elem_canon` the same typed pool refs — zero cost.
-            let mut pools = [P::zero(); 29];
+            let mut row_pools = [P::zero(); 29];
+            let pools = if rev7 { &mut band_pools } else { &mut row_pools };
             let mut local = [0.0f64; 16];
             let mut blocks = 0usize;
             let full = width / 8;
@@ -2103,22 +2136,12 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64, const R7: bool>(
             }
             if rev7 {
                 acc.central.merge(row_moments(&dvals[..width]));
+            } else {
+                dense_band_add(&mut band, pools);
             }
-            for j in 0..13 {
-                band[j] += pools[j].fin();
-            }
-            for j in 0..3 {
-                band[13 + j * 2] += pools[23 + j].fin();
-                band[14 + j * 2] += pools[26 + j].fin();
-            }
-            let mw_row = pools[13].fin();
-            let iw_row = pools[14].fin();
-            for j in 0..4 {
-                band[19 + j * 2] += pools[15 + j].fin();
-                band[20 + j * 2] += mw_row;
-                band[27 + j * 2] += pools[19 + j].fin();
-                band[28 + j * 2] += iw_row;
-            }
+        }
+        if rev7 {
+            dense_band_add(&mut band, &band_pools);
         }
         let s = &mut acc;
         s.sum_d += band[0];

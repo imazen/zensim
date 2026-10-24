@@ -1932,6 +1932,39 @@ The changes, in order:
    0.1867 ms, 256² 1.137 → 1.096 ms.
 9. **Folds only written pools; a revision-7 dense kernel without the eight-lane buffers** (`5e706fc9`): 64² 0.1875 →
    0.1813 ms, 256² 1.096 → 1.060 ms, 1024² 12.16 → 11.97 ms.
+10. **Gradient head and tail as one eight-wide step each** (`bbeb1f9b`, revision 7): without the gmsbank and rev4-bank
+    paths and in rows of at least ten columns, the head (x = 1..8) and the columns after the chunks are one
+    `gradient_terms32_v` each, whose kept lanes add to the f64 pools in ascending x. v4x, one thread, unpaired medians of
+    two runs: 64² 0.1777 → 0.164 ms, 256² 1.067 → 0.996 ms, 1024² 11.97–12.46 → 11.68–11.70 ms.
+11. **Two redundant divisions in the dense terms** (`b9c9e5d6`, every revision): the HF gain/loss pair (its operands are
+    squares, so one numerator is always zero and `b − a` is exactly `−(a − b)`) and the art/det soft-peak saturations
+    (never both nonzero; `saturate(+0) = +0`) take one division each, and the copy of `d` into the row-moment buffer
+    compiles to vector converts. Paired, 10 rounds (`rev7_bbeb1f9b_vs_densediv`): v4x −1.02% / −0.65% / +0.23%
+    (−1.13..+0.63), v3 −0.35% / −0.48% / −0.40%. The dense kernel is not bound by its divider.
+12. **Vertical blurs walk 2 KiB column panels** (`59595d48`, every revision): retirement waited on a load
+    (`ex_no_retire.load_not_complete`) for 16% of all cycles at 1507×2048 on v4x, and 39% of those samples were in the
+    vertical blur, whose 512-byte tiles step one 6 KB row stride per few cache lines, which the stream prefetchers do
+    not follow. The panels walk the full height in contiguous 2 KiB row segments; rings of four pair and eight
+    quadruple segments hold every live tree node, and every output keeps its operands and tree. Paired
+    (`rev7_densediv_vs_vpanel`): v4x −1.22% / −4.33% / −3.26%, v3 −1.92% / −2.91% / −2.47%. 4 KiB panels were 1.7–2.1%
+    slower than 2 KiB (`rev7_vpanel2k_vs_4k`), 1 KiB within ±0.9% (`rev7_vpanel2k_vs_1k`). The blur's load-stall samples
+    fell 35%; it still holds 29% of them.
+13. **Band- and call-lifetime f64 lanes** (revision 7): equal-pixel synthetic images expose a fixed cost of about
+    0.2 µs per channel-scale row (v4x, one thread: 1536×2048 32.7 ms, 768×4096 35.2 ms, 384×8192 39.5 ms, 192×16384
+    51.1 ms, 96×32768 83.1 ms). Per row, the dense, fused-SSIM and gradient kernels zeroed 67 sixteen-lane f64 pools,
+    folded the row lanes into them and ran 67 sixteen-lane tree finishes. Revision 7's f64 lanes now live for a 32-row
+    band (dense) or for the call (fused SSIM and gradient: the 128-row strip) and each pool finishes once there. Values
+    move by at most 1.8e-11 relative (110 dumps, still identical across tiers and thread counts); B's and Tga's scores
+    on the 96 scoring pairs are equal at the scorer's six decimals; against the exact oracle the per-feature median
+    error keeps p90 2.39e-6, p99 3.78e-5 and worst 5.91e-5 (26 features closer than the previous revision-7 build, 24
+    further; `rev7/rev7band_accuracy/`). Paired (`rev7_vpanel_vs_band`): v4x −11.56% / −4.66% / −4.04%, v3 −6.98% /
+    −2.32% / −1.46%.
+
+**Revision 7 against revision 6 now** (B's 55 dumps, one binary, the revision-6 and revision-7 stamps): 22,190 of
+39,600 feature values move, by a median 1.1e-6 relative (90th percentile 1.7e-5, 99th 2.3e-4, largest 4.0e-3 on the
+97×63 pair's slot 664, 5.733e-6 → 5.710e-6, an absolute 2.3e-8), and the score by at most 4.0e-5 points (median
+7.0e-6). The 1.6e-8 median and 7.1e-6 score bound above predate 4 (the difference forms and the cube root); 13 adds at
+most 1.8e-11.
 
 **Accuracy of 4 against the exact f64 oracle** (`rev7_forms.py --exact-stable`, the 93 near-identical pairs; outputs
 under `/mnt/v/output/zensim/byconstruction-2026-10-22/rev7/rev7c1_accuracy/`): per-feature median error p90 2.80e-6
@@ -1944,11 +1977,13 @@ correctly rounded) made the opsin step slower, because it is bound by FP op coun
 15.1% of samples); spreading revision 7's vertical blockiness lattice over eight lanes removed the lane-0 add chain but
 not the time (1.09 against 1.11 ms; the scalar divisions bound it); a 16-wide loop at revision 5 (above).
 
-**Where the time goes now** (B, revision 7, 2048², one thread): v4x — the dense kernel 18%, sRGB → XYB 15% (opsin math
-and the cube root), the vertical blur 13%, the horizontal fused blur 10%, the fused SSIM pools 8%, the gradient kernel
-6%, the box blurs of the activity plane 4.5%, blockiness 4%; v3 — dense 22%, XYB 15% (scalar table loads: no safe AVX2
-gather exists), vertical blur 13%, horizontal fused blur 13%, fused SSIM 8%, gradient 7%. For 64² images the per-row
-pool folds and finishes and the scalar gradient head and tail are what remains above the pixel work.
+**Where the time goes now** (B, revision 7, the 1507×2048 photo, one thread, after 13; harness PNG decoding
+excluded): v4x — the dense kernel 20%, sRGB → XYB 16% (opsin math and the cube root), the vertical blur 13%, the
+horizontal fused blur 12%, the fused SSIM pools 10%, the gradient kernel 7%, blockiness 5%, the activity plane's
+horizontal box blur 5%, downscaling 2.5%, strip copies 2%; v3 — dense 22%, XYB 19% (scalar table loads: no safe AVX2
+gather exists), horizontal fused blur 14%, vertical blur 10%, fused SSIM 10%, gradient 8%. Retirement waits on a load
+for 15.1% of the whole run's cycles (`perf stat`, 30 iterations; 15.8% before 11–13), most of it in the plane passes
+(each 148-row strip's eleven planes hold about 10 MB, more than L2).
 
 Open: NEON still runs the scalar canonical bodies (magetypes' NEON `max`/`min` propagate NaN where the canon's
 `f32::max` does not; `FMAXNM`/`FMINNM` would match it); multithreaded scaling is bound by the strips' memory traffic
