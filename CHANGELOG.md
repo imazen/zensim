@@ -22,6 +22,7 @@ None.
 
 ### Changed
 
+- Faster revision-5/6 walk, every output bit unchanged (branch `explore/byconstruction`): DENSEPOOL's blocked pool interchange in the v2 dense kernel, the sRGB8 table held in registers on v4x (`vpermb` + `vpermt2ps` instead of gathers), and eight stable central-moment blocks per SIMD call. One thread: B −10.5% at 2048² and −9.1% at 512² on v4x, −6.1% / −5.8% on v3; Tga −9.6% / −8.9% (v4x). 110 score-and-feature dumps across tiers and thread counts are identical ([record](benchmarks/byconstruction_2026-10-22.md), "Speed pass before revision 7").
 - Declared-ID plans skip every scale nothing reads (no v1-era read, no v2-era work): all walks honour it through `ComputeSet::scale_dead`, read slots stay bit-identical, and profile plans keep every v1 scale for their linear tails. A bake with no scale-0 read costs 41% (512²) and 46% (2048²) fewer instructions than B's read set at Rev5; B is unchanged ([record](benchmarks/byconstruction_2026-10-22.md), branch `explore/byconstruction`).
 
 - Complete the matched reconstructed-JND comparison with native Rust DVIFM 0.3, exact retained-score parity and frozen runtime provenance; preserve its AIC2026 training-exposure distinction ([results](benchmarks/jnd_reconstruction_b_2026-10-19.pointer.md)).

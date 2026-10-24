@@ -1532,6 +1532,10 @@ fn dense_elem_canon<P: crate::featcanon::Pool>(
 // through `f64x8` repr ops (same `vwin_slide64x8!` pattern as fused.rs):
 // each pool is one vector load/add/store, so there is no scalar per-lane
 // RMW for LLVM to vectorize into gather/scatter.
+/// Chunks of eight columns the sixteen-lane dense pools buffer between pool
+/// updates (even, so a block starts on lanes 0..8; see the kernel below).
+const DENSE_ILV: usize = 16;
+
 #[magetypes(define(f32x8, f64x8), v4x, v4, v3, -scalar)]
 #[allow(clippy::too_many_arguments)]
 fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64>(
@@ -1564,6 +1568,52 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64>(
     let ssq = &ssq[..height * width];
     let s12 = &s12[..height * width];
     let activity = &activity[..height * width];
+    // Blocked interchange for the sixteen-lane pools (DENSEPOOL,
+    // `benchmarks/dense_pool_brief_2026-10-24.md`): each chunk's 29 term
+    // vectors go to an L1-resident buffer, and every `DENSE_ILV` chunks each
+    // pool loads its two lane halves once, adds the buffered chunks in order
+    // and stores once. Lane `l` still adds column `x` (`x & 15 == l`) in
+    // ascending `x` from the row's zero, so every sum is bit-identical; only
+    // the pool memory traffic changes (a pool round trip per chunk was most
+    // of this kernel's time). The eight-lane pools keep the per-chunk update.
+    let mut ilv = [[0.0f32; 8]; 29 * DENSE_ILV];
+    // The stable central moments of `d` (Rev5+): eight full 16-column
+    // blocks at a time, one block per `f64x8` lane (`cols[k][b]` is value
+    // `k` of block `b`). Each lane runs `OnlineMoments::block`'s scalar
+    // sequence op for op (the same `-0.0`-seeded sum of `v − v₀`, mean and
+    // `m2/m3/m4` adds), and the blocks merge in raster order, so the moments
+    // are bit-identical; the serial per-block chain is what costs.
+    let mut cols = [[0.0f64; 8]; 16];
+    let central8 = |cols: &[[f64; 8]; 16], blocks: usize, central: &mut OnlineMoments| {
+        if blocks == 0 {
+            return;
+        }
+        let origin = f64x8::load_t(token, &cols[0]);
+        let mut sum = f64x8::splat_t(token, -0.0);
+        for col in cols {
+            sum += f64x8::load_t(token, col) - origin;
+        }
+        let mean = origin + sum / f64x8::splat_t(token, 16.0);
+        let zero = f64x8::zero_t(token);
+        let (mut m2, mut m3, mut m4) = (zero, zero, zero);
+        for col in cols {
+            let d = f64x8::load_t(token, col) - mean;
+            let d2 = d * d;
+            m2 += d2;
+            m3 += d2 * d;
+            m4 += d2 * d2;
+        }
+        let (mean, m2, m3, m4) = (mean.to_array(), m2.to_array(), m3.to_array(), m4.to_array());
+        for b in 0..blocks {
+            central.merge(OnlineMoments {
+                n: 16.0,
+                mean: mean[b],
+                m2: m2[b],
+                m3: m3[b],
+                m4: m4[b],
+            });
+        }
+    };
     let mut b0 = 0usize;
     while b0 < height {
         let b1 = (b0 + ERA2_BAND_ROWS).min(height);
@@ -1579,6 +1629,7 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64>(
             // give `dense_elem_canon` the same typed pool refs — zero cost.
             let mut pools = [P::zero(); 29];
             let mut local = [0.0f64; 16];
+            let mut blocks = 0usize;
             let full = width / 8;
             let srow = &src[row..row + full * 8];
             let drow = &dst[row..row + full * 8];
@@ -1639,18 +1690,59 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64>(
                     kd[1].to_array(),
                     kd[2].to_array(),
                 ];
-                for j in 0..29 {
-                    let a: [f64; 8] = std::array::from_fn(|l| bufs[j][l] as f64);
-                    let lanes = pools[j].chunk8(i & (P::LANES - 1));
-                    (f64x8::load_t(token, lanes) + f64x8::from_array_t(token, a)).store(lanes);
+                if stable {
+                    // Chunk `c` adds to lanes `(c & 1) * 8..`; a block starts
+                    // at an even chunk (`DENSE_ILV` is even), so a buffered
+                    // chunk's parity is its position's.
+                    let k = c % DENSE_ILV;
+                    for j in 0..29 {
+                        ilv[j * DENSE_ILV + k] = bufs[j];
+                    }
+                    if k + 1 == DENSE_ILV || c + 1 == full {
+                        for j in 0..29 {
+                            let blk = &ilv[j * DENSE_ILV..j * DENSE_ILV + k + 1];
+                            let mut lo = f64x8::load_t(token, pools[j].chunk8(0));
+                            let mut hi = f64x8::load_t(token, pools[j].chunk8(8));
+                            let (pairs, rest) = blk.as_chunks::<2>();
+                            for [a, b] in pairs {
+                                let a: [f64; 8] = std::array::from_fn(|l| a[l] as f64);
+                                let b: [f64; 8] = std::array::from_fn(|l| b[l] as f64);
+                                lo += f64x8::from_array_t(token, a);
+                                hi += f64x8::from_array_t(token, b);
+                            }
+                            if let [last] = rest {
+                                let a: [f64; 8] = std::array::from_fn(|l| last[l] as f64);
+                                lo += f64x8::from_array_t(token, a);
+                            }
+                            lo.store(pools[j].chunk8(0));
+                            hi.store(pools[j].chunk8(8));
+                        }
+                    }
+                } else {
+                    for j in 0..29 {
+                        let a: [f64; 8] = std::array::from_fn(|l| bufs[j][l] as f64);
+                        let lanes = pools[j].chunk8(i & (P::LANES - 1));
+                        (f64x8::load_t(token, lanes) + f64x8::from_array_t(token, a))
+                            .store(lanes);
+                    }
                 }
                 if stable {
                     let off = i & 15;
                     for l in 0..8 {
                         local[off + l] = bufs[0][l] as f64;
+                        cols[off + l][blocks] = bufs[0][l] as f64;
                     }
-                    if off == 8 || c + 1 == full && width.is_multiple_of(8) {
-                        acc.central.merge(OnlineMoments::block(&local[..off + 8]));
+                    if off == 8 {
+                        blocks += 1;
+                        if blocks == 8 {
+                            central8(&cols, blocks, &mut acc.central);
+                            blocks = 0;
+                        }
+                    } else if c + 1 == full && width.is_multiple_of(8) {
+                        // The row ends on an eight-value block.
+                        central8(&cols, blocks, &mut acc.central);
+                        blocks = 0;
+                        acc.central.merge(OnlineMoments::block(&local[..8]));
                     }
                 }
                 if let Some(r4) = r4.as_mut() {
@@ -1665,6 +1757,8 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64>(
                     );
                 }
             }
+            // Full blocks before the tail's own blocks, in raster order.
+            central8(&cols, blocks, &mut acc.central);
             // Scalar tail — the canonical element step verbatim.
             {
                 let (r, rest) = pools.split_at_mut(13);

@@ -15,6 +15,8 @@
 use archmage::arcane;
 use archmage::incant;
 use archmage::magetypes;
+#[cfg(all(target_arch = "x86_64", feature = "avx512"))]
+use core::arch::x86_64::{__m512, __m512i};
 use magetypes::simd::backends::F32x8Convert;
 use magetypes::simd::backends::F32x16Convert;
 #[cfg(target_arch = "x86_64")]
@@ -684,8 +686,10 @@ impl<T: F32x16Convert> CanonChunk<T> {
 /// per-element formula through [`CanonChunk`], full 16-pixel chunks only;
 /// the `n mod 16` remainder runs the scalar body on every tier.
 /// `-scalar`: `#[magetypes]` would otherwise emit a generic `_scalar`
-/// variant whose `mul_add` is unfused — not canonical.
-#[magetypes(define(f32x16), v4x, v4, v3, -scalar)]
+/// variant whose `mul_add` is unfused — not canonical. v4x is
+/// [`srgb_xyb_canon_vec_v4x`]: the same arithmetic with the table held in
+/// registers.
+#[magetypes(define(f32x16), v4, v3, -scalar)]
 fn srgb_xyb_canon_vec(
     token: Token,
     pixels: &[[u8; 3]],
@@ -721,6 +725,118 @@ fn srgb_xyb_canon_vec(
         y_out[i] = y;
         b_out[i] = bb;
     }
+}
+
+/// [`srgb_xyb_canon_vec`] on v4x, with the sRGB8 → linear table held in
+/// sixteen registers ([`srgb_lanes_v4x`]) instead of three 16-lane gathers
+/// per chunk (most of this kernel's time on Zen 5). The table values, the
+/// opsin arithmetic ([`CanonChunk::opsin_positive`]) and the scalar
+/// remainder are the generated variant's, so every output is bit-identical.
+#[cfg(all(target_arch = "x86_64", feature = "avx512"))]
+#[arcane]
+fn srgb_xyb_canon_vec_v4x(
+    token: archmage::X64V4xToken,
+    pixels: &[[u8; 3]],
+    x_out: &mut [f32],
+    y_out: &mut [f32],
+    b_out: &mut [f32],
+) {
+    let k = CanonChunk::new(token);
+    let lut = srgb_lut_regs_v4x();
+    let n = pixels.len();
+    let chunks = n / 16;
+    for c in 0..chunks {
+        let base = c * 16;
+        let px: &[[u8; 3]; 16] = pixels[base..base + 16]
+            .try_into()
+            .expect("16 pixels per chunk");
+        let (r, g, b) = srgb_lanes_v4x(&lut, px);
+        let (x, y, bb) = k.opsin_positive(
+            GenericF32x16::<archmage::X64V4xToken>::from_raw_t(token, r),
+            GenericF32x16::<archmage::X64V4xToken>::from_raw_t(token, g),
+            GenericF32x16::<archmage::X64V4xToken>::from_raw_t(token, b),
+        );
+        x_out[base..base + 16].copy_from_slice(&x.to_array());
+        y_out[base..base + 16].copy_from_slice(&y.to_array());
+        b_out[base..base + 16].copy_from_slice(&bb.to_array());
+    }
+    let ab = absorbance_bias_f32();
+    for i in (chunks * 16)..n {
+        let p = pixels[i];
+        let (x, y, bb) = opsin_px_canon(
+            ab,
+            srgb_u8_to_linear(p[0]),
+            srgb_u8_to_linear(p[1]),
+            srgb_u8_to_linear(p[2]),
+        );
+        x_out[i] = x;
+        y_out[i] = y;
+        b_out[i] = bb;
+    }
+}
+
+/// Byte positions that deinterleave 16 packed RGB8 pixels: R to bytes
+/// 0..16, G to 16..32, B to 32..48.
+#[cfg(all(target_arch = "x86_64", feature = "avx512"))]
+const DEINTERLEAVE_RGB16: [u8; 64] = {
+    let mut p = [0u8; 64];
+    let mut k = 0;
+    while k < 16 {
+        p[k] = (3 * k) as u8;
+        p[16 + k] = (3 * k + 1) as u8;
+        p[32 + k] = (3 * k + 2) as u8;
+        k += 1;
+    }
+    p
+};
+
+/// The sRGB8 → linear table ([`srgb_u8_to_linear`]) as sixteen registers of
+/// sixteen entries.
+#[cfg(all(target_arch = "x86_64", feature = "avx512"))]
+#[archmage::rite(v4x, import_intrinsics)]
+fn srgb_lut_regs_v4x() -> [__m512; 16] {
+    let lut: [f32; 256] = std::array::from_fn(|i| srgb_u8_to_linear(i as u8));
+    std::array::from_fn(|k| _mm512_loadu_ps(lut[k * 16..k * 16 + 16].try_into().unwrap()))
+}
+
+/// One channel's sixteen table lookups, `idx` in `0..256` per 32-bit lane:
+/// eight two-register permutes each serve 32 entries (index bits 0–4) and a
+/// blend tree on bits 5–7 picks the group. The entries are copied, not
+/// computed, so the result equals the scalar lookup bit for bit.
+#[cfg(all(target_arch = "x86_64", feature = "avx512"))]
+#[archmage::rite(v4x, import_intrinsics)]
+fn lut256_v4x(lut: &[__m512; 16], idx: __m512i) -> __m512 {
+    let g: [__m512; 8] =
+        std::array::from_fn(|k| _mm512_permutex2var_ps(lut[2 * k], idx, lut[2 * k + 1]));
+    let b5 = _mm512_test_epi32_mask(idx, _mm512_set1_epi32(32));
+    let b6 = _mm512_test_epi32_mask(idx, _mm512_set1_epi32(64));
+    let b7 = _mm512_test_epi32_mask(idx, _mm512_set1_epi32(128));
+    let s01 = _mm512_mask_blend_ps(b5, g[0], g[1]);
+    let s23 = _mm512_mask_blend_ps(b5, g[2], g[3]);
+    let s45 = _mm512_mask_blend_ps(b5, g[4], g[5]);
+    let s67 = _mm512_mask_blend_ps(b5, g[6], g[7]);
+    let s03 = _mm512_mask_blend_ps(b6, s01, s23);
+    let s47 = _mm512_mask_blend_ps(b6, s45, s67);
+    _mm512_mask_blend_ps(b7, s03, s47)
+}
+
+/// Sixteen packed RGB8 pixels to linear channel vectors: one byte permute
+/// deinterleaves the 48 bytes, then [`lut256_v4x`] per channel.
+#[cfg(all(target_arch = "x86_64", feature = "avx512"))]
+#[archmage::rite(v4x, import_intrinsics)]
+fn srgb_lanes_v4x(lut: &[__m512; 16], px: &[[u8; 3]; 16]) -> (__m512, __m512, __m512) {
+    let bytes = px.as_flattened();
+    let lo: &[u8; 32] = bytes[..32].try_into().unwrap();
+    let hi: &[u8; 16] = bytes[32..48].try_into().unwrap();
+    let v = _mm512_inserti32x4::<2>(
+        _mm512_castsi256_si512(_mm256_loadu_si256(lo)),
+        _mm_loadu_si128(hi),
+    );
+    let d = _mm512_permutexvar_epi8(_mm512_loadu_si512(&DEINTERLEAVE_RGB16), v);
+    let r = _mm512_cvtepu8_epi32(_mm512_castsi512_si128(d));
+    let g = _mm512_cvtepu8_epi32(_mm512_extracti32x4_epi32::<1>(d));
+    let b = _mm512_cvtepu8_epi32(_mm512_extracti32x4_epi32::<2>(d));
+    (lut256_v4x(lut, r), lut256_v4x(lut, g), lut256_v4x(lut, b))
 }
 
 /// The scalar tier's canonical sRGB→XYB: the per-element scalar body
