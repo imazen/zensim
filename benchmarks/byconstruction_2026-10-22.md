@@ -2002,6 +2002,52 @@ Open: NEON still runs the scalar canonical bodies (magetypes' NEON `max`/`min` p
 `f32::max` does not; `FMAXNM`/`FMINNM` would match it); multithreaded scaling is bound by the strips' memory traffic
 (about 430 bytes per pixel move from L3 to L2 at 2048²; a line-buffer walk would keep them in L2).
 
+### The JPEG XL loop at low distances: why it misses the requested distance (2026-10-24)
+
+Owner report: "at .45d, the jxlencoder doesnt converge on the reqhested distance". The workbench's loop player runs
+jxl-encoder's perceptual loop (`butteraugli-loop` with an external metric) at the requested butteraugli distance,
+steered by butteraugli itself or by a module map placed on butteraugli's scale (`scale · e^exponent`, score = the
+map's largest value). Reproduced natively by `zensim-workbench/loop-converge` (a standalone crate: `loop-converge`
+mirrors the wasm codec's adapter, `map_probe` reads one pair's signed map under every map mode, `loop_pairs` writes
+calibration pairs), on a 512² center crop of the speed pass's CLIC photo, effort 7, the player's 4 iterations.
+Final score ÷ requested distance:
+
+| Steering | d 0.3 | d 0.45 | d 0.6 | d 1.0 | d 2.0 |
+|---|---|---|---|---|---|
+| butteraugli (built in) | 1.27 | 1.28 | 1.36 | 1.30 | 1.19 |
+| B `diffmap` (shipped placement) | 4.86 | 1.84 | 1.65 | 1.62 | 1.15 |
+| Tga `diffmap` | 1.85 | 2.13 | 1.46 | 1.46 | 1.49 |
+| B `blocks8` | 8.09 | 5.42 | 3.01 | 1.37 | 1.13 |
+
+1. **Butteraugli meets the loop's own rule but not the max.** The loop (libjxl's FindBestQuantization) bumps every
+   8×8 block whose tile distance, 1.2 × the block's 16-norm, exceeds the target. With 8 iterations at d 0.45 it
+   reaches a fixpoint at the seventh frame with no block above 0.45 and the quant field far below its cap (4.49 of
+   13.3), while the pixel maximum the player shows is 0.548. The final maximum is 1.06–1.22× the largest tile
+   distance at the five distances above.
+2. **A zensim map's level falls too slowly near lossless.** Plain encodes of the crop (no loop): B's deficit falls
+   like butteraugli's maximum to the power 0.81 between d 1 and d 0.3 but only 0.48 between d 0.2 and d 0.05
+   (B 85.16 at d 1, 93.79 at d 0.3, 95.32 at d 0.2, 97.66 at d 0.05). On calibration pairs at 12 distances
+   (`loop_pairs`: the 17 CID22-512 training images of the earlier calibration, the 10 gb82-sc screenshots held
+   out, 0.1 to 6), the shipped placement's mean log ratio to butteraugli's block distances rises from −0.50 at
+   d 6 to +1.39 at d 0.1 (B `diffmap`, fit images), the same ramp for every map and bake. The shipped placement was
+   fitted at 0.5–6 only; refitting one power law over 0.1–6 drives the exponent to 0.15–0.2 and keeps the ramp,
+   and per-distance fits pick exponents of 0.1–0.25 (within one quality level the zensim block map barely predicts
+   butteraugli's). Correcting only the scale per distance (shipped exponent, scale × e^−bias) brings d 0.3 to
+   1.35× at the butteraugli loop's bytes but leaves d 0.45 at 1.96×.
+3. **Fourth-power pools make the map spike at the worst pixel.** From iteration 2 at d 0.3 the B map's maximum sits
+   at pixel (1, 417) of the left edge (density × N 3150–4980 under every window and paint mode with the exact
+   split, 750–1170 with the repair split; the map total is about 4); repairing that one pixel raises B from 95.9002 to 95.9171. Its contributions come from
+   `v2_ssim_dev4_s0_y` (−14% from the one pixel), `basic_edge_det_4th_s1_y`, `basic_ssim_4th_s0_y` and
+   `basic_edge_det_4th_s0_y`. The reconstruction there is a real +4/−3 level error in textured content (local std
+   6.2 levels), not a window artifact; a fourth-root moment's exact share grows as 1/f³ while the rest of the
+   image improves, so the largest value follows whichever pixel is currently worst and jumps between iterations.
+4. **jxl-encoder's own zensim loop clamps below d 0.5.** `zensim_targets.rs`'s distance table starts at 0.5 and
+   returns its first value for anything lower, so `--zensim-iters` at d 0.45 aims at d 0.5's target; the table is
+   also seeded against profile A.
+
+Outputs: calibration pairs `/mnt/v/zenmetrics-private/aic4/loop-pairs/2026-10-24-hq/` (dev; 324 pairs), fits
+`/mnt/v/zenmetrics-private/zensimx-workbench/loop_calibration_2026-10-24hq.tsv`.
+
 ### DVIFM 0.3 on the E21 sets and the mixture test (2026-10-23)
 
 Owner request: "eval dvifm 0.3 on kadid and other distortion//corrputions". Scorer: the frozen runtime of the

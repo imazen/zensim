@@ -26,7 +26,7 @@ const FLOOR: f64 = 0.05;
 
 /// One pair: its set (`fit` or `hold`), the map's local error at scale 1 and
 /// exponent 1, butteraugli's block distances, width and height.
-type Pair<'a> = (&'a str, Vec<f32>, Vec<f32>, usize, usize);
+type Pair<'a> = (&'a str, Vec<f32>, Vec<f32>, usize, usize, f64);
 const K_TILE_NORM: f64 = 1.2;
 
 fn tile_norms(values: &[f32], width: usize, height: usize, exponent: f64) -> Vec<f64> {
@@ -98,7 +98,8 @@ fn main() {
             continue; // CID22-512 validation: protected, never read
         };
         let (w, h): (usize, usize) = (f[4].parse().expect("width"), f[5].parse().expect("height"));
-        rows.push((idx, set, w, h));
+        let distance: f64 = f[3].parse().expect("distance");
+        rows.push((idx, set, w, h, distance));
     }
     let read = |p: std::path::PathBuf| {
         std::fs::read(&p).unwrap_or_else(|e| panic!("{}: {e}", p.display()))
@@ -113,7 +114,7 @@ fn main() {
             // Per pair: the map's local error (scale 1, exponent 1) and butteraugli's block distances.
             let pairs: Vec<Pair> = rows
                 .iter()
-                .map(|(idx, set, w, h)| {
+                .map(|(idx, set, w, h, distance)| {
                     let r = read(dir.join(format!("{idx}.ref.rgba")));
                     let d = read(dir.join(format!("{idx}.dist.rgba")));
                     let (values, _) = zensim_workbench::loop_map_values(
@@ -134,7 +135,7 @@ fn main() {
                         .iter()
                         .map(|c| f32::from_le_bytes(*c))
                         .collect();
-                    (*set, values, b, *w, *h)
+                    (*set, values, b, *w, *h, *distance)
                 })
                 .collect();
             let mut best: Option<(f64, f64, f64)> = None;
@@ -175,6 +176,98 @@ fn main() {
             };
             let (fr, fp, fnn) = fit_stats(&set("fit"), scale);
             let (hr, hp, hn) = fit_stats(&set("hold"), scale);
+            // Per encoded distance: the mean log ratio of the placed block
+            // distances to butteraugli's (positive: the placed map reads
+            // worse than butteraugli, so the loop over-refines there), for
+            // this fit and for the placement the module ships.
+            // LOOP_CAL_PER_DISTANCE: the same fit separately at each encoded
+            // distance (fit images), as `d<distance>=<scale>,<exponent>` pairs
+            // ready for loop-converge's LOOP_PLACEMENT.
+            if std::env::var_os("LOOP_CAL_PER_DISTANCE").is_some() {
+                let mut ds: Vec<f64> = pairs.iter().map(|p| p.5).collect();
+                ds.sort_by(f64::total_cmp);
+                ds.dedup();
+                let mut parts = Vec::new();
+                for &d in &ds {
+                    let mut best: Option<(f64, f64, f64)> = None;
+                    for &ex in &EXPONENTS {
+                        let fit: Vec<(Vec<f64>, Vec<f32>)> = pairs
+                            .iter()
+                            .filter(|p| p.0 == "fit" && p.5 == d)
+                            .map(|p| (tile_norms(&p.1, p.3, p.4, ex), p.2.clone()))
+                            .collect();
+                        let (mut s, mut n) = (0.0, 0usize);
+                        for (m, b) in &fit {
+                            for (&mv, &bv) in m.iter().zip(b) {
+                                if mv > 0.0 && f64::from(bv) >= FLOOR {
+                                    s += f64::from(bv).ln() - mv.ln();
+                                    n += 1;
+                                }
+                            }
+                        }
+                        if n == 0 {
+                            continue;
+                        }
+                        let sc = (s / n as f64).exp();
+                        let (rmse, _, _) = fit_stats(&fit, sc);
+                        if best.is_none_or(|b| rmse < b.0) {
+                            best = Some((rmse, sc, ex));
+                        }
+                    }
+                    if let Some((rmse, sc, ex)) = best {
+                        parts.push(format!("{d}={sc:.4e},{ex}"));
+                        eprintln!(
+                            "  per-distance d{d}: scale {sc:.4e} exponent {ex} fit rmse {rmse:.3}"
+                        );
+                    }
+                }
+                eprintln!("  LOOP_PLACEMENT={}", parts.join(";"));
+            }
+            if std::env::var_os("LOOP_CAL_BY_DISTANCE").is_some() {
+                let shipped: Vec<serde_json::Value> =
+                    serde_json::from_str(&zensim_workbench::loop_map_defaults()).expect("defaults");
+                let shipped = shipped
+                    .iter()
+                    .find(|d| d["metric"] == metric.as_str() && d["map"] == map.as_str())
+                    .map(|d| {
+                        (
+                            d["scale"].as_f64().unwrap(),
+                            d["exponent"].as_f64().unwrap(),
+                        )
+                    });
+                let mut ds: Vec<f64> = pairs.iter().map(|p| p.5).collect();
+                ds.sort_by(f64::total_cmp);
+                ds.dedup();
+                for which in ["fit", "hold"] {
+                    let mut line = format!("  {which} bias by distance (this fit");
+                    if let Some((ss, se)) = shipped {
+                        line += &format!(" | shipped {ss:.4e}/{se}");
+                    }
+                    line += "):";
+                    for &d in &ds {
+                        let bias = |sc: f64, ex: f64| -> (f64, usize) {
+                            let (mut s, mut n) = (0.0, 0usize);
+                            for p in pairs.iter().filter(|p| p.0 == which && p.5 == d) {
+                                let m = tile_norms(&p.1, p.3, p.4, ex);
+                                for (&mv, &bv) in m.iter().zip(&p.2) {
+                                    if mv > 0.0 && f64::from(bv) >= FLOOR {
+                                        s += (sc * mv).ln() - f64::from(bv).ln();
+                                        n += 1;
+                                    }
+                                }
+                            }
+                            (if n > 0 { s / n as f64 } else { f64::NAN }, n)
+                        };
+                        let (b, n) = bias(scale, e);
+                        line += &format!(" d{d} {b:+.2}");
+                        if let Some((ss, se)) = shipped {
+                            line += &format!("|{:+.2}", bias(ss, se).0);
+                        }
+                        line += &format!(" (n{n})");
+                    }
+                    eprintln!("{line}");
+                }
+            }
             tsv.push_str(&format!(
                 "{metric}\t{map}\t{scale:.6e}\t{e}\t{fr:.4}\t{fp:.4}\t{fnn}\t{hr:.4}\t{hp:.4}\t{hn}\n"
             ));
