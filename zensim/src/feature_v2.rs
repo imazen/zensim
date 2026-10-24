@@ -5329,6 +5329,8 @@ pub(crate) struct FoldRetention {
     pub(crate) basic_sd: Vec<[Vec<f32>; 3]>,
     retain_basic: bool,
     rev5: bool,
+    /// The revision the retaining walk computed its planes at (the plan's, not the process's).
+    pub(crate) revision: FormulaRevision,
     channels: [[bool; 3]; crate::NUM_SCALES],
 }
 
@@ -5356,6 +5358,7 @@ impl FoldRetention {
             basic_sd: Vec::new(),
             retain_basic: false,
             rev5: false,
+            revision: crate::ssim_form::SHIPPED_REVISION,
             channels: [[false; 3]; crate::NUM_SCALES],
         }
     }
@@ -5375,6 +5378,7 @@ impl FoldRetention {
         self.strips
             .resize_with(dims.len(), || core::array::from_fn(|_| Vec::new()));
         let rev5 = compute.formula_revision >= FormulaRevision::Rev5;
+        self.revision = compute.formula_revision;
         let channels = core::array::from_fn(|scale| {
             core::array::from_fn(|ch| {
                 scale < dims.len() && (!rev5 || compute.channel_active(scale, ch))
@@ -7697,6 +7701,7 @@ fn retention_pass_b_all_scales(
             &mut scratch.lattice,
             guide0.as_deref(),
             paint,
+            ret.revision,
         );
     }
 }
@@ -10081,10 +10086,11 @@ struct V2AppCoeffs {
     sp_ssim: (f64, f64),
     sp_art: (f64, f64),
     sp_det: (f64, f64),
-    // ssim dev pools: μ, raw2, raw3, f2, f4 and the two s_k.
+    // ssim dev pools: μ, raw2, raw3, the third central moment, f2, f4 and the two s_k.
     dev_mu: f64,
     dev_raw2: f64,
     dev_raw3: f64,
+    dev_c3: f64,
     dev_f2: f64,
     dev_f4: f64,
     s_dev2: f64,
@@ -10116,6 +10122,12 @@ struct V2AppCoeffs {
     c_bv_gain: f64,
     c_bv_loss: f64,
     inv_n: f64,
+    // The forms of the computation that produced the planes, never the process's: whether `s12` holds the
+    // direct error moment (Rev3+), and whether ringing reads the high-pass residual (revision 6 or the
+    // research ring-form override). A bake served at its declared revision in a process of another one
+    // retains planes of its own revision.
+    direct: bool,
+    ring_hp: bool,
 }
 
 #[cfg(feature = "custom-profiles")]
@@ -10130,6 +10142,7 @@ fn derive_v2app_coeffs(
     append_active: bool,
     cross: bool,
     edgew_coeff: f64,
+    revision: FormulaRevision,
 ) -> V2AppCoeffs {
     let n_f = cell.n as f64;
     let inv_n = 1.0 / n_f;
@@ -10164,6 +10177,8 @@ fn derive_v2app_coeffs(
         c_banding: -gv2(idx::BANDING) * inv_n,
         c_blockiness: -gv2(idx::BLOCKINESS) * inv_n,
         c_edgew: edgew_coeff,
+        direct: revision >= FormulaRevision::Rev3,
+        ring_hp: revision.ring_high_pass() || active_ring_form() == RingForm::HighPassMu,
         ..Default::default()
     };
 
@@ -10248,6 +10263,13 @@ fn derive_v2app_coeffs(
     c.dev_mu = mu;
     c.dev_raw2 = raw2;
     c.dev_raw3 = raw3;
+    // The third central moment, from the stable block moments when the walk
+    // kept them (Rev5+), else from the raw sums.
+    c.dev_c3 = if dense.central.n > 0.0 {
+        dense.central.m3 * inv_n
+    } else {
+        raw3 - 3.0 * mu * raw2 + 2.0 * mu.powi(3)
+    };
     c.dev_f2 = m2.sqrt();
     c.dev_f4 = m4.quarter_root(crate::det_math::active_root_form());
     c.s_dev2 = gv2(idx::SSIM_DEV2);
@@ -10389,10 +10411,11 @@ fn attr_pass_b_rows(
     win_plane: &mut [f64],
 ) {
     // Revision 3 (issue #61): the `s12` plane is the direct error moment, so
-    // the v2 SSIM signal must read it as such. Hoisted once per call;
-    // loop-invariant, so every call site below unswitches on it.
-    let direct = crate::ssim_form::active_revision() >= crate::feature_defs::FormulaRevision::Rev3;
-    let ring_hp = process_ring_high_pass();
+    // the v2 SSIM signal must read it as such. The planes' own revision
+    // (`V2AppCoeffs::direct`); loop-invariant, so every call site below
+    // unswitches on it.
+    let direct = co.direct;
+    let ring_hp = co.ring_hp;
     let out_off = y0 * width;
     let cross_on = cross.is_some();
     for y in y0..y1 {
@@ -10461,17 +10484,19 @@ fn attr_pass_b_rows(
             a_res += co.sp_art.0 * saturate(art_i, C_PEAK) * (co.sp_art.1 - art_i);
             a_res += co.sp_det.0 * saturate(det_i, C_PEAK) * (co.sp_det.1 - det_i);
 
-            // SSIM deviation pools (v = d).
+            // SSIM deviation pools (v = d), in centered form: the removal
+            // polynomials `2μd − d²` and `−d⁴ + 4d·raw3 + 4μd³ − 12μd·raw2 −
+            // 6μ²d² + 12μ³d` equal `μ² − e²` and `μ⁴ − e⁴ + 4d·c3` with
+            // `e = d − μ`, which do not cancel when the deviation is small
+            // against the mean.
             if co.s_dev2 != 0.0 && co.dev_f2 > 1e-12 {
-                a_win += co.s_dev2 * (2.0 * co.dev_mu * d - d * d)
+                let e = d - co.dev_mu;
+                a_win += co.s_dev2 * (co.dev_mu * co.dev_mu - e * e)
                     / (2.0 * co.dev_f2 * (1.0 / co.inv_n));
             }
             if co.s_dev4 != 0.0 && co.dev_f4 > 1e-12 {
-                let mu = co.dev_mu;
-                let dm4 = -d.powi(4) + 4.0 * d * co.dev_raw3 + 4.0 * mu * d.powi(3)
-                    - 12.0 * mu * d * co.dev_raw2
-                    - 6.0 * mu * mu * d * d
-                    + 12.0 * mu.powi(3) * d;
+                let e = d - co.dev_mu;
+                let dm4 = co.dev_mu.powi(4) - e.powi(4) + 4.0 * d * co.dev_c3;
                 a_win += co.s_dev4 * co.inv_n * dm4 / (4.0 * co.dev_f4.powi(3));
             }
 
@@ -10752,12 +10777,16 @@ struct V2AppCoeffsF32 {
     sp_art: (f32, f32),
     sp_det: (f32, f32),
     /// ssim-`d` dev-pool polynomial (dev2 + dev4 folded, guards applied at
-    /// fold time): `pd1·d + pd2·d² + pd3·d³ + pd4·d⁴` added to the window
-    /// class.
+    /// fold time), centered at the pool mean `pdm`:
+    /// `pd0 + pd1·d + pq2·e² + pq4·e⁴` with `e = d − pdm`, added to the
+    /// window class. Expanded in raw powers of `d` these coefficients grow as
+    /// `1/f³` and the f32 sum cancels catastrophically once the deviation is
+    /// small against the mean.
+    pd0: f32,
     pd1: f32,
-    pd2: f32,
-    pd3: f32,
-    pd4: f32,
+    pq2: f32,
+    pq4: f32,
+    pdm: f32,
     c_xmask: f32,
     c_lumt: f32,
     c_mscn: f32,
@@ -10781,6 +10810,9 @@ struct V2AppCoeffsF32 {
     c_edgew: f32,
     c_bv_gain: f32,
     c_bv_loss: f32,
+    /// [`V2AppCoeffs::direct`] / [`V2AppCoeffs::ring_hp`]: the planes' own forms.
+    direct: bool,
+    ring_hp: bool,
 }
 
 /// Fold a derived [`V2AppCoeffs`] into the f32 pack. `cross_on` = the f64
@@ -10788,21 +10820,19 @@ struct V2AppCoeffsF32 {
 /// and cross-mask terms are zeroed exactly as the f64 branch skips them.
 #[cfg(feature = "custom-profiles")]
 fn v2app_coeffs_fold_f32(co: &V2AppCoeffs, cross_on: bool) -> V2AppCoeffsF32 {
-    // dev2: s·(2μd − d²) / (2·f2·N)  →  lin/quad in d.
-    let (mut pd1, mut pd2, mut pd3, mut pd4) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
+    // dev2: s·(μ² − e²) / (2·f2·N); dev4: k4·(μ⁴ − e⁴ + 4d·c3), e = d − μ.
+    let (mut pd0, mut pd1, mut pq2, mut pq4) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
+    let mu = co.dev_mu;
     if co.s_dev2 != 0.0 && co.dev_f2 > 1e-12 {
         let k = co.s_dev2 * co.inv_n / (2.0 * co.dev_f2);
-        pd1 += k * 2.0 * co.dev_mu;
-        pd2 += -k;
+        pd0 += k * mu * mu;
+        pq2 += -k;
     }
-    // dev4: k4·dm4 with dm4 = −d⁴ + 4d·raw3 + 4μd³ − 12μd·raw2 − 6μ²d² + 12μ³d.
     if co.s_dev4 != 0.0 && co.dev_f4 > 1e-12 {
         let k4 = co.s_dev4 * co.inv_n / (4.0 * co.dev_f4.powi(3));
-        let mu = co.dev_mu;
-        pd1 += k4 * (4.0 * co.dev_raw3 - 12.0 * mu * co.dev_raw2 + 12.0 * mu.powi(3));
-        pd2 += k4 * (-6.0) * mu * mu;
-        pd3 += k4 * 4.0 * mu;
-        pd4 += -k4;
+        pd0 += k4 * mu.powi(4);
+        pd1 += k4 * 4.0 * co.dev_c3;
+        pq4 += -k4;
     }
     let gdp_lq = |g: (f64, f64, f64)| -> (f32, f32) {
         let (sk, m, f) = g;
@@ -10842,10 +10872,11 @@ fn v2app_coeffs_fold_f32(co: &V2AppCoeffs, cross_on: bool) -> V2AppCoeffsF32 {
         sp_ssim: (co.sp_ssim.0 as f32, co.sp_ssim.1 as f32),
         sp_art: (co.sp_art.0 as f32, co.sp_art.1 as f32),
         sp_det: (co.sp_det.0 as f32, co.sp_det.1 as f32),
+        pd0: pd0 as f32,
         pd1: pd1 as f32,
-        pd2: pd2 as f32,
-        pd3: pd3 as f32,
-        pd4: pd4 as f32,
+        pq2: pq2 as f32,
+        pq4: pq4 as f32,
+        pdm: mu as f32,
         c_xmask: if cross_on { co.c_xmask as f32 } else { 0.0 },
         c_lumt: if cross_on { co.c_lumt as f32 } else { 0.0 },
         c_mscn: co.c_mscn as f32,
@@ -10868,6 +10899,8 @@ fn v2app_coeffs_fold_f32(co: &V2AppCoeffs, cross_on: bool) -> V2AppCoeffsF32 {
         c_edgew: co.c_edgew as f32,
         c_bv_gain: co.c_bv_gain as f32,
         c_bv_loss: co.c_bv_loss as f32,
+        direct: co.direct,
+        ring_hp: co.ring_hp,
     }
 }
 
@@ -10992,9 +11025,10 @@ fn attr_pass_b_main_px(
     a_win += co.sp_ssim.0 * sat(d, CPK) * (co.sp_ssim.1 - d);
     a_res += co.sp_art.0 * sat(art_i, CPK) * (co.sp_art.1 - art_i);
     a_res += co.sp_det.0 * sat(det_i, CPK) * (co.sp_det.1 - det_i);
-    // Dev polynomial: pd1·d + pd2·d² + pd3·d³ + pd4·d⁴.
-    let dsq = d * d;
-    a_win += (co.pd1 + co.pd3 * dsq) * d + (co.pd2 + co.pd4 * dsq) * dsq;
+    // Dev polynomial, centered: pd0 + pd1·d + pq2·e² + pq4·e⁴, e = d − pdm.
+    let e = d - co.pdm;
+    let esq = e * e;
+    a_win += co.pd0 + co.pd1 * d + (co.pq2 + co.pq4 * esq) * esq;
     // Rev5 retains no appendix plane: its coefficients cannot read this block.
     if append {
         // Append block.
@@ -11067,9 +11101,10 @@ fn attr_pass_b_main_kernel_generic<T: F32x8Backend + Copy>(
     win_plane: &mut [f32],
 ) {
     // Revision 3 (issue #61): the `s12` plane is the direct error moment, so
-    // the v2 SSIM signal must read it as such. Hoisted once per call;
-    // loop-invariant, so every call site below unswitches on it.
-    let direct = crate::ssim_form::active_revision() >= crate::feature_defs::FormulaRevision::Rev3;
+    // the v2 SSIM signal must read it as such. The planes' own revision
+    // (`V2AppCoeffsF32::direct`); loop-invariant, so every call site below
+    // unswitches on it.
+    let direct = co.direct;
     let zero = V8::<T>::zero_t(token);
     let one = V8::<T>::splat_t(token, 1.0);
     let sp = |v: f32| V8::<T>::splat_t(token, v);
@@ -11157,9 +11192,10 @@ fn attr_pass_b_main_kernel_generic<T: F32x8Backend + Copy>(
             a_win += sp(co.sp_ssim.0) * sat_v(d, c_peak) * (sp(co.sp_ssim.1) - d);
             a_res += sp(co.sp_art.0) * sat_v(art_i, c_peak) * (sp(co.sp_art.1) - art_i);
             a_res += sp(co.sp_det.0) * sat_v(det_i, c_peak) * (sp(co.sp_det.1) - det_i);
-            // Dev polynomial.
-            let dsq = d * d;
-            a_win += (sp(co.pd1) + sp(co.pd3) * dsq) * d + (sp(co.pd2) + sp(co.pd4) * dsq) * dsq;
+            // Dev polynomial, centered (see `V2AppCoeffsF32::pd0`).
+            let e = d - sp(co.pdm);
+            let esq = e * e;
+            a_win += sp(co.pd0) + sp(co.pd1) * d + (sp(co.pq2) + sp(co.pq4) * esq) * esq;
             if append {
                 // Append block.
                 let b2v = ld!(bs2);
@@ -11355,7 +11391,7 @@ fn attr_pass_b_grad_px(
     let mut acc = co.c_gms * g;
     acc += (co.gg_lin + co.gg_quad * g) * g;
     if co.c_ringing != 0.0 {
-        let ring_err = if process_ring_high_pass() {
+        let ring_err = if co.ring_hp {
             ((s_c - m1_c) - (d_c - m2_c)).abs()
         } else {
             (s_c - d_c).abs()
@@ -11412,7 +11448,7 @@ fn attr_pass_b_grad_kernel_generic<T: F32x8Backend + Copy>(
 ) {
     let need_bandvis = co.c_bv_gain != 0.0 || co.c_bv_loss != 0.0;
     let has_ringing = co.c_ringing != 0.0;
-    let ring_hp = process_ring_high_pass();
+    let ring_hp = co.ring_hp;
     let has_banding = co.c_banding != 0.0;
     let zero = V8::<T>::zero_t(token);
     let one = V8::<T>::splat_t(token, 1.0);
@@ -11913,6 +11949,8 @@ fn attr_pass_b_for_scale(
             append_active,
             ch == 1,
             attr_ew_coeff(s_v2, mg, dims, n_scales, scale, ch),
+            // The standalone walk computes its planes at the process revision (`validate_wide_revision`).
+            crate::ssim_form::active_revision(),
         );
         attr_pass_b_channel(
             rplanes[ch],
@@ -12006,6 +12044,7 @@ fn attr_pass_b_for_scale_f32(
     lattice: &mut crate::attribution::LatticeSet,
     guide0: Option<&[f64]>,
     paint: crate::map_paint::MapPaint,
+    revision: FormulaRevision,
 ) {
     let tpb = std::time::Instant::now();
     let (ws, hs) = dims[scale];
@@ -12040,6 +12079,7 @@ fn attr_pass_b_for_scale_f32(
             append_active,
             ch == 1,
             attr_ew_coeff(s_v2, mg, dims, n_scales, scale, ch),
+            revision,
         );
         let co32 = v2app_coeffs_fold_f32(&co, cross.is_some());
         attr_pass_b_channel_f32(

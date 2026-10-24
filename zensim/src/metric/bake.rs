@@ -4582,6 +4582,128 @@ mod revision_contract_tests {
         }
     }
 
+    /// The attribution map of a declared-revision bake is the same in every
+    /// process. Its retained planes come from the bake's revision, so pass B
+    /// must read them in that revision's forms: the `s12` plane as the direct
+    /// error moment (Rev3+) and ringing as the high-pass residual (revision 6).
+    /// Pass B used to take both from the process revision, so the shipped B
+    /// bake (Rev5) in a default process read `s12` as a product moment and its
+    /// SSIM deviation pools amplified the resulting `d` to a map summing to
+    /// about -1.8e19 (benchmarks/byconstruction_2026-10-22.md).
+    #[test]
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    fn attribution_maps_serve_the_declared_revision_in_every_process() {
+        const MARK: &str = "ATTRIBUTION-DECLARED-BITS ";
+        let path = "metric::bake::revision_contract_tests::attribution_maps_serve_the_declared_revision_in_every_process";
+        if std::env::var("ZENSIM_ATTRIBUTION_REVISION_CHILD").is_err() {
+            let mut expected: Option<Vec<String>> = None;
+            for process in ["1", "5", "6"] {
+                let out = std::process::Command::new(std::env::current_exe().unwrap())
+                    .args([path, "--exact", "--nocapture", "--test-threads=1"])
+                    .env("ZENSIM_FORMULA_REV", process)
+                    .env("ZENSIM_ATTRIBUTION_REVISION_CHILD", "1")
+                    .env_remove("ZENSIM_RING_FORM")
+                    .output()
+                    .unwrap();
+                let stdout = String::from_utf8_lossy(&out.stdout);
+                assert!(
+                    out.status.success(),
+                    "{stdout}\n{}",
+                    String::from_utf8_lossy(&out.stderr)
+                );
+                let lines: Vec<_> = stdout
+                    .lines()
+                    .filter_map(|l| l.find(MARK).map(|i| l[i..].to_owned()))
+                    .collect();
+                assert_eq!(lines.len(), 2, "child at revision {process}: {stdout}");
+                if let Some(expected) = &expected {
+                    assert_eq!(
+                        &lines, expected,
+                        "ZENSIM_FORMULA_REV={process} changed an attribution map; the \
+                         process revision must not reach a declared-revision bake"
+                    );
+                } else {
+                    expected = Some(lines);
+                }
+            }
+            return;
+        }
+        let (w, h) = (131usize, 101usize);
+        let (src, mut dst) = pair(w, h);
+        // A 3x3 box blur of the source: smooth, real structure loss, with a
+        // ringing-like residual at every edge.
+        for y in 0..h {
+            for x in 0..w {
+                let mut acc = [0u32; 3];
+                for dy in 0..3 {
+                    for dx in 0..3 {
+                        let yy = (y + dy).saturating_sub(1).min(h - 1);
+                        let xx = (x + dx).saturating_sub(1).min(w - 1);
+                        for (c, a) in acc.iter_mut().enumerate() {
+                            *a += u32::from(src[yy * w + xx][c]);
+                        }
+                    }
+                }
+                dst[y * w + x] = acc.map(|a| (a / 9) as u8);
+            }
+        }
+        let (rs, ds) = (RgbSlice::new(&src, w, h), RgbSlice::new(&dst, w, h));
+        let shipped = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/weights/b_sdr_diff_frag_820_rev5_2026-10-19.bin"
+        ))
+        .unwrap();
+        // A revision-6 bake over the SSIM mean and deviation pools and the
+        // ringing slot of every scale's Y channel and scale 1's X channel.
+        let v2 = |scale: usize, ch: usize, slot: usize| 372 + scale * 87 + ch * 29 + slot;
+        let slots = [
+            crate::feature_v2::idx::SSIM_MEAN,
+            crate::feature_v2::idx::SSIM_DEV2,
+            crate::feature_v2::idx::SSIM_DEV4,
+            crate::feature_v2::idx::RINGING,
+        ];
+        let mut ids: Vec<usize> = (0..4)
+            .flat_map(|scale| slots.map(|slot| v2(scale, 1, slot)))
+            .chain(slots.map(|slot| v2(1, 0, slot)))
+            .collect();
+        ids.sort_unstable();
+        let recipe = serde_json::json!({
+            "schema_hash":1,
+            "scaler_mean": vec![0.0; ids.len()],
+            "scaler_scale": vec![1.0; ids.len()],
+            "metadata":[
+                {"key":"zentrain.feature_ids","type":"utf8",
+                 "text": ids.iter().map(usize::to_string).collect::<Vec<_>>().join(" ")},
+                {"key":"zentrain.formula_revision","type":"utf8","text":"6"}],
+            "layers":[{"in_dim":ids.len(),"out_dim":1,"activation":"identity",
+                "dtype":"f32","weights": vec![-40.0; ids.len()],"biases":[100.0]}]
+        });
+        let rev6 = zenpredict_bake::bake_from_json_str(&recipe.to_string()).unwrap();
+        for (name, bytes) in [("shipped-b-rev5", shipped.as_slice()), ("rev6-ring-dev", rev6.as_slice())] {
+            let model = zenpredict::Model::from_bytes(bytes).unwrap();
+            let mut scorer = crate::BakeScorer::new(&model).unwrap().with_parallel(false);
+            let pre = scorer.precompute_reference(&rs).unwrap();
+            let mut session = crate::Fused944Session::new();
+            let att = scorer
+                .compute_with_ref_and_attribution(&rs, &pre, &ds, None, &mut session, 1)
+                .unwrap();
+            let density = att.attribution().density();
+            let total: f64 = density.iter().map(|&v| f64::from(v)).sum();
+            assert!(
+                density.iter().all(|v| v.is_finite()) && total.abs() < 1e4,
+                "{name}: map total {total:e} is not a bounded attribution"
+            );
+            let hash = density.iter().fold(0xcbf2_9ce4_8422_2325u64, |h, v| {
+                (h ^ u64::from(v.to_bits())).wrapping_mul(0x0000_0100_0000_01b3)
+            });
+            println!(
+                "{MARK}{name} {} {hash:016x} {}",
+                att.result().score().to_bits(),
+                total.to_bits()
+            );
+        }
+    }
+
     #[test]
     #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
     fn prepared_worker_refuses_incomplete_contracts_before_use() {
@@ -4662,3 +4784,85 @@ mod steerfix_packet;
 #[cfg(steerfix_instrument)]
 #[path = "mapperf_audit.rs"]
 mod mapperf_audit;
+
+/// Diagnostic (ignored by default): per-feature integrand sums of the
+/// candidate attribution map for the shipped B bake, one sensitivity at a
+/// time, against the feature values. `cargo test --release --all-features --lib
+/// map_scale_diagnostic -- --ignored --nocapture`.
+#[cfg(all(test, feature = "custom-profiles", feature = "feature-regime-v2"))]
+mod map_scale_diagnostic {
+    use crate::RgbSlice;
+
+    #[test]
+    #[ignore]
+    fn map_scale_diagnostic() {
+        let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/weights/b_sdr_diff_frag_820_rev5_2026-10-19.bin"))
+            .expect("B bake");
+        let model = zenpredict::Model::from_bytes(&bytes).expect("parse");
+        let (w, h) = (192usize, 160usize);
+        let mut src = Vec::with_capacity(w * h);
+        let mut dst = Vec::with_capacity(w * h);
+        for y in 0..h {
+            for x in 0..w {
+                let v = (((x * 7 + y * 13) % 200) + 20) as u8;
+                src.push([v, v / 2 + 40, 255 - v]);
+            }
+        }
+        // A 3x3 box blur of the source.
+        for y in 0..h {
+            for x in 0..w {
+                let mut acc = [0u32; 3];
+                for dy in 0..3 {
+                    for dx in 0..3 {
+                        let yy = (y + dy).saturating_sub(1).min(h - 1);
+                        let xx = (x + dx).saturating_sub(1).min(w - 1);
+                        for c in 0..3 {
+                            acc[c] += src[yy * w + xx][c] as u32;
+                        }
+                    }
+                }
+                dst.push([(acc[0] / 9) as u8, (acc[1] / 9) as u8, (acc[2] / 9) as u8]);
+            }
+        }
+        let (rs, ds) = (RgbSlice::new(&src, w, h), RgbSlice::new(&dst, w, h));
+        let mut scorer = super::BakeScorer::new(&model).unwrap().with_parallel(false);
+        let pre = scorer.precompute_reference(&rs).unwrap();
+        let mut session = crate::Fused944Session::new();
+        let att = scorer.compute_with_ref_and_attribution(&rs, &pre, &ds, None, &mut session, 1).unwrap();
+        let total: f64 = att.attribution().density().iter().map(|&v| v as f64).sum();
+        let feats = att.result().features().to_vec();
+        let sens = att.sensitivities().to_vec();
+        println!("score {} total mass {total:e}", att.result().score());
+        let plan = scorer.plan().unwrap();
+        let (spatial, _) = crate::attribution::candidate_map_sensitivities(&plan, &sens);
+        let mut rows = Vec::new();
+        for id in 0..spatial.len() {
+            if spatial[id] == 0.0 {
+                continue;
+            }
+            let mut one = vec![0.0f64; spatial.len()];
+            one[id] = 1.0;
+            let (_, a) = crate::Zensim::new(crate::ZensimProfile::BHdr)
+                .with_parallel(false)
+                .attribution_from_retention_binned(
+                    &pre,
+                    &ds,
+                    &one,
+                    &[],
+                    None,
+                    None,
+                    &mut session,
+                    1,
+                    Some(plan.compute.formula_revision),
+                    crate::map_paint::MapPaint::default(),
+                )
+                .unwrap();
+            let sum: f64 = a.density().iter().map(|&v| v as f64).sum();
+            rows.push((id, sum, feats.get(id).copied().unwrap_or(f64::NAN), spatial[id]));
+        }
+        rows.sort_by(|a, b| (b.1 * b.3).abs().total_cmp(&(a.1 * a.3).abs()));
+        for (id, sum, f, s) in rows.iter().take(25) {
+            println!("f{id}: integrand sum {sum:e} feature {f:e} sens {s:e} mass {:e}", sum * s);
+        }
+    }
+}
