@@ -7114,22 +7114,29 @@ fn box_blur_v_local11(
                 quads[k][c] = pairs[k][c] + pairs[k + 2][c];
             }
         }
+        // The tile's span of the two new tap rows and of the output row, cut
+        // to exact length once per row, so the column loop has no range checks.
+        let (x0, span) = (tile * 8, count * 8);
         for y in 0..height {
             let a = crate::featcanon::tap_mirror(y as isize + 4, height) * width;
             let b = crate::featcanon::tap_mirror(y as isize + 5, height) * width;
+            let ra = &input[a + x0..a + x0 + span].as_chunks::<8>().0[..count];
+            let rb = &input[b + x0..b + x0 + span].as_chunks::<8>().0[..count];
+            let o = y * width + x0;
+            let ro = &mut output[o..o + span].as_chunks_mut::<8>().0[..count];
+            let (q0, q4, p7, p8, p9) = (
+                y & 15,
+                (y + 4) & 15,
+                (y + 7) & 15,
+                (y + 8) & 15,
+                (y + 9) & 15,
+            );
             for c in 0..count {
-                let x = (tile + c) * 8;
-                let last = f32x8::load_t(token, input[b + x..b + x + 8].try_into().unwrap());
-                pairs[(y + 9) & 15][c] =
-                    f32x8::load_t(token, input[a + x..a + x + 8].try_into().unwrap()) + last;
-                quads[(y + 7) & 15][c] = pairs[(y + 7) & 15][c] + pairs[(y + 9) & 15][c];
-                let sum =
-                    ((quads[y & 15][c] + quads[(y + 4) & 15][c]) + pairs[(y + 8) & 15][c]) + last;
-                (sum * inv).store(
-                    (&mut output[y * width + x..y * width + x + 8])
-                        .try_into()
-                        .unwrap(),
-                );
+                let last = f32x8::load_t(token, &rb[c]);
+                pairs[p9][c] = f32x8::load_t(token, &ra[c]) + last;
+                quads[p7][c] = pairs[p7][c] + pairs[p9][c];
+                let sum = ((quads[q0][c] + quads[q4][c]) + pairs[p8][c]) + last;
+                (sum * inv).store(&mut ro[c]);
             }
         }
     }
@@ -10946,22 +10953,29 @@ fn box_blur_v_local11_wide(
                 quads[k][c] = pairs[k][c] + pairs[k + 2][c];
             }
         }
+        // The tile's span of the two new tap rows and of the output row, cut
+        // to exact length once per row, so the column loop has no range checks.
+        let (x0, span) = (tile * 16, count * 16);
         for y in 0..height {
             let a = crate::featcanon::tap_mirror(y as isize + 4, height) * width;
             let b = crate::featcanon::tap_mirror(y as isize + 5, height) * width;
+            let ra = &input[a + x0..a + x0 + span].as_chunks::<16>().0[..count];
+            let rb = &input[b + x0..b + x0 + span].as_chunks::<16>().0[..count];
+            let o = y * width + x0;
+            let ro = &mut output[o..o + span].as_chunks_mut::<16>().0[..count];
+            let (q0, q4, p7, p8, p9) = (
+                y & 15,
+                (y + 4) & 15,
+                (y + 7) & 15,
+                (y + 8) & 15,
+                (y + 9) & 15,
+            );
             for c in 0..count {
-                let x = (tile + c) * 16;
-                let last = f32x16::load_t(token, input[b + x..b + x + 16].try_into().unwrap());
-                pairs[(y + 9) & 15][c] =
-                    f32x16::load_t(token, input[a + x..a + x + 16].try_into().unwrap()) + last;
-                quads[(y + 7) & 15][c] = pairs[(y + 7) & 15][c] + pairs[(y + 9) & 15][c];
-                let sum =
-                    ((quads[y & 15][c] + quads[(y + 4) & 15][c]) + pairs[(y + 8) & 15][c]) + last;
-                (sum * inv).store(
-                    (&mut output[y * width + x..y * width + x + 16])
-                        .try_into()
-                        .unwrap(),
-                );
+                let last = f32x16::load_t(token, &rb[c]);
+                pairs[p9][c] = f32x16::load_t(token, &ra[c]) + last;
+                quads[p7][c] = pairs[p7][c] + pairs[p9][c];
+                let sum = ((quads[q0][c] + quads[q4][c]) + pairs[p8][c]) + last;
+                (sum * inv).store(&mut ro[c]);
             }
         }
     }
