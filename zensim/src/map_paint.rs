@@ -20,11 +20,23 @@
 //!   `guided` splits it in proportion to the source-resolution squared
 //!   difference inside the footprint (per-pixel refinement); it applies only
 //!   to a per-pixel map (`bin == 1`).
+//! - **split** — how a pooled feature's value is divided among its pixels.
+//!   `repair` (the default, today's map) gives each pixel its first-order
+//!   removal effect, what the feature loses when that one pixel is made
+//!   perfect: exact for mean pools, `1/p` of the feature in total for an Lp
+//!   pool, and for the SSIM deviation pools a near-uniform field (making a
+//!   pixel perfect moves it away from the mean) whose total is not the
+//!   feature. `exact` gives each pixel its share of the feature, as DVIFM
+//!   splits its block terms: `xᵖ/Σxᵖ` of an Lp pool (Euler's theorem), `d·∂f/∂d`
+//!   of a deviation pool, `w·v/W` of a soft peak and the secant share of the
+//!   global and HF-gain ratios, so every such pool's map sums to its feature.
+//!   Linearized cross-scale terms (edge width) and maxima keep their repair
+//!   form in both.
 //!
 //! A scorer selects them per map (`BakeScorer::with_map_paint`); research
-//! command lines can set `ZENSIM_MAP_WINDOW=box|center|guided` and
-//! `ZENSIM_MAP_PAINT=nearest|guided` instead. Nothing in the score path reads
-//! them.
+//! command lines can set `ZENSIM_MAP_WINDOW=box|center|guided`,
+//! `ZENSIM_MAP_PAINT=nearest|guided` and `ZENSIM_MAP_SPLIT=repair|exact`
+//! instead. Nothing in the score path reads them.
 
 /// Where a window-supported signal's mass goes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -41,26 +53,38 @@ pub(crate) enum PaintMode {
     Guided,
 }
 
-/// The two painting choices of one map.
+/// How a pooled feature's value is divided among its pixels.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SplitMode {
+    /// Each pixel's first-order removal effect.
+    Repair,
+    /// Each pixel's share of the feature; the shares sum to it.
+    Exact,
+}
+
+/// The painting choices of one map.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct MapPaint {
     pub(crate) window: WindowMode,
     pub(crate) paint: PaintMode,
+    pub(crate) split: SplitMode,
 }
 
 impl Default for MapPaint {
-    /// The uniform window spread and nearest-neighbour fold: today's map.
+    /// The uniform window spread, nearest-neighbour fold and removal split:
+    /// today's map.
     fn default() -> Self {
         Self {
             window: WindowMode::Box,
             paint: PaintMode::Nearest,
+            split: SplitMode::Repair,
         }
     }
 }
 
 impl MapPaint {
-    /// Parse `box|center|guided` and `nearest|guided`.
-    pub(crate) fn parse(window: &str, paint: &str) -> Option<Self> {
+    /// Parse `box|center|guided`, `nearest|guided` and `repair|exact`.
+    pub(crate) fn parse(window: &str, paint: &str, split: &str) -> Option<Self> {
         let window = match window {
             "box" => WindowMode::Box,
             "center" => WindowMode::Center,
@@ -72,66 +96,58 @@ impl MapPaint {
             "guided" => PaintMode::Guided,
             _ => return None,
         };
-        Some(Self { window, paint })
+        let split = match split {
+            "repair" => SplitMode::Repair,
+            "exact" => SplitMode::Exact,
+            _ => return None,
+        };
+        Some(Self {
+            window,
+            paint,
+            split,
+        })
     }
 
     /// The process's research selection (`ZENSIM_MAP_WINDOW`,
-    /// `ZENSIM_MAP_PAINT`), read once; unset means [`Self::default`] and an
-    /// unknown value panics.
+    /// `ZENSIM_MAP_PAINT`, `ZENSIM_MAP_SPLIT`), read once; unset means
+    /// [`Self::default`] and an unknown value panics.
     pub(crate) fn from_env() -> Self {
         use std::sync::OnceLock;
         static MODES: OnceLock<MapPaint> = OnceLock::new();
         *MODES.get_or_init(|| {
             let window = std::env::var("ZENSIM_MAP_WINDOW").unwrap_or_else(|_| "box".into());
             let paint = std::env::var("ZENSIM_MAP_PAINT").unwrap_or_else(|_| "nearest".into());
-            Self::parse(&window, &paint).unwrap_or_else(|| {
-                panic!("ZENSIM_MAP_WINDOW={window:?} / ZENSIM_MAP_PAINT={paint:?}: expected box|center|guided and nearest|guided")
+            let split = std::env::var("ZENSIM_MAP_SPLIT").unwrap_or_else(|_| "repair".into());
+            Self::parse(&window, &paint, &split).unwrap_or_else(|| {
+                panic!(
+                    "ZENSIM_MAP_WINDOW={window:?} / ZENSIM_MAP_PAINT={paint:?} / ZENSIM_MAP_SPLIT={split:?}: \
+                     expected box|center|guided, nearest|guided and repair|exact"
+                )
             })
         })
     }
 }
 
 /// Clipped box sum of radius `r` (each output sums the in-bounds inputs of
-/// its `(2r+1)²` window), in f64.
+/// its `(2r+1)²` window), in f64. Each window is summed afresh, separably,
+/// rather than as a running sum: a running sum subtracts every value it
+/// added, so a large value leaves its rounding error behind in every later
+/// window of small ones (the guide spans many decades).
 fn box_sum(src: &[f64], w: usize, h: usize, r: usize, out: &mut Vec<f64>) {
     let mut tmp = vec![0.0f64; w * h];
     for y in 0..h {
         let row = &src[y * w..(y + 1) * w];
-        let mut acc = 0.0f64;
-        let mut lo = 0usize;
-        let mut hi = 0usize; // window [lo, hi)
         for x in 0..w {
-            let want_hi = (x + r + 1).min(w);
-            while hi < want_hi {
-                acc += row[hi];
-                hi += 1;
-            }
-            let want_lo = x.saturating_sub(r);
-            while lo < want_lo {
-                acc -= row[lo];
-                lo += 1;
-            }
-            tmp[y * w + x] = acc;
+            tmp[y * w + x] = row[x.saturating_sub(r)..(x + r + 1).min(w)].iter().sum();
         }
     }
     out.clear();
     out.resize(w * h, 0.0);
-    for x in 0..w {
-        let mut acc = 0.0f64;
-        let mut lo = 0usize;
-        let mut hi = 0usize;
-        for y in 0..h {
-            let want_hi = (y + r + 1).min(h);
-            while hi < want_hi {
-                acc += tmp[hi * w + x];
-                hi += 1;
-            }
-            let want_lo = y.saturating_sub(r);
-            while lo < want_lo {
-                acc -= tmp[lo * w + x];
-                lo += 1;
-            }
-            out[y * w + x] = acc;
+    for y in 0..h {
+        for x in 0..w {
+            out[y * w + x] = (y.saturating_sub(r)..(y + r + 1).min(h))
+                .map(|yy| tmp[yy * w + x])
+                .sum();
         }
     }
 }

@@ -79,18 +79,28 @@ impl<'a> BakeScorer<'a> {
     }
 
     /// Research: how the attribution map paints windowed signals and coarse
-    /// scales — `window` is `box` (default), `center` or `guided`; `paint` is
-    /// `nearest` (default) or `guided`. Scores are unchanged.
-    /// Exploration record: `benchmarks/byconstruction_2026-10-22.md` ("Maps").
+    /// scales and divides pooled features among pixels — `window` is `box`
+    /// (default), `center` or `guided`; `paint` is `nearest` (default) or
+    /// `guided`; `split` is `repair` (default) or `exact`. Scores are
+    /// unchanged. Such a map is for viewing, so it keeps every feature's
+    /// density: the scorer takes no neighbour-exact steering snapshot, which
+    /// would zero the v2 features of scales 1–3 (f459..f719) in the map and
+    /// serve them only through `refinement_gain`. Exploration record:
+    /// `benchmarks/byconstruction_2026-10-22.md` ("Maps").
     ///
     /// # Errors
     /// An unknown mode name.
     #[doc(hidden)]
     #[cfg(feature = "custom-profiles")]
-    pub fn with_map_paint(mut self, window: &str, paint: &str) -> Result<Self, ZensimError> {
-        self.map_paint = Some(crate::map_paint::MapPaint::parse(window, paint).ok_or(
+    pub fn with_map_paint(
+        mut self,
+        window: &str,
+        paint: &str,
+        split: &str,
+    ) -> Result<Self, ZensimError> {
+        self.map_paint = Some(crate::map_paint::MapPaint::parse(window, paint, split).ok_or(
             ZensimError::ModelLoadFailed {
-                reason: "map paint modes are box|center|guided and nearest|guided",
+                reason: "map paint modes are box|center|guided, nearest|guided and repair|exact",
             },
         )?);
         Ok(self)
@@ -1452,7 +1462,11 @@ impl<'a> BakeScorer<'a> {
         // either way, and whether a capture succeeds is decided up front
         // (`capture_admits`), so the frozen v2 density is zeroed for exactly
         // the same calls as before.
+        // A scorer with research map modes (`with_map_paint`) serves a map for
+        // viewing: every feature's density stays in it, so it takes no
+        // snapshot.
         let capture = neighbour_enabled
+            && self.map_paint.is_none()
             && (encoding.is_none()
                 || plan.compute.formula_revision >= crate::feature_defs::FormulaRevision::Rev5)
             && crate::local_refine::LocalRefineSnapshot::capture_admits(
@@ -4785,30 +4799,90 @@ mod steerfix_packet;
 #[path = "mapperf_audit.rs"]
 mod mapperf_audit;
 
-/// Diagnostic (ignored by default): per-feature integrand sums of the
-/// candidate attribution map for the shipped B bake, one sensitivity at a
-/// time, against the feature values. `cargo test --release --all-features --lib
-/// map_scale_diagnostic -- --ignored --nocapture`.
+/// Per-feature map sums of the candidate attribution map: one unit
+/// sensitivity at a time, each map summed over the image, against the feature
+/// value. Under the exact split (`crate::map_paint::SplitMode::Exact`) every
+/// pool's map sums to minus its feature; the diagnostic below prints the sums
+/// of either split (`ZENSIM_DIAG_SPLIT=exact`).
 #[cfg(all(test, feature = "custom-profiles", feature = "feature-regime-v2"))]
-mod map_scale_diagnostic {
+mod map_split_tests {
     use crate::RgbSlice;
+    use crate::map_paint::{MapPaint, SplitMode};
 
-    #[test]
-    #[ignore]
-    fn map_scale_diagnostic() {
-        let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/weights/b_sdr_diff_frag_820_rev5_2026-10-19.bin"))
-            .expect("B bake");
-        let model = zenpredict::Model::from_bytes(&bytes).expect("parse");
-        let (w, h) = (192usize, 160usize);
-        let mut src = Vec::with_capacity(w * h);
-        let mut dst = Vec::with_capacity(w * h);
-        for y in 0..h {
-            for x in 0..w {
+    fn shipped_b() -> Vec<u8> {
+        std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/weights/b_sdr_diff_frag_820_rev5_2026-10-19.bin"
+        ))
+        .expect("B bake")
+    }
+
+    /// `(id, map sum, feature, sensitivity)` for every feature the bake's map
+    /// reads, each map over the one walk's retention.
+    fn probe(
+        bytes: &[u8],
+        src: &[[u8; 3]],
+        dst: &[[u8; 3]],
+        w: usize,
+        h: usize,
+        split: SplitMode,
+    ) -> Vec<(usize, f64, f64, f64)> {
+        let model = zenpredict::Model::from_bytes(bytes).expect("parse");
+        let (rs, ds) = (RgbSlice::new(src, w, h), RgbSlice::new(dst, w, h));
+        // Map modes keep the session's retention whole (no steering snapshot),
+        // which every probe below reads.
+        let mut scorer = super::BakeScorer::new(&model)
+            .unwrap()
+            .with_parallel(false)
+            .with_map_paint("box", "nearest", "repair")
+            .unwrap();
+        let pre = scorer.precompute_reference(&rs).unwrap();
+        let mut session = crate::Fused944Session::new();
+        let att = scorer
+            .compute_with_ref_and_attribution(&rs, &pre, &ds, None, &mut session, 1)
+            .unwrap();
+        let feats = att.result().features().to_vec();
+        let plan = scorer.plan().unwrap();
+        let (spatial, _) = crate::attribution::candidate_map_sensitivities(&plan, att.sensitivities());
+        (0..spatial.len())
+            .filter(|&id| spatial[id] != 0.0)
+            .map(|id| {
+                let mut one = vec![0.0f64; spatial.len()];
+                one[id] = 1.0;
+                let (_, a) = crate::Zensim::new(crate::ZensimProfile::BHdr)
+                    .with_parallel(false)
+                    .attribution_from_retention_binned(
+                        &pre,
+                        &ds,
+                        &one,
+                        &[],
+                        None,
+                        None,
+                        &mut session,
+                        1,
+                        Some(plan.compute.formula_revision),
+                        MapPaint {
+                            split,
+                            ..Default::default()
+                        },
+                    )
+                    .unwrap();
+                let sum: f64 = a.density().iter().map(|&v| f64::from(v)).sum();
+                (id, sum, feats.get(id).copied().unwrap_or(f64::NAN), spatial[id])
+            })
+            .collect()
+    }
+
+    /// A smooth sinusoid-and-ramp source and its 3×3 box blur.
+    fn blur_pair(w: usize, h: usize) -> (Vec<[u8; 3]>, Vec<[u8; 3]>) {
+        let src: Vec<[u8; 3]> = (0..w * h)
+            .map(|i| {
+                let (x, y) = (i % w, i / w);
                 let v = (((x * 7 + y * 13) % 200) + 20) as u8;
-                src.push([v, v / 2 + 40, 255 - v]);
-            }
-        }
-        // A 3x3 box blur of the source.
+                [v, v / 2 + 40, 255 - v]
+            })
+            .collect();
+        let mut dst = src.clone();
         for y in 0..h {
             for x in 0..w {
                 let mut acc = [0u32; 3];
@@ -4816,53 +4890,169 @@ mod map_scale_diagnostic {
                     for dx in 0..3 {
                         let yy = (y + dy).saturating_sub(1).min(h - 1);
                         let xx = (x + dx).saturating_sub(1).min(w - 1);
-                        for c in 0..3 {
-                            acc[c] += src[yy * w + xx][c] as u32;
+                        for (c, a) in acc.iter_mut().enumerate() {
+                            *a += u32::from(src[yy * w + xx][c]);
                         }
                     }
                 }
-                dst.push([(acc[0] / 9) as u8, (acc[1] / 9) as u8, (acc[2] / 9) as u8]);
+                dst[y * w + x] = acc.map(|a| (a / 9) as u8);
             }
         }
-        let (rs, ds) = (RgbSlice::new(&src, w, h), RgbSlice::new(&dst, w, h));
-        let mut scorer = super::BakeScorer::new(&model).unwrap().with_parallel(false);
-        let pre = scorer.precompute_reference(&rs).unwrap();
-        let mut session = crate::Fused944Session::new();
-        let att = scorer.compute_with_ref_and_attribution(&rs, &pre, &ds, None, &mut session, 1).unwrap();
-        let total: f64 = att.attribution().density().iter().map(|&v| v as f64).sum();
-        let feats = att.result().features().to_vec();
-        let sens = att.sensitivities().to_vec();
-        println!("score {} total mass {total:e}", att.result().score());
-        let plan = scorer.plan().unwrap();
-        let (spatial, _) = crate::attribution::candidate_map_sensitivities(&plan, &sens);
-        let mut rows = Vec::new();
-        for id in 0..spatial.len() {
-            if spatial[id] == 0.0 {
-                continue;
-            }
-            let mut one = vec![0.0f64; spatial.len()];
-            one[id] = 1.0;
-            let (_, a) = crate::Zensim::new(crate::ZensimProfile::BHdr)
+        (src, dst)
+    }
+
+    /// A bright, nearly flat source and a uniformly brightened copy: every
+    /// per-pixel dissimilarity is close to one value, so each deviation pool
+    /// is tiny against its mean, where an uncentred polynomial cancels.
+    fn offset_pair(w: usize, h: usize) -> (Vec<[u8; 3]>, Vec<[u8; 3]>) {
+        let src: Vec<[u8; 3]> = (0..w * h)
+            .map(|i| {
+                let t = (((i as u64).wrapping_mul(2_654_435_761) >> 13) % 5) as u8;
+                [226 + t, 222 + t, 218 + t]
+            })
+            .collect();
+        let dst = src.iter().map(|p| p.map(|v| v + 4)).collect();
+        (src, dst)
+    }
+
+    /// The cross-scale edge-width slot keeps its linearized term in both
+    /// splits (`crate::map_paint`), so it has no sum identity.
+    fn linearized(id: usize) -> bool {
+        (372..372 + 4 * 87).contains(&id)
+            && (id - 372) % 29 == crate::feature_v2::idx::EDGE_WIDTH_CHANGE
+    }
+
+    /// Under the exact split each probed feature's map sums to minus the
+    /// feature, on structure (a blur) and on a near-constant dissimilarity
+    /// (a uniform brightening, where the deviation pools are tiny against
+    /// their means). Tolerance (introduced here): 1e-4 of the feature plus
+    /// 1e-9, for the f32 kernels' rounding over the image.
+    #[test]
+    fn exact_split_maps_sum_to_their_features() {
+        let b = shipped_b();
+        let (w, h) = (192usize, 160usize);
+        for (name, (src, dst)) in [("blur", blur_pair(w, h)), ("offset", offset_pair(w, h))] {
+            let rows = probe(&b, &src, &dst, w, h, SplitMode::Exact);
+            assert!(rows.len() > 100, "{name}: only {} probes", rows.len());
+            let off: Vec<String> = rows
+                .iter()
+                .filter(|r| !linearized(r.0))
+                .filter(|&&(_, sum, f, _)| {
+                    let err = (sum + f).abs();
+                    err.is_nan() || err > 1e-4 * f.abs() + 1e-9
+                })
+                .map(|&(id, sum, f, _)| format!("f{id}: map {sum:e}, -feature {:e}", -f))
+                .collect();
+            assert!(off.is_empty(), "{name}: {} of {} maps miss -feature:\n{}", off.len(), rows.len(), off.join("\n"));
+        }
+    }
+
+    /// Diagnostic (ignored by default): the v2 SSIM dissimilarity's luminance
+    /// term in the direct form is `nb − na`, a difference of two numbers near
+    /// `2μ²` whose true value is `(μ1 − μ2)²`. Per scale and channel, prints
+    /// the walk's own mean `d` against the same mean recomputed from the
+    /// retained f32 moments with the production form, with `(μ1 − μ2)²` in
+    /// f32, and in f64. `cargo test --release --all-features --lib
+    /// v2_ssim_luminance_cancellation -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn v2_ssim_luminance_cancellation() {
+        let (w, h) = (192usize, 160usize);
+        let (src, blurred) = blur_pair(w, h);
+        let sparse: Vec<[u8; 3]> = src
+            .iter()
+            .enumerate()
+            .map(|(i, p)| if i % 7 == 0 { p.map(|v| v.saturating_add(1)) } else { *p })
+            .collect();
+        let lsb: Vec<[u8; 3]> = src.iter().map(|p| p.map(|v| v.saturating_add(1))).collect();
+        let (osrc, odst) = offset_pair(w, h);
+        let b = shipped_b();
+        let model = zenpredict::Model::from_bytes(&b).unwrap();
+        let (c1, c2) = (crate::feature_v2::C1_V2 as f32, crate::feature_v2::C2_V2 as f32);
+        for (name, s, d) in [
+            ("blur", &src, &blurred),
+            ("+1 on every 7th pixel", &src, &sparse),
+            ("+1 everywhere", &src, &lsb),
+            ("flat +4", &osrc, &odst),
+        ] {
+            let (rs, ds) = (RgbSlice::new(s, w, h), RgbSlice::new(d, w, h));
+            let mut scorer = super::BakeScorer::new(&model)
+                .unwrap()
                 .with_parallel(false)
-                .attribution_from_retention_binned(
-                    &pre,
-                    &ds,
-                    &one,
-                    &[],
-                    None,
-                    None,
-                    &mut session,
-                    1,
-                    Some(plan.compute.formula_revision),
-                    crate::map_paint::MapPaint::default(),
-                )
+                .with_map_paint("box", "nearest", "repair")
                 .unwrap();
-            let sum: f64 = a.density().iter().map(|&v| v as f64).sum();
-            rows.push((id, sum, feats.get(id).copied().unwrap_or(f64::NAN), spatial[id]));
+            let pre = scorer.precompute_reference(&rs).unwrap();
+            let mut session = crate::Fused944Session::new();
+            scorer
+                .compute_with_ref_and_attribution(&rs, &pre, &ds, None, &mut session, 1)
+                .unwrap();
+            let ret = session.retention();
+            println!("{name}:");
+            for (scale, planes) in ret.planes.iter().enumerate() {
+                for (ch, p) in planes.iter().enumerate() {
+                    let n = p.mu1.len();
+                    if n == 0 {
+                        continue;
+                    }
+                    let (mut prod, mut stable, mut exact) = (0.0f64, 0.0f64, 0.0f64);
+                    for i in 0..n {
+                        let (m1, m2, sq, e) = (p.mu1[i], p.mu2[i], p.ssq[i], p.s12[i]);
+                        let na = 2.0 * m1 * m2 + c1;
+                        let nb = m1 * m1 + m2 * m2 + c1;
+                        let nd = sq - m1 * m1 - m2 * m2 + c2;
+                        let md = m1 - m2;
+                        let ev = (e - md * md).max(0.0);
+                        prod += f64::from(((nd * (nb - na) + na * ev) / (nb * nd)).max(0.0));
+                        stable += f64::from(((nd * (md * md) + na * ev) / (nb * nd)).max(0.0));
+                        let (m1, m2, sq, e) = (f64::from(m1), f64::from(m2), f64::from(sq), f64::from(e));
+                        let (na, nb) = (2.0 * m1 * m2 + f64::from(c1), m1 * m1 + m2 * m2 + f64::from(c1));
+                        let nd = sq - m1 * m1 - m2 * m2 + f64::from(c2);
+                        let md = m1 - m2;
+                        exact += ((nd * (md * md) + na * (e - md * md).max(0.0)) / (nb * nd)).max(0.0);
+                    }
+                    let walk = ret.cells[scale][ch].dense.sum_d / n as f64;
+                    let nf = n as f64;
+                    println!(
+                        "  scale {scale} ch {ch}: walk {walk:.6e} prod {:.6e} stable {:.6e} f64 {:.6e} | walk/f64 {:+.3e} stable/f64 {:+.3e}",
+                        prod / nf,
+                        stable / nf,
+                        exact / nf,
+                        walk / (exact / nf) - 1.0,
+                        stable / exact - 1.0,
+                    );
+                }
+            }
         }
+    }
+
+    /// Diagnostic (ignored by default): prints the largest per-feature map
+    /// masses and the sum identity. `ZENSIM_DIAG_SPLIT=exact cargo test
+    /// --release --all-features --lib map_split_diagnostic -- --ignored
+    /// --nocapture`.
+    #[test]
+    #[ignore]
+    fn map_split_diagnostic() {
+        let split = if std::env::var("ZENSIM_DIAG_SPLIT").as_deref() == Ok("exact") {
+            SplitMode::Exact
+        } else {
+            SplitMode::Repair
+        };
+        let (w, h) = (192usize, 160usize);
+        let (src, dst) = blur_pair(w, h);
+        let mut rows = probe(&shipped_b(), &src, &dst, w, h, split);
         rows.sort_by(|a, b| (b.1 * b.3).abs().total_cmp(&(a.1 * a.3).abs()));
+        println!("split {split:?}: {} probes", rows.len());
         for (id, sum, f, s) in rows.iter().take(25) {
-            println!("f{id}: integrand sum {sum:e} feature {f:e} sens {s:e} mass {:e}", sum * s);
+            println!("f{id}: map sum {sum:e} feature {f:e} sens {s:e} mass {:e}", sum * s);
+        }
+        let mut off: Vec<_> = rows
+            .iter()
+            .filter(|(_, sum, f, _)| (sum + f).abs() > 1e-4 * f.abs() + 1e-9)
+            .collect();
+        off.sort_by_key(|r| r.0);
+        println!("maps not summing to -feature: {}", off.len());
+        for (id, sum, f, _) in off {
+            println!("  f{id}: map {sum:e} vs -feature {:e} (ratio {:.4})", -f, sum / -f);
         }
     }
 }

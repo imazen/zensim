@@ -1426,6 +1426,70 @@ standard mixture 2–12 inversions per cell (max +4.5), global-edit mixture **0*
 max-pair class 0.009 on E21 (M64 −0.0131) for no AIC gain over Tga (0.932). Tga stays the candidate by the committed
 rule; M64a keeps M64's strict global-edit monotonicity.
 
+### Attribution-map correctness (2026-10-24)
+
+Owner, 2026-10-24: "make sure we test EVERYTHING for catastrophic cancellation". The candidate map
+(`BakeScorer::compute_with_ref_and_attribution`) was checked by giving one feature a unit sensitivity, summing its map
+over the image and comparing with the feature (`metric::bake::map_split_tests`; shipped B bake, 410 probed features,
+a 192×160 blur pair). Four defects, all fixed on this branch:
+
+1. **Pass B read the process revision** (`ec9289df`). The retained planes follow the bake's revision, but the map
+   kernels chose the SSIM form (direct error moment, Rev3+) and the ringing form (high-pass, revision 6) from
+   `ZENSIM_FORMULA_REV`. B (revision 5) in a default process read its error-moment plane as a product moment and the
+   SSIM deviation pools amplified the result: the map summed to −1.8e19 (one probe, f635, to −2.8e20). After the fix the
+   total is 356, every probe is bounded, and B and a revision-6 bake give the same map bits in processes at revisions
+   1, 5 and 6 (`attribution_maps_serve_the_declared_revision_in_every_process`; with the bug restored it fails). The
+   same code is on main (`feature_v2.rs`, three `active_revision()` reads in pass B): main's B maps are affected in a
+   default process (not measured on main). The JXL loop's default B map is the legacy basic-plane map, not this one;
+   its `JXL_ZENSIM_MODEL_MAP` arms follow the model's gradient and would be (not checked in jxl-encoder).
+2. **The deviation-pool polynomial cancelled in f32.** Evaluated in raw powers of `d`, the fourth-moment pools' maps
+   miss their sum identity by up to 2.2% on the blur pair (6 of 410 probes outside 1e-4; negative control of
+   `exact_split_maps_sum_to_their_features`). The kernels now evaluate one quartic in `e = d − μ` (Horner), and the
+   gradient/edge deviation pools one quadratic in `e = v − m`, in the f64 and both f32 kernels.
+3. **A revision-5/6 map leaves out the v2 features of scales 1–3** (f459–f719). For steering, the neighbour-exact
+   snapshot zeroes them in the density and serves them as exact finite deltas through `refinement_gain`; a map for
+   viewing loses most of its coarse-scale signal. A scorer with research map modes (`with_map_paint`) now keeps them
+   and takes no snapshot. The earlier map-study dumps and the workbench module's maps were missing them and are rerun.
+4. **The removal split is not additive.** The map gives each pixel its first-order removal effect: exact for mean
+   pools, `f/p` in total for an Lp pool, and for the SSIM deviation pools a near-uniform positive field (removing a
+   pixel moves it away from the mean) that dominates the map: one probe (f577, a feature of 0.00074) integrates to 32.
+   The new **exact split** (`ZENSIM_MAP_SPLIT=exact`, or `with_map_paint(.., .., "exact")`) gives each pixel its share
+   of the feature, as DVIFM splits its block terms: Euler shares for the Lp, L8 and deviation pools, `w·v/W` for soft
+   peaks, the secant share for the global mean, global contrast and HF-gain ratios; mean and linear pools are
+   unchanged. Under it, 400 of the 410 probes sum to minus their feature within 1e-4 on the blur pair, and all of them
+   on a near-constant pair (a uniform +4 brightening, where every deviation pool is tiny against its mean). The 10
+   others are the cross-scale edge-width slot (v2 slot 28), which stays linearized in both splits. Removal stays the
+   default; steering relies on it.
+
+Also: the research map painter's box sums now sum each window afresh instead of a running add-and-subtract, which left
+a large value's rounding error in every later window (`map_paint::box_sum`).
+
+**globaff one-pass moments cancelled** (fixed). The served descriptor formed the error as
+`(ms − md)² + vss + vdd − 2·vsd` from raw one-pass sums: quantities the size of the texture subtracted to get one the
+size of the error. On a 2048×1024 plane with mean 0.6 and a 2e-5 offset, `share` came out 0.99971 instead of 1
+(`large_mean_tiny_error_matches_compensated_two_pass`, against compensated two-pass moments). The walk now sums the
+error `e = s − d` (exact in f64) and its moments, so `mse = mean(e)² + var(e)` and
+`explained = mean(e)² + min(var(e), cov(s, e)²/var(s))` add non-negative terms; all three tiny-edit cases agree to
+1e-6. Served Tga against its training route after the fix: AIC2026 public_train max |Δ| **5.0e-7** over 3,920 pairs
+(7.5e-6 before), the standard mixture cell 5.0e-6 over 1,344 images, and the global-edit mixture cell 7.0e-6 over
+2,016 images (tables rounded to 1e-6; `serve_parity.py`, `just byc-serve-parity-pairs`).
+
+**v2 SSIM luminance term cancels in the features themselves** (open: a fix changes feature bits). The direct form
+computes `nb − na = (m1² + m2² + C1) − (2·m1·m2 + C1)` in f32, whose true value is `(m1 − m2)²`; the walk
+(`feature_v2_kernels.rs`) and the map kernels share it. `map_split_tests::v2_ssim_luminance_cancellation` recomputes
+each cell's mean `d` from the walk's own f32 moments in f64: on near-identical pairs the walk's v2 SSIM means of the
+chroma channels at scales 1–3 are off by up to +336% (+1 LSB on every 7th pixel, B channel, scale 3) and −87% (a uniform
++4 on a flat image, X channel); a structured blur is within 1e-7. Computing `(m1 − m2)²` directly in f32 agrees with
+f64 to 1e-5 in every cell. These features are small (1e-8 to 1e-9) but this is the near-lossless regime. B (revision
+5) carries it; changing it needs a new formula revision and a retrain.
+
+**Read, no subtraction to cancel** (code reading, not a test): the workbench loop map (a positive power of the
+density, then a 16-norm) and the attribution's Lp and L8 coefficients (products and powers). **Measured elsewhere**: the
+DENSEPOOL precision record puts revision 5's v2 pools at a maximum relative error of 1.09e-3 against the exact
+summation oracle (`524a04c28`). **Known, frozen eras**: revisions 1–4 finalize the SSIM deviation pools from raw
+moments (fixed at revision 5); the append block's deviation pools and global variances use `E[v²] − E[v]²` over f64
+sums.
+
 ### DVIFM 0.3 on the E21 sets and the mixture test (2026-10-23)
 
 Owner request: "eval dvifm 0.3 on kadid and other distortion//corrputions". Scorer: the frozen runtime of the

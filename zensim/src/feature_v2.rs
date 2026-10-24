@@ -10095,6 +10095,10 @@ struct V2AppCoeffs {
     dev_f4: f64,
     s_dev2: f64,
     s_dev4: f64,
+    // The two deviation pools' density as one polynomial in `e = d − dev_mu`,
+    // guards and the map split folded in:
+    // `q0 + e·(q1 + e·(q2 + e·(q3 + e·q4)))`.
+    dev_q: [f64; 5],
     // append mean slots.
     c_xmask: f64,
     c_lumt: f64,
@@ -10111,23 +10115,36 @@ struct V2AppCoeffs {
     gd_gms: (f64, f64, f64),
     gd_art: (f64, f64, f64),
     gd_det: (f64, f64, f64),
+    // The same pools' densities as `q[0] + e·(q[1] + e·q[2])` in `e = v − q[3]`.
+    gq_gms: [f64; 4],
+    gq_art: [f64; 4],
+    gq_det: [f64; 4],
     // append globals.
     g_dmean: f64, // coefficient × (s − d)
-    g_var: f64,   // coefficient × ((s²−d²) − 2·gmean_d·(s−d))
-    gmean_d: f64,
+    g_var: f64,   // coefficient × ((s − d) − g_shift)·((s + d) − g_sum)
+    g_shift: f64,
+    g_sum: f64,
     // edge-width: coefficient × (|∇d| − |∇s|).
     c_edgew: f64,
     // append2 BANDVIS pair (f924+, Y-only): coefficient × the per-pixel
     // FR-excess indicator. Mean pools like the v2 hf pair — `−s_k/N`.
     c_bv_gain: f64,
     c_bv_loss: f64,
-    inv_n: f64,
     // The forms of the computation that produced the planes, never the process's: whether `s12` holds the
     // direct error moment (Rev3+), and whether ringing reads the high-pass residual (revision 6 or the
     // research ring-form override). A bake served at its declared revision in a process of another one
     // retains planes of its own revision.
     direct: bool,
     ring_hp: bool,
+}
+
+/// A deviation pool's centred quadratic density (`V2AppCoeffs::gq_art`):
+/// `q[0] + e·(q[1] + e·q[2])` with `e = v − q[3]`.
+#[cfg(feature = "custom-profiles")]
+#[inline(always)]
+fn gq_density(q: &[f64; 4], v: f64) -> f64 {
+    let e = v - q[3];
+    q[0] + e * (q[1] + e * q[2])
 }
 
 #[cfg(feature = "custom-profiles")]
@@ -10143,7 +10160,9 @@ fn derive_v2app_coeffs(
     cross: bool,
     edgew_coeff: f64,
     revision: FormulaRevision,
+    split: crate::map_paint::SplitMode,
 ) -> V2AppCoeffs {
+    use crate::map_paint::SplitMode;
     let n_f = cell.n as f64;
     let inv_n = 1.0 / n_f;
     let v2b = scale * 3 * FEATURES_PER_CHANNEL_V2_TOTAL + ch * FEATURES_PER_CHANNEL_V2_TOTAL;
@@ -10160,7 +10179,6 @@ fn derive_v2app_coeffs(
     let grad = &cell.grad;
 
     let mut c = V2AppCoeffs {
-        inv_n,
         // Mean pools: density += s_k · (−v_i/N).
         c_ssim: -gv2(idx::SSIM_MEAN) * inv_n,
         c_art: -gv2(idx::ART) * inv_n,
@@ -10248,6 +10266,12 @@ fn derive_v2app_coeffs(
     c.sp_ssim = sp(&dense.ws_peak_ssim, gv2(idx::SSIM_SOFT_PEAK));
     c.sp_art = sp(&dense.ws_peak_art, gv2(idx::ART_SOFT_PEAK));
     c.sp_det = sp(&dense.ws_peak_det, gv2(idx::DET_SOFT_PEAK));
+    if split == SplitMode::Exact {
+        // The pixel's share `w(v)·v/W` of the soft peak `Σw(v)·v / Σw(v)`.
+        c.sp_ssim.1 = 0.0;
+        c.sp_art.1 = 0.0;
+        c.sp_det.1 = 0.0;
+    }
     // SSIM deviation pools (central moments of the d map).
     let mu = dense.sum_d * inv_n;
     let raw2 = dense.sum_d2 * inv_n;
@@ -10274,6 +10298,52 @@ fn derive_v2app_coeffs(
     c.dev_f4 = m4.quarter_root(crate::det_math::active_root_form());
     c.s_dev2 = gv2(idx::SSIM_DEV2);
     c.s_dev4 = gv2(idx::SSIM_DEV4);
+    // Both deviation pools as one polynomial in `e = d − μ`, which does not
+    // cancel when the deviation is small against the mean (raw powers of `d`
+    // carry coefficients that grow as `1/f³`).
+    //  * repair (pixel `i` made perfect, `d → 0`, first order):
+    //    `k2·(μ² − e²)` and `k4·(μ⁴ − e⁴ + 4d·c3)`, `k2 = s2/(2·f2·N)`,
+    //    `k4 = s4/(4·f4³·N)`;
+    //  * exact (the pixel's share `d·∂f/∂d`, negated; both pools are
+    //    homogeneous of degree 1 in `d`, so the shares sum to the feature):
+    //    `−(s2/(f2·N))·d·e` and `−(s4/(f4³·N))·d·(e³ − c3)`.
+    let mut q = [0.0f64; 5];
+    if c.s_dev2 != 0.0 && c.dev_f2 > 1e-12 {
+        match split {
+            SplitMode::Repair => {
+                let k = c.s_dev2 * inv_n / (2.0 * c.dev_f2);
+                q[0] += k * mu * mu;
+                q[2] -= k;
+            }
+            SplitMode::Exact => {
+                // d·e = e² + μ·e
+                let k = -c.s_dev2 * inv_n / c.dev_f2;
+                q[1] += k * mu;
+                q[2] += k;
+            }
+        }
+    }
+    if c.s_dev4 != 0.0 && c.dev_f4 > 1e-12 {
+        let c3 = c.dev_c3;
+        match split {
+            SplitMode::Repair => {
+                // μ⁴ − e⁴ + 4(e + μ)·c3
+                let k = c.s_dev4 * inv_n / (4.0 * c.dev_f4.powi(3));
+                q[0] += k * (mu.powi(4) + 4.0 * mu * c3);
+                q[1] += k * 4.0 * c3;
+                q[4] -= k;
+            }
+            SplitMode::Exact => {
+                // d·(e³ − c3) = e⁴ + μ·e³ − c3·e − μ·c3
+                let k = -c.s_dev4 * inv_n / c.dev_f4.powi(3);
+                q[0] -= k * mu * c3;
+                q[1] -= k * c3;
+                q[3] += k * mu;
+                q[4] += k;
+            }
+        }
+    }
+    c.dev_q = q;
 
     if append_active {
         if cross {
@@ -10304,27 +10374,79 @@ fn derive_v2app_coeffs(
         c.gd_gms = gd(gap(idx_append::GMS_DEV2), grad.sum_gms, grad.sum_gms2);
         c.gd_art = gd(gap(idx_append::ART_DEV2), dense.sum_art, app.sum_art2);
         c.gd_det = gd(gap(idx_append::DET_DEV2), dense.sum_det, app.sum_det2);
-        // Globals. GLOBAL_DMEAN: f = sat(|Δ|, C), Δ = (Σs−Σd)/N;
-        // (δf)_i = −sat'(|Δ|)·sign(Δ)·(s_i−d_i)/N.
+        // The same deviation pools as quadratics in `e = v − m`: repair
+        // `s·(2m·v − v²)/(2f·N) = −(s/(2fN))·(e² − m²)`; exact, the share
+        // `v·∂f/∂v` negated, `−(s/(fN))·v·(v − m) = −(s/(fN))·(e² + m·e)`.
+        let gq = |g: (f64, f64, f64)| -> [f64; 4] {
+            let (sk, m, f) = g;
+            if sk == 0.0 || f <= 1e-12 {
+                return [0.0; 4];
+            }
+            match split {
+                SplitMode::Repair => {
+                    let k = -sk * inv_n / (2.0 * f);
+                    [-k * m * m, 0.0, k, m]
+                }
+                SplitMode::Exact => {
+                    let k = -sk * inv_n / f;
+                    [0.0, k * m, k, m]
+                }
+            }
+        };
+        c.gq_gms = gq(c.gd_gms);
+        c.gq_art = gq(c.gd_art);
+        c.gq_det = gq(c.gd_det);
+        // Globals. GLOBAL_DMEAN: f = sat(|Δ|, C), Δ = (Σs−Σd)/N. Repair:
+        // (δf)_i = −sat'(|Δ|)·sign(Δ)·(s_i−d_i)/N. Exact: the secant share
+        // (f/Δ)·(s_i−d_i)/N, with f/Δ = sign(Δ)/(|Δ| + C) bounded at Δ → 0.
         let delta = (app.sum_s - app.sum_d) * inv_n;
-        let sat_p = C_GDMEAN / ((delta.abs() + C_GDMEAN) * (delta.abs() + C_GDMEAN));
-        c.g_dmean = gap(idx_append::GLOBAL_DMEAN) * (-sat_p * delta.signum() * inv_n);
+        c.g_dmean = match split {
+            SplitMode::Repair => {
+                let sat_p = C_GDMEAN / ((delta.abs() + C_GDMEAN) * (delta.abs() + C_GDMEAN));
+                gap(idx_append::GLOBAL_DMEAN) * (-sat_p * delta.signum() * inv_n)
+            }
+            SplitMode::Exact if delta != 0.0 => {
+                gap(idx_append::GLOBAL_DMEAN)
+                    * (-(delta.signum() / (delta.abs() + C_GDMEAN)) * inv_n)
+            }
+            SplitMode::Exact => 0.0,
+        };
         // GLOBAL_CGAIN/CLOSS: chain rule on gvar2 (gvar1 is reference-side).
         let gmean_s = app.sum_s * inv_n;
         let gmean_d = app.sum_d * inv_n;
         let gvar1 = (app.sum_s2 * inv_n - gmean_s * gmean_s).max(0.0);
         let gvar2 = (app.sum_d2 * inv_n - gmean_d * gmean_d).max(0.0);
         let denom = gvar1 + gvar2 + C_GCONTRAST;
-        // δgvar2 per refined pixel = ((s²−d²) − 2·gmean_d·(s−d))/N.
-        let df_dg2 = if gvar2 > gvar1 {
-            gap(idx_append::GLOBAL_CGAIN) * ((2.0 * gvar1 + C_GCONTRAST) / (denom * denom))
-        } else if gvar1 > gvar2 {
-            gap(idx_append::GLOBAL_CLOSS) * (-(2.0 * gvar1 + C_GCONTRAST) / (denom * denom))
-        } else {
-            0.0
-        };
-        c.g_var = df_dg2 * inv_n;
-        c.gmean_d = gmean_d;
+        match split {
+            SplitMode::Repair => {
+                // δgvar2 per refined pixel = (s−d)·((s+d) − 2·gmean_d)/N.
+                let df_dg2 = if gvar2 > gvar1 {
+                    gap(idx_append::GLOBAL_CGAIN) * ((2.0 * gvar1 + C_GCONTRAST) / (denom * denom))
+                } else if gvar1 > gvar2 {
+                    gap(idx_append::GLOBAL_CLOSS) * (-(2.0 * gvar1 + C_GCONTRAST) / (denom * denom))
+                } else {
+                    0.0
+                };
+                c.g_var = df_dg2 * inv_n;
+                c.g_shift = 0.0;
+                c.g_sum = 2.0 * gmean_d;
+            }
+            SplitMode::Exact => {
+                // GLOBAL_CGAIN = (gvar2 − gvar1)/denom, GLOBAL_CLOSS its
+                // negation: the pixel's share of `gvar2 − gvar1` is
+                // ((d−μd)² − (s−μs)²)/N, factored as
+                // −((s−d) − (μs−μd))·((s+d) − (μs+μd))/N so it does not cancel.
+                c.g_var = if gvar2 > gvar1 {
+                    gap(idx_append::GLOBAL_CGAIN) * inv_n / denom
+                } else if gvar1 > gvar2 {
+                    -gap(idx_append::GLOBAL_CLOSS) * inv_n / denom
+                } else {
+                    0.0
+                };
+                c.g_shift = gmean_s - gmean_d;
+                c.g_sum = gmean_s + gmean_d;
+            }
+        }
         // GRAD_SRC_MEAN (slot 16): reference-only ⇒ integrand 0 (no term).
     }
     c
@@ -10484,20 +10606,12 @@ fn attr_pass_b_rows(
             a_res += co.sp_art.0 * saturate(art_i, C_PEAK) * (co.sp_art.1 - art_i);
             a_res += co.sp_det.0 * saturate(det_i, C_PEAK) * (co.sp_det.1 - det_i);
 
-            // SSIM deviation pools (v = d), in centered form: the removal
-            // polynomials `2μd − d²` and `−d⁴ + 4d·raw3 + 4μd³ − 12μd·raw2 −
-            // 6μ²d² + 12μ³d` equal `μ² − e²` and `μ⁴ − e⁴ + 4d·c3` with
-            // `e = d − μ`, which do not cancel when the deviation is small
-            // against the mean.
-            if co.s_dev2 != 0.0 && co.dev_f2 > 1e-12 {
+            // SSIM deviation pools (v = d): the centred polynomial
+            // `V2AppCoeffs::dev_q` in `e = d − μ`.
+            {
+                let q = &co.dev_q;
                 let e = d - co.dev_mu;
-                a_win += co.s_dev2 * (co.dev_mu * co.dev_mu - e * e)
-                    / (2.0 * co.dev_f2 * (1.0 / co.inv_n));
-            }
-            if co.s_dev4 != 0.0 && co.dev_f4 > 1e-12 {
-                let e = d - co.dev_mu;
-                let dm4 = co.dev_mu.powi(4) - e.powi(4) + 4.0 * d * co.dev_c3;
-                a_win += co.s_dev4 * co.inv_n * dm4 / (4.0 * co.dev_f4.powi(3));
+                a_win += q[0] + e * (q[1] + e * (q[2] + e * (q[3] + e * q[4])));
             }
 
             // Append block.
@@ -10545,19 +10659,10 @@ fn attr_pass_b_rows(
                 a_id += (co.c_dark * wd + co.c_mid * wm + co.c_bright * wb) * mse_i;
             }
             // Append dev pools for art/det (gms handled in the gradient loop).
-            let gdp = |g: (f64, f64, f64), v: f64, inv_n: f64| -> f64 {
-                let (sk, m, f) = g;
-                if sk != 0.0 && f > 1e-12 {
-                    sk * (2.0 * m * v - v * v) * inv_n / (2.0 * f)
-                } else {
-                    0.0
-                }
-            };
-            a_res += gdp(co.gd_art, art_i, co.inv_n);
-            a_res += gdp(co.gd_det, det_i, co.inv_n);
+            a_res += gq_density(&co.gq_art, art_i) + gq_density(&co.gq_det, det_i);
             // Globals (pixel class — raw whole-plane sums).
             a_id += co.g_dmean * (s - dd);
-            a_id += co.g_var * ((s * s - dd * dd) - 2.0 * co.gmean_d * (s - dd));
+            a_id += co.g_var * (((s - dd) - co.g_shift) * ((s + dd) - co.g_sum));
 
             id_plane[i - out_off] += a_id + a_res;
             win_plane[i - out_off] += a_win;
@@ -10598,10 +10703,7 @@ fn attr_pass_b_rows(
                 let gmag_d = (gx_d * gx_d + gy_d * gy_d).sqrt();
                 let g = 1.0 - bounded_sim(gmag_s, gmag_d, C_GMS);
                 let mut acc = co.c_gms * g;
-                if co.gd_gms.0 != 0.0 && co.gd_gms.2 > 1e-12 {
-                    acc += co.gd_gms.0 * (2.0 * co.gd_gms.1 * g - g * g) * co.inv_n
-                        / (2.0 * co.gd_gms.2);
-                }
+                acc += gq_density(&co.gq_gms, g);
                 if co.c_ringing != 0.0 {
                     let s = src[i] as f64;
                     let dd = dst[i] as f64;
@@ -10776,16 +10878,12 @@ struct V2AppCoeffsF32 {
     sp_ssim: (f32, f32),
     sp_art: (f32, f32),
     sp_det: (f32, f32),
-    /// ssim-`d` dev-pool polynomial (dev2 + dev4 folded, guards applied at
-    /// fold time), centered at the pool mean `pdm`:
-    /// `pd0 + pd1·d + pq2·e² + pq4·e⁴` with `e = d − pdm`, added to the
-    /// window class. Expanded in raw powers of `d` these coefficients grow as
-    /// `1/f³` and the f32 sum cancels catastrophically once the deviation is
-    /// small against the mean.
-    pd0: f32,
-    pd1: f32,
-    pq2: f32,
-    pq4: f32,
+    /// ssim-`d` dev-pool polynomial ([`V2AppCoeffs::dev_q`]), centered at the
+    /// pool mean `pdm`: `pq[0] + e·(pq[1] + e·(pq[2] + e·(pq[3] + e·pq[4])))`
+    /// with `e = d − pdm`, added to the window class. Expanded in raw powers
+    /// of `d` these coefficients grow as `1/f³` and the f32 sum cancels
+    /// catastrophically once the deviation is small against the mean.
+    pq: [f32; 5],
     pdm: f32,
     c_xmask: f32,
     c_lumt: f32,
@@ -10797,16 +10895,15 @@ struct V2AppCoeffsF32 {
     c_dark: f32,
     c_mid: f32,
     c_bright: f32,
-    /// gdp pools as lin/quad pairs: `lin·v + quad·v²` (guards folded).
-    ga_lin: f32,
-    ga_quad: f32,
-    gd_lin: f32,
-    gd_quad: f32,
-    gg_lin: f32,
-    gg_quad: f32,
+    /// gdp pools as centred quadratics ([`V2AppCoeffs::gq_art`]):
+    /// `q[0] + e·(q[1] + e·q[2])`, `e = v − q[3]` (guards folded).
+    ga: [f32; 4],
+    gd: [f32; 4],
+    gg: [f32; 4],
     g_dmean: f32,
     g_var: f32,
-    gmean_d: f32,
+    g_shift: f32,
+    g_sum: f32,
     c_edgew: f32,
     c_bv_gain: f32,
     c_bv_loss: f32,
@@ -10820,32 +10917,8 @@ struct V2AppCoeffsF32 {
 /// and cross-mask terms are zeroed exactly as the f64 branch skips them.
 #[cfg(feature = "custom-profiles")]
 fn v2app_coeffs_fold_f32(co: &V2AppCoeffs, cross_on: bool) -> V2AppCoeffsF32 {
-    // dev2: s·(μ² − e²) / (2·f2·N); dev4: k4·(μ⁴ − e⁴ + 4d·c3), e = d − μ.
-    let (mut pd0, mut pd1, mut pq2, mut pq4) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
-    let mu = co.dev_mu;
-    if co.s_dev2 != 0.0 && co.dev_f2 > 1e-12 {
-        let k = co.s_dev2 * co.inv_n / (2.0 * co.dev_f2);
-        pd0 += k * mu * mu;
-        pq2 += -k;
-    }
-    if co.s_dev4 != 0.0 && co.dev_f4 > 1e-12 {
-        let k4 = co.s_dev4 * co.inv_n / (4.0 * co.dev_f4.powi(3));
-        pd0 += k4 * mu.powi(4);
-        pd1 += k4 * 4.0 * co.dev_c3;
-        pq4 += -k4;
-    }
-    let gdp_lq = |g: (f64, f64, f64)| -> (f32, f32) {
-        let (sk, m, f) = g;
-        if sk != 0.0 && f > 1e-12 {
-            let k = sk * co.inv_n / (2.0 * f);
-            ((k * 2.0 * m) as f32, (-k) as f32)
-        } else {
-            (0.0, 0.0)
-        }
-    };
-    let (ga_lin, ga_quad) = gdp_lq(co.gd_art);
-    let (gd_lin, gd_quad) = gdp_lq(co.gd_det);
-    let (gg_lin, gg_quad) = gdp_lq(co.gd_gms);
+    let f32x = |q: &[f64]| -> Vec<f32> { q.iter().map(|&v| v as f32).collect() };
+    let q4 = |q: &[f64; 4]| -> [f32; 4] { f32x(q).try_into().unwrap() };
     V2AppCoeffsF32 {
         c_ssim: co.c_ssim as f32,
         c_art: co.c_art as f32,
@@ -10872,11 +10945,8 @@ fn v2app_coeffs_fold_f32(co: &V2AppCoeffs, cross_on: bool) -> V2AppCoeffsF32 {
         sp_ssim: (co.sp_ssim.0 as f32, co.sp_ssim.1 as f32),
         sp_art: (co.sp_art.0 as f32, co.sp_art.1 as f32),
         sp_det: (co.sp_det.0 as f32, co.sp_det.1 as f32),
-        pd0: pd0 as f32,
-        pd1: pd1 as f32,
-        pq2: pq2 as f32,
-        pq4: pq4 as f32,
-        pdm: mu as f32,
+        pq: f32x(&co.dev_q).try_into().unwrap(),
+        pdm: co.dev_mu as f32,
         c_xmask: if cross_on { co.c_xmask as f32 } else { 0.0 },
         c_lumt: if cross_on { co.c_lumt as f32 } else { 0.0 },
         c_mscn: co.c_mscn as f32,
@@ -10887,15 +10957,13 @@ fn v2app_coeffs_fold_f32(co: &V2AppCoeffs, cross_on: bool) -> V2AppCoeffsF32 {
         c_dark: co.c_dark as f32,
         c_mid: co.c_mid as f32,
         c_bright: co.c_bright as f32,
-        ga_lin,
-        ga_quad,
-        gd_lin,
-        gd_quad,
-        gg_lin,
-        gg_quad,
+        ga: q4(&co.gq_art),
+        gd: q4(&co.gq_det),
+        gg: q4(&co.gq_gms),
         g_dmean: co.g_dmean as f32,
         g_var: co.g_var as f32,
-        gmean_d: co.gmean_d as f32,
+        g_shift: co.g_shift as f32,
+        g_sum: co.g_sum as f32,
         c_edgew: co.c_edgew as f32,
         c_bv_gain: co.c_bv_gain as f32,
         c_bv_loss: co.c_bv_loss as f32,
@@ -11025,10 +11093,10 @@ fn attr_pass_b_main_px(
     a_win += co.sp_ssim.0 * sat(d, CPK) * (co.sp_ssim.1 - d);
     a_res += co.sp_art.0 * sat(art_i, CPK) * (co.sp_art.1 - art_i);
     a_res += co.sp_det.0 * sat(det_i, CPK) * (co.sp_det.1 - det_i);
-    // Dev polynomial, centered: pd0 + pd1·d + pq2·e² + pq4·e⁴, e = d − pdm.
+    // Dev polynomial, centered: `V2AppCoeffsF32::pq` in e = d − pdm.
     let e = d - co.pdm;
-    let esq = e * e;
-    a_win += co.pd0 + co.pd1 * d + (co.pq2 + co.pq4 * esq) * esq;
+    let q = &co.pq;
+    a_win += q[0] + e * (q[1] + e * (q[2] + e * (q[3] + e * q[4])));
     // Rev5 retains no appendix plane: its coefficients cannot read this block.
     if append {
         // Append block.
@@ -11061,11 +11129,14 @@ fn attr_pass_b_main_px(
         let wm = 1.0 - wd - wb;
         a_id += (co.c_dark * wd + co.c_mid * wm + co.c_bright * wb) * mse_i;
         // gdp pools (art/det).
-        a_res += (co.ga_lin + co.ga_quad * art_i) * art_i;
-        a_res += (co.gd_lin + co.gd_quad * det_i) * det_i;
+        let gq = |q: &[f32; 4], v: f32| -> f32 {
+            let e = v - q[3];
+            q[0] + e * (q[1] + e * q[2])
+        };
+        a_res += gq(&co.ga, art_i) + gq(&co.gd, det_i);
         // Globals (factored g_var form).
         a_id += co.g_dmean * raw_diff;
-        a_id += co.g_var * raw_diff * ((s + dd) - 2.0 * co.gmean_d);
+        a_id += co.g_var * ((raw_diff - co.g_shift) * ((s + dd) - co.g_sum));
     }
     (a_id + a_res, a_win)
 }
@@ -11192,10 +11263,10 @@ fn attr_pass_b_main_kernel_generic<T: F32x8Backend + Copy>(
             a_win += sp(co.sp_ssim.0) * sat_v(d, c_peak) * (sp(co.sp_ssim.1) - d);
             a_res += sp(co.sp_art.0) * sat_v(art_i, c_peak) * (sp(co.sp_art.1) - art_i);
             a_res += sp(co.sp_det.0) * sat_v(det_i, c_peak) * (sp(co.sp_det.1) - det_i);
-            // Dev polynomial, centered (see `V2AppCoeffsF32::pd0`).
+            // Dev polynomial, centered (see `V2AppCoeffsF32::pq`).
             let e = d - sp(co.pdm);
-            let esq = e * e;
-            a_win += sp(co.pd0) + sp(co.pd1) * d + (sp(co.pq2) + sp(co.pq4) * esq) * esq;
+            let q = &co.pq;
+            a_win += sp(q[0]) + e * (sp(q[1]) + e * (sp(q[2]) + e * (sp(q[3]) + e * sp(q[4]))));
             if append {
                 // Append block.
                 let b2v = ld!(bs2);
@@ -11234,11 +11305,13 @@ fn attr_pass_b_main_kernel_generic<T: F32x8Backend + Copy>(
                 let wm = one - wd - wb;
                 a_id += (sp(co.c_dark) * wd + sp(co.c_mid) * wm + sp(co.c_bright) * wb) * mse_i;
                 // gdp pools.
-                a_res += (sp(co.ga_lin) + sp(co.ga_quad) * art_i) * art_i;
-                a_res += (sp(co.gd_lin) + sp(co.gd_quad) * det_i) * det_i;
+                let ea = art_i - sp(co.ga[3]);
+                a_res += sp(co.ga[0]) + ea * (sp(co.ga[1]) + ea * sp(co.ga[2]));
+                let ed = det_i - sp(co.gd[3]);
+                a_res += sp(co.gd[0]) + ed * (sp(co.gd[1]) + ed * sp(co.gd[2]));
                 // Globals (factored g_var form).
                 a_id += sp(co.g_dmean) * raw_diff;
-                a_id += sp(co.g_var) * raw_diff * ((s + dd) - sp(2.0 * co.gmean_d));
+                a_id += sp(co.g_var) * ((raw_diff - sp(co.g_shift)) * ((s + dd) - sp(co.g_sum)));
             }
             let o = orow + x;
             let id_new =
@@ -11389,7 +11462,8 @@ fn attr_pass_b_grad_px(
     let gmag_d = (gx_d * gx_d + gy_d * gy_d).sqrt();
     let g = 1.0 - (2.0 * gmag_s * gmag_d + CG) / (gmag_s * gmag_s + gmag_d * gmag_d + CG);
     let mut acc = co.c_gms * g;
-    acc += (co.gg_lin + co.gg_quad * g) * g;
+    let eg = g - co.gg[3];
+    acc += co.gg[0] + eg * (co.gg[1] + eg * co.gg[2]);
     if co.c_ringing != 0.0 {
         let ring_err = if co.ring_hp {
             ((s_c - m1_c) - (d_c - m2_c)).abs()
@@ -11542,7 +11616,8 @@ fn attr_pass_b_grad_kernel_generic<T: F32x8Backend + Copy>(
             let gmag_d = (gx_d * gx_d + gy_d * gy_d).sqrt();
             let g = one - bounded_sim_v(token, gmag_s, gmag_d, c_gms);
             let mut acc = sp(co.c_gms) * g;
-            acc += (sp(co.gg_lin) + sp(co.gg_quad) * g) * g;
+            let eg = g - sp(co.gg[3]);
+            acc += sp(co.gg[0]) + eg * (sp(co.gg[1]) + eg * sp(co.gg[2]));
             if has_ringing {
                 let ring_err = if ring_hp {
                     ((s_c - ldo!(mu1, i)) - (d_c - ldo!(mu2, i))).abs()
@@ -11669,8 +11744,7 @@ fn attr_pass_b_grad_rows_f32(
     let need_grad = co.c_gms != 0.0
         || co.c_ringing != 0.0
         || co.c_banding != 0.0
-        || co.gg_lin != 0.0
-        || co.gg_quad != 0.0
+        || co.gg[..3].iter().any(|&v| v != 0.0)
         || co.c_edgew != 0.0
         || need_bandvis;
     if !need_grad {
@@ -11951,6 +12025,8 @@ fn attr_pass_b_for_scale(
             attr_ew_coeff(s_v2, mg, dims, n_scales, scale, ch),
             // The standalone walk computes its planes at the process revision (`validate_wide_revision`).
             crate::ssim_form::active_revision(),
+            // The standalone route keeps the removal split (no paint modes).
+            crate::map_paint::SplitMode::Repair,
         );
         attr_pass_b_channel(
             rplanes[ch],
@@ -12080,6 +12156,7 @@ fn attr_pass_b_for_scale_f32(
             ch == 1,
             attr_ew_coeff(s_v2, mg, dims, n_scales, scale, ch),
             revision,
+            paint.split,
         );
         let co32 = v2app_coeffs_fold_f32(&co, cross.is_some());
         attr_pass_b_channel_f32(

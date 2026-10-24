@@ -2742,7 +2742,17 @@ mod tests {
                 let mut sensitivities = [0.0; 156];
                 sensitivities[12] = -2.5;
                 let co =
-                    SlotCoeffs::from_scale_stats(&sensitivities, 0, &stats, 0, n, src, 0.5, form);
+                    SlotCoeffs::from_scale_stats(
+                        &sensitivities,
+                        0,
+                        &stats,
+                        0,
+                        n,
+                        src,
+                        0.5,
+                        form,
+                        crate::map_paint::SplitMode::Repair,
+                    );
                 let eps = dst * 1e-5;
                 let fd = -2.5
                     * (hf_energy_gain(form, src / n, (dst + eps) / n)
@@ -2782,7 +2792,7 @@ mod tests {
             };
             let mut s = [0.0; 72];
             s[3] = -256.0;
-            let co = l8_coefficients(&s, 0, 0, &stats, 64.0);
+            let co = l8_coefficients(&s, 0, 0, &stats, 64.0, crate::map_paint::SplitMode::Repair);
             let mut id = [0.0; 64];
             let mut win = [0.0; 64];
             fused_combine_l8_f32(
@@ -4851,7 +4861,14 @@ fn l8_coefficients(
     channel: usize,
     stats: &crate::metric::ScaleStats,
     n: f64,
+    split: crate::map_paint::SplitMode,
 ) -> [f64; 3] {
+    // Removal `−s·x⁸/(8·N·L8⁷)`; the exact share is eight times it.
+    let share = if split == crate::map_paint::SplitMode::Exact {
+        1.0
+    } else {
+        1.0 / 8.0
+    };
     let roots = [
         stats.ssim_p95[channel],
         stats.art_p95[channel],
@@ -4865,7 +4882,7 @@ fn l8_coefficients(
         if sensitivity == 0.0 || roots[slot] <= 0.0 {
             0.0
         } else {
-            -sensitivity / (8.0 * n * roots[slot].powi(7))
+            -sensitivity * share / (n * roots[slot].powi(7))
         }
     })
 }
@@ -5469,6 +5486,14 @@ impl SlotCoeffs {
     /// the stats do not carry. Matches [`SlotCoeffs::derive`]'s math; the
     /// clamp-side gating for the hf ratio slots reads the stats' CLAMPED
     /// feature values directly (`f10 > 0` ⇔ loss side active, etc.).
+    ///
+    /// `split` ([`crate::map_paint::SplitMode`]): `Repair` keeps the
+    /// removal-consistent `1/p` integrand of the p-pooled slots; `Exact` gives
+    /// each pixel its Euler share `xᵖ·M^((1−p)/p)/N` (p times the removal
+    /// form), so those slots sum to their feature, and splits a nonlinear HF
+    /// gain by the secant, `f·e_i/(Σdst² − Σsrc²)`. Mean and HF-loss slots are
+    /// linear and identical in both.
+    #[allow(clippy::too_many_arguments)]
     fn from_scale_stats(
         s: &[f64],
         base_k: usize,
@@ -5478,12 +5503,15 @@ impl SlotCoeffs {
         hf_sq_src_sum: f64,
         hf_abs_src_sum: f64,
         gain_form: crate::hf_gain_form::HfGainForm,
+        split: crate::map_paint::SplitMode,
     ) -> Self {
+        let exact = split == crate::map_paint::SplitMode::Exact;
         let g = |slot: usize| s.get(base_k + slot).copied().unwrap_or(0.0);
         let inv_n = 1.0 / n_f;
         let p_coeff = |sk: f64, m: f64, p: f64| -> f64 {
             if m > 0.0 {
-                -sk * inv_n * (1.0 / p) * m.powf((1.0 - p) / p)
+                let share = if exact { 1.0 } else { 1.0 / p };
+                -sk * inv_n * share * m.powf((1.0 - p) / p)
             } else {
                 0.0
             }
@@ -5499,8 +5527,11 @@ impl SlotCoeffs {
                 -g(10) / hf_sq_src_sum
             } else if stats.hf_energy_gain[c] > 0.0 {
                 if gain_form == crate::hf_gain_form::HfGainForm::RatioExcess {
-                    // Preserve the established revision-1 spelling bit for bit.
+                    // Preserve the established revision-1 spelling bit for bit
+                    // (this gain is linear in Σdst², so both splits agree).
                     g(12) / hf_sq_src_sum
+                } else if exact {
+                    g(12) * stats.hf_energy_gain[c] / (stats.hf_sq_dst_sum[c] - hf_sq_src_sum)
                 } else {
                     g(12)
                         * crate::hf_gain_form::hf_energy_gain_d_sum_dst_sq(
@@ -6528,10 +6559,12 @@ impl crate::metric::Zensim {
                     hf[c].0,
                     hf[c].1,
                     crate::hf_gain_form::HfGainForm::at_revision(config.formula_revision),
+                    paint.split,
                 ))
             });
-            let l8_co: [[f64; 3]; 3] =
-                core::array::from_fn(|c| l8_coefficients(s_peaks, scale, c, stats, n_f));
+            let l8_co: [[f64; 3]; 3] = core::array::from_fn(|c| {
+                l8_coefficients(s_peaks, scale, c, stats, n_f, paint.split)
+            });
             // task #70: prime the stale session — THIS compare's coefficient
             // packs become the NEXT stale call's fold input; the hf sums are
             // reference-side constants cached once here.
@@ -7025,6 +7058,8 @@ impl crate::metric::Zensim {
                     hf[c].0,
                     hf[c].1,
                     crate::hf_gain_form::HfGainForm::at_revision(config.formula_revision),
+                    // The stale route has no paint modes.
+                    crate::map_paint::SplitMode::Repair,
                 ))
             }));
             tail_ms.set(tail_ms.get() + t_c.elapsed().as_secs_f64() * 1e3);

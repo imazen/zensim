@@ -16,6 +16,7 @@ None.
 
 - Formula revision 6 (research, branch `explore/byconstruction`): revision 5 with the corrected ringing measurement (`ringhpm`, imazen/zensim#72) selected by a bake's declared revision instead of `ZENSIM_RING_FORM`, plus the `globaff` family (f1867..1890: per scale and XYB channel, the share of the mean squared error a global affine fit explains, and that error), accumulated over the streaming walk's strips with fixed 16-lane f64 sums. Revision 5 and every earlier revision keep their bits ([record](benchmarks/byconstruction_2026-10-22.md)).
 - Research map-painting modes for the candidate attribution map (`ZENSIM_MAP_WINDOW=box|center|guided`, `ZENSIM_MAP_PAINT=nearest|guided`); the defaults keep today's map bits.
+- Exact map split (`ZENSIM_MAP_SPLIT=exact`; research, branch `explore/byconstruction`): each pixel gets its share of a pooled feature (Euler shares for Lp and deviation pools, secant shares for the global and HF-gain ratios), so every such pool's map sums to its feature; the removal split stays the default. A scorer with research map modes keeps every feature's density in the map instead of taking the steering snapshot ([record](benchmarks/byconstruction_2026-10-22.md), "Attribution-map correctness").
 
 ### Changed
 
@@ -186,6 +187,9 @@ None.
 
 
 ### Fixed
+
+- The candidate attribution map's pass B read the SSIM and ringing forms from the process revision instead of the bake's: B (revision 5) in a default process produced a map summing to about −1.8e19 (`ec9289df`, branch `explore/byconstruction`; the same code is on main). The SSIM deviation-pool polynomials are now evaluated centred at the pool mean in every kernel; in raw powers their f32 maps missed the feature by up to 2.2% ([record](benchmarks/byconstruction_2026-10-22.md), "Attribution-map correctness").
+- The revision-6 `globaff` descriptor sums the error `s − d` and its moments instead of raw moments of `s` and `d`, which cancelled for small errors over large planes (share 0.99971 instead of 1 on a 2-megapixel tiny offset). Served Tga matches its training route to 5.0e-7 on AIC2026 public_train (branch `explore/byconstruction`).
 
 - Isolate E34 harvest jobset errors, retain bounded ledger-sync diagnostics and retries, and persist per-jobset installed counts without admitting failed verification (`d9bd4953`, `0dddffd5`).
 
