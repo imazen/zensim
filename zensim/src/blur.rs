@@ -6866,76 +6866,76 @@ fn fused_blur_h_local11(
     let last = (width / 8).saturating_sub(1) * 8;
     let right: [usize; 18] =
         std::array::from_fn(|i| crate::featcanon::tap_mirror((last + i) as isize - 5, width));
+    // One 8-output block of the four planes from its 18 leaves of each input:
+    // the frozen tree over taps at constant offsets (one range check per block
+    // and input, not one per tap), as `fused_blur_h_local11_wide` does at 16.
+    let block = |a_t: &[f32; 18], b_t: &[f32; 18]| {
+        let tap = |k: usize| {
+            let a = f32x8::load_t(token, a_t[k..k + 8].try_into().unwrap());
+            let b = f32x8::load_t(token, b_t[k..k + 8].try_into().unwrap());
+            let q = a.mul_add(a, b * b);
+            let p = if err {
+                let e = a - b;
+                e * e
+            } else {
+                a * b
+            };
+            (a, b, q, p)
+        };
+        let add = |a: (f32x8, f32x8, f32x8, f32x8), b: (f32x8, f32x8, f32x8, f32x8)| {
+            (a.0 + b.0, a.1 + b.1, a.2 + b.2, a.3 + b.3)
+        };
+        let pair = |k| add(tap(k), tap(k + 1));
+        let s01 = add(pair(0), pair(2));
+        let s45 = add(pair(4), pair(6));
+        add(add(add(s01, s45), pair(8)), tap(10))
+    };
     for y in 0..height {
         let row = y * width;
+        let (sr, dr) = (&src[row..row + width], &dst[row..row + width]);
+        let o1 = &mut out_mu1[row..row + width];
+        let o2 = &mut out_mu2[row..row + width];
+        let oq = &mut out_sigma_sq[row..row + width];
+        let op = &mut out_sigma12[row..row + width];
         let mut x = 0;
-        while x < width {
-            if x + 8 <= width {
-                let interior = x >= 5 && x + 8 + 5 <= width;
-                let edge = (!interior).then(|| {
-                    let indices = if x == 0 { &left } else { &right };
-                    (indices.map(|i| src[row + i]), indices.map(|i| dst[row + i]))
-                });
-                let mut a = [f32x8::zero_t(token); 11];
-                let mut b = a;
-                let mut q = a;
-                let mut p = a;
-                for k in 0..11 {
-                    if x >= 5 && x + 8 + 5 <= width {
-                        let i = row + x + k - 5;
-                        a[k] = f32x8::load_t(token, src[i..i + 8].try_into().unwrap());
-                        b[k] = f32x8::load_t(token, dst[i..i + 8].try_into().unwrap());
-                    } else {
-                        let (a_edge, b_edge) = edge.as_ref().unwrap();
-                        a[k] = f32x8::load_t(token, a_edge[k..k + 8].try_into().unwrap());
-                        b[k] = f32x8::load_t(token, b_edge[k..k + 8].try_into().unwrap());
-                    }
-                    q[k] = a[k].mul_add(a[k], b[k] * b[k]);
-                    p[k] = if err {
-                        let e = a[k] - b[k];
-                        e * e
-                    } else {
-                        a[k] * b[k]
-                    };
-                }
-                let tree = |t: [f32x8; 11]| {
-                    ((((t[0] + t[1]) + (t[2] + t[3])) + ((t[4] + t[5]) + (t[6] + t[7])))
-                        + (t[8] + t[9])
-                        + t[10])
-                        * inv
-                };
-                tree(a).store((&mut out_mu1[row + x..row + x + 8]).try_into().unwrap());
-                tree(b).store((&mut out_mu2[row + x..row + x + 8]).try_into().unwrap());
-                tree(q).store(
-                    (&mut out_sigma_sq[row + x..row + x + 8])
-                        .try_into()
-                        .unwrap(),
-                );
-                tree(p).store((&mut out_sigma12[row + x..row + x + 8]).try_into().unwrap());
-                x += 8;
+        while x + 8 <= width {
+            let sum = if x >= 5 && x + 8 + 5 <= width {
+                block(
+                    sr[x - 5..x + 13].try_into().unwrap(),
+                    dr[x - 5..x + 13].try_into().unwrap(),
+                )
             } else {
-                let mut a = [0.0; 11];
-                let mut b = a;
-                let mut q = a;
-                let mut p = a;
-                for k in 0..11 {
-                    let i = row + crate::featcanon::tap_mirror(x as isize + k as isize - 5, width);
-                    a[k] = src[i];
-                    b[k] = dst[i];
-                    q[k] = a[k].mul_add(a[k], b[k] * b[k]);
-                    p[k] = if err {
-                        let e = a[k] - b[k];
-                        e * e
-                    } else {
-                        a[k] * b[k]
-                    };
-                }
-                out_mu1[row + x] = local_sum_taps(&a) * (1.0 / 11.0);
-                out_mu2[row + x] = local_sum_taps(&b) * (1.0 / 11.0);
-                out_sigma_sq[row + x] = local_sum_taps(&q) * (1.0 / 11.0);
-                out_sigma12[row + x] = local_sum_taps(&p) * (1.0 / 11.0);
-                x += 1;
+                let indices = if x == 0 { &left } else { &right };
+                block(&indices.map(|i| sr[i]), &indices.map(|i| dr[i]))
+            };
+            (sum.0 * inv).store((&mut o1[x..x + 8]).try_into().unwrap());
+            (sum.1 * inv).store((&mut o2[x..x + 8]).try_into().unwrap());
+            (sum.2 * inv).store((&mut oq[x..x + 8]).try_into().unwrap());
+            (sum.3 * inv).store((&mut op[x..x + 8]).try_into().unwrap());
+            x += 8;
+        }
+        while x < width {
+            let mut a = [0.0; 11];
+            let mut b = a;
+            let mut q = a;
+            let mut p = a;
+            for k in 0..11 {
+                let i = crate::featcanon::tap_mirror(x as isize + k as isize - 5, width);
+                a[k] = sr[i];
+                b[k] = dr[i];
+                q[k] = a[k].mul_add(a[k], b[k] * b[k]);
+                p[k] = if err {
+                    let e = a[k] - b[k];
+                    e * e
+                } else {
+                    a[k] * b[k]
+                };
             }
+            o1[x] = local_sum_taps(&a) * (1.0 / 11.0);
+            o2[x] = local_sum_taps(&b) * (1.0 / 11.0);
+            oq[x] = local_sum_taps(&q) * (1.0 / 11.0);
+            op[x] = local_sum_taps(&p) * (1.0 / 11.0);
+            x += 1;
         }
     }
 }
@@ -7004,36 +7004,32 @@ fn box_blur_h_local11(
     let last = (width / 8).saturating_sub(1) * 8;
     let right: [usize; 18] =
         std::array::from_fn(|i| crate::featcanon::tap_mirror((last + i) as isize - 5, width));
+    // One 8-output block from its 18 leaves: the frozen tree over taps at
+    // constant offsets (one range check per block, not one per tap).
+    let block = |t: &[f32; 18]| {
+        let l = |k: usize| f32x8::load_t(token, t[k..k + 8].try_into().unwrap());
+        (((l(0) + l(1)) + (l(2) + l(3))) + ((l(4) + l(5)) + (l(6) + l(7)))) + (l(8) + l(9)) + l(10)
+    };
     for y in 0..height {
-        let row = y * width;
+        let rin = &input[y * width..(y + 1) * width];
+        let rout = &mut output[y * width..(y + 1) * width];
         let mut x = 0;
-        while x < width {
-            if x + 8 <= width {
-                let interior = x >= 5 && x + 8 + 5 <= width;
-                let edge = (!interior).then(|| {
-                    let indices = if x == 0 { &left } else { &right };
-                    indices.map(|i| input[row + i])
-                });
-                let t: [f32x8; 11] = std::array::from_fn(|k| {
-                    if let Some(edge) = &edge {
-                        f32x8::load_t(token, edge[k..k + 8].try_into().unwrap())
-                    } else {
-                        let i = row + x + k - 5;
-                        f32x8::load_t(token, input[i..i + 8].try_into().unwrap())
-                    }
-                });
-                let sum = (((t[0] + t[1]) + (t[2] + t[3])) + ((t[4] + t[5]) + (t[6] + t[7])))
-                    + (t[8] + t[9])
-                    + t[10];
-                (sum * inv).store((&mut output[row + x..row + x + 8]).try_into().unwrap());
-                x += 8;
+        while x + 8 <= width {
+            let sum = if x >= 5 && x + 8 + 5 <= width {
+                block(rin[x - 5..x + 13].try_into().unwrap())
             } else {
-                let t: [f32; 11] = std::array::from_fn(|k| {
-                    input[row + crate::featcanon::tap_mirror(x as isize + k as isize - 5, width)]
-                });
-                output[row + x] = local_sum_taps(&t) * (1.0 / 11.0);
-                x += 1;
-            }
+                let indices = if x == 0 { &left } else { &right };
+                block(&indices.map(|i| rin[i]))
+            };
+            (sum * inv).store((&mut rout[x..x + 8]).try_into().unwrap());
+            x += 8;
+        }
+        while x < width {
+            let t: [f32; 11] = std::array::from_fn(|k| {
+                rin[crate::featcanon::tap_mirror(x as isize + k as isize - 5, width)]
+            });
+            rout[x] = local_sum_taps(&t) * (1.0 / 11.0);
+            x += 1;
         }
     }
 }
