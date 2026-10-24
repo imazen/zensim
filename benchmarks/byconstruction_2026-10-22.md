@@ -1483,6 +1483,10 @@ chroma channels at scales 1–3 are off by up to +336% (+1 LSB on every 7th pixe
 f64 to 1e-5 in every cell. These features are small (1e-8 to 1e-9) but this is the near-lossless regime. B (revision
 5) carries it; changing it needs a new formula revision and a retrain.
 
+**Feature audit, all served families** (revision 5, see "Formula revision 7" below): against the exact f64 oracle
+on 93 near-identical TRAIN pairs, every basic, peaks and v2 feature is within 5.1e-5 median relative error, and
+switching every cancelling form to its exact equivalent moves B's score by at most 7.9e-5 points.
+
 **Read, no subtraction to cancel** (code reading, not a test): the workbench loop map (a positive power of the
 density, then a 16-norm) and the attribution's Lp and L8 coefficients (products and powers). **Measured elsewhere**: the
 DENSEPOOL precision record puts revision 5's v2 pools at a maximum relative error of 1.09e-3 against the exact
