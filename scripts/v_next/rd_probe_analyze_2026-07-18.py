@@ -21,6 +21,13 @@ from collections import defaultdict
 
 RD = sys.argv[1] if len(sys.argv) > 1 else "/mnt/v/output/zensim/rd-target-eval-2026-07"
 CLASS = {"codec_wiki": "screen", "gmessages": "screen"}  # rest = photo
+# A corpus file beside the run (`$RD/corpus/corpus.tsv`: path, name, class) names every image's class.
+if os.path.exists(f"{RD}/corpus/corpus.tsv"):
+    with open(f"{RD}/corpus/corpus.tsv") as _f:
+        for _line in _f:
+            _parts = _line.rstrip("\n").split("\t")
+            if len(_parts) >= 3:
+                CLASS[_parts[1]] = _parts[2]
 
 
 def load_judges():
@@ -86,8 +93,9 @@ def fmt_saved(saved, drivers, judges=("ssim2", "butter", "zensim")):
         "| driver | class | " + " | ".join(f"{j} med% (n)" for j in judges) + " |",
         "|---|---|" + "---|" * len(judges),
     ]
+    classes = sorted({cls for (_, _, cls) in saved}) or ["photo", "screen"]
     for d in drivers:
-        for cls in ("photo", "screen"):
+        for cls in classes:
             cells = []
             for j in judges:
                 v = saved.get((j, d, cls), [])
@@ -1576,11 +1584,12 @@ def main():
         eff = defaultdict(list)
         for c in jxl:
             eff[(c["label"], CLASS.get(c["image"], "photo"))].append(c["ms"])
-        out.append("| driver | photo ms | screen ms |")
-        out.append("|---|---|---|")
+        classes = sorted({cls for (_, cls) in eff})
+        out.append("| driver | " + " | ".join(f"{c} ms" for c in classes) + " |")
+        out.append("|---|" + "---|" * len(classes))
         for d in ["none", *drivers]:
-            p = eff.get((d, "photo"), []); s = eff.get((d, "screen"), [])
-            out.append(f"| {d} | {st.median(p):.0f} | {st.median(s):.0f} |" if p and s else f"| {d} | — | — |")
+            out.append(f"| {d} | " + " | ".join(f"{st.median(eff[(d, c)]):.0f}" if eff.get((d, c)) else "—"
+                                              for c in classes) + " |")
 
     # ---- zenjpeg ----
     zp = f"{RD}/zenjpeg/probe.tsv"
