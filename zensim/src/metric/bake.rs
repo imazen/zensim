@@ -4916,10 +4916,13 @@ mod map_split_tests {
     }
 
     /// The cross-scale edge-width slot keeps its linearized term in both
-    /// splits (`crate::map_paint`), so it has no sum identity.
+    /// splits (`crate::map_paint`), so it has no sum identity; globaff's
+    /// `share` slots split to zero (`exact_split_globaff_maps_sum_to_their_features`).
     fn linearized(id: usize) -> bool {
-        (372..372 + 4 * 87).contains(&id)
-            && (id - 372) % 29 == crate::feature_v2::idx::EDGE_WIDTH_CHANGE
+        let first = crate::globaff::FIRST_ID;
+        ((372..372 + 4 * 87).contains(&id)
+            && (id - 372) % 29 == crate::feature_v2::idx::EDGE_WIDTH_CHANGE)
+            || ((first..first + crate::globaff::SLOTS).contains(&id) && (id - first).is_multiple_of(2))
     }
 
     /// Under the exact split each probed feature's map sums to minus the
@@ -4944,6 +4947,54 @@ mod map_split_tests {
                 .map(|&(id, sum, f, _)| format!("f{id}: map {sum:e}, -feature {:e}", -f))
                 .collect();
             assert!(off.is_empty(), "{name}: {} of {} maps miss -feature:\n{}", off.len(), rows.len(), off.join("\n"));
+        }
+    }
+
+    /// A revision-6 bake over the globaff family's slots and a few v2 slots.
+    fn rev6_globaff_bake() -> Vec<u8> {
+        let ids: Vec<usize> = (crate::globaff::FIRST_ID..crate::globaff::FIRST_ID + crate::globaff::SLOTS)
+            .chain([372 + 29, 372 + 87 + 29])
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        let recipe = serde_json::json!({
+            "schema_hash":1,
+            "scaler_mean": vec![0.0; ids.len()],
+            "scaler_scale": vec![1.0; ids.len()],
+            "metadata":[
+                {"key":"zentrain.feature_ids","type":"utf8",
+                 "text": ids.iter().map(usize::to_string).collect::<Vec<_>>().join(" ")},
+                {"key":"zentrain.formula_revision","type":"utf8","text":"6"}],
+            "layers":[{"in_dim":ids.len(),"out_dim":1,"activation":"identity",
+                "dtype":"f32","weights": vec![-40.0; ids.len()],"biases":[100.0]}]
+        });
+        zenpredict_bake::bake_from_json_str(&recipe.to_string()).unwrap()
+    }
+
+    /// The globaff family's map term (`crate::globaff::map_planes`) under the
+    /// exact split: each `explained` map sums to minus its feature and each
+    /// `share` map (a degree-0 ratio) to zero, on a global edit and on a blur.
+    #[test]
+    fn exact_split_globaff_maps_sum_to_their_features() {
+        let bake = rev6_globaff_bake();
+        let (w, h) = (192usize, 160usize);
+        let (src, blurred) = blur_pair(w, h);
+        let edited: Vec<[u8; 3]> = src
+            .iter()
+            .map(|p| p.map(|v| ((u16::from(v) * 7) / 8 + 20).min(255) as u8))
+            .collect();
+        for (name, d) in [("global edit", &edited), ("blur", &blurred)] {
+            let rows = probe(&bake, &src, d, w, h, SplitMode::Exact);
+            let first = crate::globaff::FIRST_ID;
+            let globaff: Vec<_> = rows.iter().filter(|r| (first..first + crate::globaff::SLOTS).contains(&r.0)).collect();
+            assert!(globaff.len() >= 12, "{name}: only {} globaff probes", globaff.len());
+            for &&(id, sum, f, _) in &globaff {
+                let explained = (id - first) % 2 == 1;
+                let want = if explained { -f } else { 0.0 };
+                let tol = 1e-4 * f.abs() + 1e-9;
+                assert!((sum - want).abs() <= tol, "{name} f{id} ({}): map {sum:e}, want {want:e} (feature {f:e})",
+                    if explained { "explained" } else { "share" });
+            }
         }
     }
 

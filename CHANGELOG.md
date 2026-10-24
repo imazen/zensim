@@ -17,6 +17,7 @@ None.
 - Formula revision 6 (research, branch `explore/byconstruction`): revision 5 with the corrected ringing measurement (`ringhpm`, imazen/zensim#72) selected by a bake's declared revision instead of `ZENSIM_RING_FORM`, plus the `globaff` family (f1867..1890: per scale and XYB channel, the share of the mean squared error a global affine fit explains, and that error), accumulated over the streaming walk's strips with fixed 16-lane f64 sums. Revision 5 and every earlier revision keep their bits ([record](benchmarks/byconstruction_2026-10-22.md)).
 - Research map-painting modes for the candidate attribution map (`ZENSIM_MAP_WINDOW=box|center|guided`, `ZENSIM_MAP_PAINT=nearest|guided`); the defaults keep today's map bits.
 - Exact map split (`ZENSIM_MAP_SPLIT=exact`; research, branch `explore/byconstruction`): each pixel gets its share of a pooled feature (Euler shares for Lp and deviation pools, secant shares for the global and HF-gain ratios), so every such pool's map sums to its feature; the removal split stays the default. A scorer with research map modes keeps every feature's density in the map instead of taking the steering snapshot ([record](benchmarks/byconstruction_2026-10-22.md), "Attribution-map correctness").
+- The revision-6 `globaff` family has a map term (`globaff::map_planes`): `explained` takes its exact pixel share and `share`, a ratio, splits to zero in total (branch `explore/byconstruction`).
 
 ### Changed
 

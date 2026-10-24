@@ -6213,10 +6213,15 @@ pub(crate) fn candidate_map_sensitivities(
         }
         let v1_pool_missing = (BLOCK_END_BASIC..BLOCK_END_V1_POOLS).contains(&id)
             && !(id < BLOCK_END_V1_PEAKS && (id - BLOCK_END_BASIC) % 6 >= 3);
-        let missing = v1_pool_missing
-            || id >= BLOCK_END_APPEND2
-            || (toggles.v1_only && id >= BLOCK_END_V1_POOLS)
-            || (toggles.append2_dst_activity && append2_slot.is_some());
+        // The globaff family has its own map term (`crate::globaff::map_planes`).
+        let globaff = toggles.globaff
+            && (crate::globaff::FIRST_ID..crate::globaff::FIRST_ID + crate::globaff::SLOTS)
+                .contains(&id);
+        let missing = !globaff
+            && (v1_pool_missing
+                || id >= BLOCK_END_APPEND2
+                || (toggles.v1_only && id >= BLOCK_END_V1_POOLS)
+                || (toggles.append2_dst_activity && append2_slot.is_some()));
         if missing {
             unsupported.push(id);
             *value = 0.0;
@@ -7426,6 +7431,29 @@ impl crate::metric::Zensim {
                 precomputed.sampling_geometry.as_ref(),
                 paint,
             );
+        }
+        // The globaff family (revision 6), over the pyramid planes its walk read.
+        let first = crate::globaff::FIRST_ID;
+        let s_globaff = block(first, first + crate::globaff::SLOTS).filter(|g| g.iter().any(|v| *v != 0.0));
+        if let Some(s_globaff) = s_globaff {
+            let rev = revision.unwrap_or_else(crate::ssim_form::active_revision);
+            let dst = PrecomputedReference::new(distorted, precomputed.scales.len(), self.parallel(), rev);
+            let planes = crate::globaff::map_planes(precomputed, &dst, s_globaff, paint.split);
+            let geometry = precomputed.sampling_geometry.as_ref();
+            let guide0 = (paint.paint == crate::map_paint::PaintMode::Guided && geometry.is_none()).then(|| {
+                let (sp, w, h) = precomputed.scale(0);
+                let (dp, _, _) = dst.scale(0);
+                crate::map_paint::difference_guide(sp, dp, w * h)
+            });
+            for (scale, plane, w, h) in planes {
+                if let Some(geometry) = geometry {
+                    let projected = geometry.project(&plane, scale);
+                    let (lw, lh) = geometry.logical_dimensions();
+                    accum.add_scale_plane_f32(&projected, lw, lh, 1);
+                } else {
+                    accum.add_scale_plane_painted_f32(&plane, w, h, scale, paint.paint, guide0.as_deref());
+                }
+            }
         }
         Ok((result, accum.into_result_reusing(&mut session.bin_scratch)))
     }

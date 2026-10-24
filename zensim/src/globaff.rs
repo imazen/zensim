@@ -35,6 +35,13 @@ use archmage::autoversion;
 /// Signals per (scale, channel) cell: `share`, `explained`.
 pub(crate) const GLOBAFF_PER_CELL: usize = 2;
 
+/// The family's first feature id; its slots follow in
+/// `2·(3·scale + channel) + {share, explained}` order.
+pub(crate) const FIRST_ID: usize = 1867;
+
+/// The family's slot count over the four scales.
+pub(crate) const SLOTS: usize = crate::NUM_SCALES * 3 * GLOBAFF_PER_CELL;
+
 /// Below this, a variance or a mean squared error counts as zero (the
 /// sidecar's thresholds).
 const TINY: f64 = 1e-12;
@@ -161,9 +168,118 @@ fn finish_moments(ms: f64, md: f64, vss: f64, vdd: f64, vsd: f64) -> (f64, f64) 
     (share, explained)
 }
 
+/// The family's attribution-map term: per scale, a pixel-supported density
+/// plane `(scale, plane, width, height)` for the sensitivities `s` of the
+/// family's slots (its own order), over the reference-cache pyramids, whose
+/// planes equal the walk's byte for byte.
+///
+/// With `e = s − d`: `explained = mean(e)² + min(var(e), cov(s, e)²/var(s))` is
+/// homogeneous of degree 2 in `e`; a pixel's exact share is
+/// `E_i = (mean(e)·e_i + (cov/var(s))·(s_i − mean(s))·e_i)/N` (the `var(e)`
+/// branch: `e_i·(e_i − mean(e))/N`), and the shares sum to it. `share =
+/// explained/mse` is of degree 0: its exact split `(E_i − share·e_i²/N)/mse`
+/// moves mass between pixels and sums to zero. The removal split is the first
+/// order effect of `e_i → 0`, `−e_i·∂f/∂e_i`, twice the exact share for both.
+/// Moments are two-pass f64, and the walk's `TINY` thresholds apply.
+#[cfg(feature = "custom-profiles")]
+pub(crate) fn map_planes(
+    src: &impl crate::streaming::MultiScaleRef,
+    dst: &impl crate::streaming::MultiScaleRef,
+    s: &[f64],
+    split: crate::map_paint::SplitMode,
+) -> Vec<(usize, Vec<f32>, usize, usize)> {
+    let k = match split {
+        crate::map_paint::SplitMode::Exact => 1.0,
+        crate::map_paint::SplitMode::Repair => 2.0,
+    };
+    let sens = |scale: usize, ch: usize, slot: usize| {
+        s.get(GLOBAFF_PER_CELL * (3 * scale + ch) + slot)
+            .copied()
+            .unwrap_or(0.0)
+    };
+    let mut out = Vec::new();
+    for scale in 0..src.num_scales().min(dst.num_scales()) {
+        let active: Vec<usize> = (0..3)
+            .filter(|&ch| sens(scale, ch, 0) != 0.0 || sens(scale, ch, 1) != 0.0)
+            .collect();
+        if active.is_empty() {
+            continue;
+        }
+        let (sp, w, h) = src.scale(scale);
+        let (dp, dw, dh) = dst.scale(scale);
+        debug_assert_eq!((w, h), (dw, dh));
+        let n = w * h;
+        let nf = n as f64;
+        let mut plane = vec![0.0f32; n];
+        for ch in active {
+            let (a, b) = (&sp[ch][..n], &dp[ch][..n]);
+            let e = |i: usize| f64::from(a[i]) - f64::from(b[i]);
+            let ms = a.iter().map(|&v| f64::from(v)).sum::<f64>() / nf;
+            let me = (0..n).map(e).sum::<f64>() / nf;
+            let (mut vss, mut vee, mut cse) = (0.0f64, 0.0f64, 0.0f64);
+            for (&av, &bv) in a.iter().zip(b) {
+                let (x, y) = (f64::from(av) - ms, (f64::from(av) - f64::from(bv)) - me);
+                vss += x * x;
+                vee += y * y;
+                cse += x * y;
+            }
+            let (vss, vee, cse) = (vss / nf, vee / nf, cse / nf);
+            let mse = me * me + vee;
+            // Which branch of `min(var(e), cov²/var(s))` the feature took.
+            let cov_branch = vss > TINY && cse * cse / vss < vee;
+            let vee_branch = vss > TINY && !cov_branch;
+            let explained = me * me
+                + if cov_branch {
+                    cse * cse / vss
+                } else if vee_branch {
+                    vee
+                } else {
+                    0.0
+                };
+            let share = if mse > TINY {
+                (explained / mse).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            let (s_share, s_expl) = (sens(scale, ch, 0), sens(scale, ch, 1));
+            for (i, out) in plane.iter_mut().enumerate() {
+                let ei = e(i);
+                let term = if cov_branch {
+                    cse / vss * (f64::from(a[i]) - ms) * ei
+                } else if vee_branch {
+                    ei * (ei - me)
+                } else {
+                    0.0
+                };
+                let e_share = (me * ei + term) / nf;
+                let s_part = if mse > TINY {
+                    (e_share - share * ei * ei / nf) / mse
+                } else {
+                    0.0
+                };
+                *out += (-k * (s_expl * e_share + s_share * s_part)) as f32;
+            }
+        }
+        out.push((scale, plane, w, h));
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The family's id range is the registry's.
+    #[test]
+    fn first_id_and_slots_match_the_registry() {
+        let ids: Vec<usize> = crate::feature_defs::family_slots(
+            crate::feature_set_id::ComputeToken::GlobAff,
+            crate::NUM_SCALES,
+        )
+        .iter_slots()
+        .collect();
+        assert_eq!(ids, (FIRST_ID..FIRST_ID + SLOTS).collect::<Vec<_>>());
+    }
 
     /// The sidecar's two-pass f64 computation over one whole plane.
     fn two_pass(s: &[f32], d: &[f32]) -> (f64, f64) {
