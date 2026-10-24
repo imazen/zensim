@@ -1989,6 +1989,15 @@ The changes, in order:
     v4x: eight threads (cpus 0–7) −9.38% at 1507×2048 and −10.48% at 1024² (`rev7_raw3_vs_blockpar_t8`); one thread
     +0.31% / +0.20%, intervals spanning zero (`rev7_raw3_vs_blockpar_t1`).
 
+17. **Strip batches from two threads** (every revision): the walk ran strip jobs in parallel batches only when the
+    rayon pool had at least eight threads, so two to six threads got only the kernels' own parallelism (1507×2048, B
+    at revision 7, v4x: 1.40× at two threads, 1.85× at four). Batching now starts at two threads, one job per thread
+    and at least four per batch; the merge order is unchanged, so every value keeps its bits (110 of 110 dumps at
+    revisions 5/6 and 7; revision-7 dumps at 2, 3, 4 and 6 threads identical to one thread). Unpaired medians:
+    2 threads 21.2 → 18.7 ms, 3 → 17.9 → 15.1, 4 → 16.2 → 11.4, 6 → 14.9 → 9.4, 1 and 8 unchanged. Paired
+    (`rev7_blockpar_vs_batch2_t2`, `_t4`): two threads −13.01% / −9.89% (1507×2048 / 1024²), four −30.15% /
+    −28.05%. Batches of twice the thread count were slower at eight threads (7.8 → 10.1 ms) and at sixteen.
+
 **Tried and not kept** (after 13): the three opsin cube roots interleaved step by step (bit-identical): −0.06% /
 −0.90% on v4x (`rev7_band_vs_cbrt3`, the 1507×2048 and 1024² cases), noise on v3; the conversion's inner loop runs at
 about two instructions per cycle, but interleaving did not raise it. The activity chain's `|src − mu1|` computed per

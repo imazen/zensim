@@ -26,6 +26,7 @@ None.
 - Blockiness runs eight lattice steps per vector through one shared row kernel (branch `explore/byconstruction`): bit-identical at revisions 5 and 6; revision 7 spreads the vertical lattice steps over the eight f64 lanes (column `8j` → lane `(j − 1) & 7`), moving values by at most 1.3e-14 relative. B at revision 7, one thread: −3.3% (1507×2048) / −3.0% (1024²) on v4x, −2.0% / −2.0% on v3.
 - Revision 7's dense kernel no longer accumulates the raw `d²`, `d³`, `d⁴` pools, which no feature reads from revision 5 on (the deviation features use the central moments); every emitted value keeps its bits (branch `explore/byconstruction`). B at revision 7, one thread: −2.8% (1024²) / −1.6% (1507×2048) on v4x, −3.0% / −1.7% on v3.
 - Revision 7 sums blockiness per 128-row kernel strip and merges the strips in order, so the parallel strip jobs compute it instead of the main thread; every walk and thread count gives the same bits (values move by at most 2.0e-15 from the previous revision-7 build). B at eight threads: −9.4% (1507×2048) / −10.5% (1024²) on v4x; one thread unchanged (branch `explore/byconstruction`).
+- Strip jobs run in parallel batches from two threads instead of eight (one job per thread, at least four per batch), every value unchanged at every revision. B at revision 7, 1507×2048, v4x: −13% at two threads, −30% at four (branch `explore/byconstruction`).
 
 ### Changed
 

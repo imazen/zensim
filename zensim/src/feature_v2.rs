@@ -8215,7 +8215,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
         && compute.formula_revision >= FormulaRevision::Rev5
         && compute.v2_blocks
         && !layout_append
-        && rayon::current_num_threads() >= 8
+        && rayon::current_num_threads() >= 2
         && h0 > STRIP_ROWS
     {
         debug_assert!(
@@ -8249,7 +8249,11 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
         if jobs >= REV5_MIN_JOB_SLOTS && jobs <= capacity {
             jobs
         } else {
-            rev5_job_limit(strip_max_n, rayon::current_num_threads(), job_budget)
+            // One job per thread, at least four (measured on a 1507×2048
+            // photo, B at revision 7: two threads 21.2 → 18.7 ms with batches
+            // of four; at eight threads batches of sixteen were slower, 7.8 →
+            // 10.1 ms, their scratch no longer fitting the cache).
+            rev5_job_limit(strip_max_n, rayon::current_num_threads().max(4), job_budget)
         }
     } else {
         0
