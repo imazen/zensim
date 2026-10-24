@@ -4802,14 +4802,18 @@ fn gradient_interior_elem_canon<
     bank_row: &mut [GmsBankCellVar; 5],
     chroma_row: &mut [GmsBankCellVar; 5],
     r4: &mut Option<Rev4Grad<'_>>,
-    r_gsrc: &mut P,
-    r_gdst: &mut P,
+    r_gsrc: &mut Q,
+    r_gdst: &mut Q,
     r_gms: &mut Q,
     r_gms2: &mut Q,
     r_ring: &mut Q,
     r_band: &mut Q,
     r_bv_gain: &mut Q,
     r_bv_loss: &mut Q,
+    // Revision 7's f32 row lanes: `r_gdst` takes `gdst − gsrc` (exact when
+    // the two are within a factor of 2), and the fold adds `r_gsrc`'s lanes to
+    // both sums, so the edge-width decay sees the difference summed directly.
+    gdiff: bool,
 ) {
     let lane = x & (P::LANES - 1);
     let sxl = src_h[row + x - 1];
@@ -4861,7 +4865,7 @@ fn gradient_interior_elem_canon<
     }
 
     r_gsrc.add(lane, gsrc);
-    r_gdst.add(lane, gdst);
+    r_gdst.add(lane, if gdiff { gdst - gsrc } else { gdst });
     // Revision 7: `bounded_dissim_v`'s exact `(a−b)²/(a²+b²+c)`, same op order.
     let g = if R7 {
         crate::feature_v2::bounded_dissim32(gsrc, gdst, C_GMS as f32, true)
@@ -5002,10 +5006,10 @@ fn gradient_block_kernel_canon<
             // columns and at the end of the chunks; head and tail stay f64.
             let head_end = interior_end.min(8);
             let chunk_end = head_end + (interior_end - head_end) / 8 * 8;
-            let mut q32 = [crate::featcanon::Lanes16F32::default(); 6];
+            let mut q32 = [crate::featcanon::Lanes16F32::default(); 8];
             for x in 1..interior_end {
                 if R7 && (head_end..chunk_end).contains(&x) {
-                    let [q_gms, q_gms2, q_ring, q_band, q_bvg, q_bvl] = &mut q32;
+                    let [q_gms, q_gms2, q_ring, q_band, q_bvg, q_bvl, q_gsrc, q_gdst] = &mut q32;
                     gradient_interior_elem_canon::<
                         P,
                         crate::featcanon::Lanes16F32,
@@ -5033,23 +5037,28 @@ fn gradient_block_kernel_canon<
                         &mut bank_row,
                         &mut chroma_row,
                         &mut r4,
-                        &mut r_gsrc,
-                        &mut r_gdst,
+                        q_gsrc,
+                        q_gdst,
                         q_gms,
                         q_gms2,
                         q_ring,
                         q_band,
                         q_bvg,
                         q_bvl,
+                        true,
                     );
                     if (x + 1).is_multiple_of(crate::featcanon::ROW_LANES_FOLD) || x + 1 == chunk_end {
-                        let [q_gms, q_gms2, q_ring, q_band, q_bvg, q_bvl] = &mut q32;
+                        let [q_gms, q_gms2, q_ring, q_band, q_bvg, q_bvl, q_gsrc, q_gdst] = &mut q32;
                         q_gms.fold_into(&mut r_gms);
                         q_gms2.fold_into(&mut r_gms2);
                         q_ring.fold_into(&mut r_ring);
                         q_band.fold_into(&mut r_band);
                         q_bvg.fold_into(&mut r_bv_gain);
                         q_bvl.fold_into(&mut r_bv_loss);
+                        // The difference pair: the source lanes to both sums.
+                        q_gsrc.add_into(&mut r_gsrc);
+                        q_gsrc.fold_into(&mut r_gdst);
+                        q_gdst.fold_into(&mut r_gdst);
                     }
                     continue;
                 }
@@ -5080,6 +5089,7 @@ fn gradient_block_kernel_canon<
                     &mut r_band,
                     &mut r_bv_gain,
                     &mut r_bv_loss,
+                    false,
                 );
             }
             acc.sum_gms += r_gms.fin();
@@ -5323,6 +5333,13 @@ fn gradient_block_kernel_canon64_vec<
                 gpool_fold!($pool, $pool32);
             )*
         }};
+        // The difference pair: the source lanes to both sums, then the
+        // difference lanes to the distorted sum.
+        (pair; $src:ident, $src32:ident, $dst:ident, $dst32:ident) => {{
+            gpool_fold!($src, $src32);
+            gpool_fold!($dst, $src32);
+            gpool_fold!($dst, $dst32);
+        }};
         ($pool:ident, $pool32:ident) => {{
             for off in [0usize, 8] {
                 let lanes = $pool.chunk8(off);
@@ -5373,6 +5390,8 @@ fn gradient_block_kernel_canon64_vec<
             let (mut r_gms32, mut r_gms232, mut r_ring32, mut r_band32) =
                 ([0.0f32; 16], [0.0f32; 16], [0.0f32; 16], [0.0f32; 16]);
             let (mut r_bv_gain32, mut r_bv_loss32) = ([0.0f32; 16], [0.0f32; 16]);
+            // Revision 7's difference pair: `gsrc` and `gdst − gsrc`.
+            let (mut r_gsrc32, mut r_gdst32) = ([0.0f32; 16], [0.0f32; 16]);
             // Lane-aligned head: x = 1..8 scalar (interior starts one
             // pixel in — the canonical lanes land on chunk lanes only for
             // x ≡ 0 (mod 8) chunk starts).
@@ -5405,6 +5424,7 @@ fn gradient_block_kernel_canon64_vec<
                     &mut r_band,
                     &mut r_bv_gain,
                     &mut r_bv_loss,
+                    false,
                 );
             }
             // The chunks, x0 = head_end + 8k for k < n. Every plane's window
@@ -5530,8 +5550,8 @@ fn gradient_block_kernel_canon64_vec<
                                 }
                             }};
                         }
-                        add64!(r_gsrc, gsrc);
-                        add64!(r_gdst, gdst);
+                        add!(r_gsrc, r_gsrc32, gsrc);
+                        add!(r_gdst, r_gdst32, gdst - gsrc);
                         add!(r_gms, r_gms32, g);
                         add!(r_gms2, r_gms232, g2);
                         add!(r_ring, r_ring32, ring_i);
@@ -5547,6 +5567,9 @@ fn gradient_block_kernel_canon64_vec<
                                 r_ring, r_ring32; r_band, r_band32; r_bv_gain, r_bv_gain32;
                                 r_bv_loss, r_bv_loss32
                             );
+                            gpool_fold!(pair; r_gsrc, r_gsrc32, r_gdst, r_gdst32);
+                            r_gsrc32 = [0.0f32; 16];
+                            r_gdst32 = [0.0f32; 16];
                         }
                     }
                     k = 1 + 2 * m16;
@@ -5615,8 +5638,13 @@ fn gradient_block_kernel_canon64_vec<
                     }
                 }
 
-                gpool_add64!(r_gsrc, x0, gsrc);
-                gpool_add64!(r_gdst, x0, gdst);
+                if rev7 {
+                    gpool_add!(r_gsrc, r_gsrc32, x0, gsrc);
+                    gpool_add!(r_gdst, r_gdst32, x0, gdst - gsrc);
+                } else {
+                    gpool_add64!(r_gsrc, x0, gsrc);
+                    gpool_add64!(r_gdst, x0, gdst);
+                }
                 gpool_add!(r_gms, r_gms32, x0, g);
                 gpool_add!(r_gms2, r_gms232, x0, g2);
                 gpool_add!(r_ring, r_ring32, x0, ring_i);
@@ -5648,6 +5676,9 @@ fn gradient_block_kernel_canon64_vec<
                         r_ring, r_ring32; r_band, r_band32; r_bv_gain, r_bv_gain32;
                         r_bv_loss, r_bv_loss32
                     );
+                    gpool_fold!(pair; r_gsrc, r_gsrc32, r_gdst, r_gdst32);
+                    r_gsrc32 = [0.0f32; 16];
+                    r_gdst32 = [0.0f32; 16];
                 }
                 k += 1;
             }
@@ -5660,6 +5691,7 @@ fn gradient_block_kernel_canon64_vec<
                     r_ring, r_ring32; r_band, r_band32; r_bv_gain, r_bv_gain32;
                     r_bv_loss, r_bv_loss32
                 );
+                gpool_fold!(pair; r_gsrc, r_gsrc32, r_gdst, r_gdst32);
             }
             // Scalar tail — the canonical element step verbatim.
             for x in x0..interior_end {
@@ -5690,6 +5722,7 @@ fn gradient_block_kernel_canon64_vec<
                     &mut r_band,
                     &mut r_bv_gain,
                     &mut r_bv_loss,
+                    false,
                 );
             }
             acc.sum_gms += r_gms.fin();

@@ -4623,10 +4623,36 @@ struct BandPools<P: Copy> {
 }
 
 impl VblurPools<crate::featcanon::Lanes16F32> {
-    /// Revision 7: fold the f32 row lanes of every pool except the four
-    /// `hf_*` sums (which difference large sums and stay f64) into `row`, and
-    /// clear them (`crate::featcanon::Lanes16F32::fold_into`).
+    /// Revision 7: fold the f32 row lanes into `row` and clear them
+    /// (`crate::featcanon::Lanes16F32::fold_into`). The `hf_*_dst` lanes hold
+    /// the differences from the source (`(vd − vs)(vd + vs)`, `|vd| − |vs|`),
+    /// so each source lane is added to both its own sum and the distorted
+    /// sum, then the difference lane to the distorted sum: the ratio features
+    /// then see the small difference summed directly, not recovered by
+    /// subtracting two large sums.
     fn fold_into<P: crate::featcanon::Pool>(&mut self, row: &mut VblurPools<P>) {
+        for (src, dst, rsrc, rdst) in [
+            (
+                &mut self.hf_sq_src,
+                &mut self.hf_sq_dst,
+                &mut row.hf_sq_src,
+                &mut row.hf_sq_dst,
+            ),
+            (
+                &mut self.hf_abs_src,
+                &mut self.hf_abs_dst,
+                &mut row.hf_abs_src,
+                &mut row.hf_abs_dst,
+            ),
+        ] {
+            for l in 0..16 {
+                rsrc.add(l, src.0[l]);
+                rdst.add(l, src.0[l]);
+                rdst.add(l, dst.0[l]);
+            }
+            *src = crate::featcanon::Lanes16F32::default();
+            *dst = crate::featcanon::Lanes16F32::default();
+        }
         self.ssim_d.fold_into(&mut row.ssim_d);
         self.ssim_d4.fold_into(&mut row.ssim_d4);
         self.ssim_d2.fold_into(&mut row.ssim_d2);
@@ -5232,10 +5258,24 @@ fn vblur_ssim_elem_canon<P: crate::featcanon::Pool>(
     let vs = s - mu1;
     let vd = d - mu2;
     if !free.local_only {
-        row.hf_sq_src.add(lane, vs * vs);
-        row.hf_sq_dst.add(lane, vd * vd);
-        row.hf_abs_src.add(lane, diff1);
-        row.hf_abs_dst.add(lane, diff2);
+        match row32.as_deref_mut() {
+            // Revision 7: the source sums and the differences
+            // `(vd − vs)(vd + vs)` and `|vd| − |vs|` (exact subtractions
+            // when the two are within a factor of 2) in the f32 lanes; the
+            // fold adds both to the distorted sums (`VblurPools::fold_into`).
+            Some(r) => {
+                crate::featcanon::Pool::add(&mut r.hf_sq_src, lane, vs * vs);
+                crate::featcanon::Pool::add(&mut r.hf_sq_dst, lane, (vd - vs) * (vd + vs));
+                crate::featcanon::Pool::add(&mut r.hf_abs_src, lane, diff1);
+                crate::featcanon::Pool::add(&mut r.hf_abs_dst, lane, diff2 - diff1);
+            }
+            None => {
+                row.hf_sq_src.add(lane, vs * vs);
+                row.hf_sq_dst.add(lane, vd * vd);
+                row.hf_abs_src.add(lane, diff1);
+                row.hf_abs_dst.add(lane, diff2);
+            }
+        }
     }
 
     // MSE + ext pools
@@ -5820,9 +5860,11 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
             }
         }};
     }
-    // Pools whose features difference or ratio large sums (v1 variance,
-    // texture and contrast terms; the band raw moments) keep f64 lanes: f32
-    // row sums lose up to 2.4e-4 of those features to the cancellation.
+    // Pools whose features difference or ratio large sums keep f64 lanes
+    // (f32 row sums lose up to 2.4e-4 of those features to the
+    // cancellation): the band raw moments, and through revision 6 the v1
+    // variance, texture and contrast sums, which revision 7 accumulates in
+    // the f32 lanes as differences instead (`VblurPools::fold_into`).
     macro_rules! pool_add64 {
         ($tgt:ident, $field:ident, $x0:expr, $v:expr) => {{
             let values = ($v).to_array();
@@ -5861,9 +5903,13 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
             // each tap plane is cut to the chunks' exact span, so the loads
             // need no per-chunk offset arithmetic or range checks. Same taps,
             // same summation tree.
-            let tap_base: [usize; 11] = std::array::from_fn(|k| {
-                crate::featcanon::tap_mirror(y as isize + k as isize - 5, height) * width
-            });
+            let tap_base: [usize; 11] = if local && radius != 0 {
+                std::array::from_fn(|k| {
+                    crate::featcanon::tap_mirror(y as isize + k as isize - 5, height) * width
+                })
+            } else {
+                [0; 11]
+            };
             macro_rules! taps {
                 ($plane:expr) => {{
                     let plane: &[f32] = $plane;
@@ -6006,10 +6052,18 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
                     let vs = sv - m1v;
                     let vd = dv - m2v;
                     if !free.local_only {
-                        $add64!(row, hf_sq_src, x0, vs * vs);
-                        $add64!(row, hf_sq_dst, x0, vd * vd);
-                        $add64!(row, hf_abs_src, x0, diff1);
-                        $add64!(row, hf_abs_dst, x0, diff2);
+                        if rev7 {
+                            // The difference form of the scalar step.
+                            $add!(row, row32, hf_sq_src, x0, vs * vs);
+                            $add!(row, row32, hf_sq_dst, x0, (vd - vs) * (vd + vs));
+                            $add!(row, row32, hf_abs_src, x0, diff1);
+                            $add!(row, row32, hf_abs_dst, x0, diff2 - diff1);
+                        } else {
+                            $add64!(row, hf_sq_src, x0, vs * vs);
+                            $add64!(row, hf_sq_dst, x0, vd * vd);
+                            $add64!(row, hf_abs_src, x0, diff1);
+                            $add64!(row, hf_abs_dst, x0, diff2);
+                        }
                     }
 
                     // MSE + ext pools

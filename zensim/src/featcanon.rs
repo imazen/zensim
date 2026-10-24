@@ -544,6 +544,15 @@ impl Lanes16F32 {
         &mut self.0.as_chunks_mut::<8>().0[(offset >> 3) & 1]
     }
 
+    /// Add every lane to `pool`'s matching lane, keeping the lanes (the
+    /// first half of a difference pair's fold, see the gradient kernel).
+    #[inline(always)]
+    pub(crate) fn add_into<P: Pool>(&self, pool: &mut P) {
+        for l in 0..16 {
+            pool.add(l, self.0[l]);
+        }
+    }
+
     /// Add every lane to `pool`'s matching lane (for [`Lanes16F64`],
     /// `lane += v as f64`), then clear.
     #[inline(always)]

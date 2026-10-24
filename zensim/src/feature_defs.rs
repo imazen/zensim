@@ -518,6 +518,10 @@ pub enum FormulaRevision {
     ///   `(m1 − m2)²`, the bounded dissimilarities `(a − b)²/(a² + b² + c)`
     ///   and the v1 edge ratio `(x − y)/(1 + y)`: the exact values the old
     ///   forms computed by subtracting nearly equal numbers.
+    /// * **Opsin cube root with one division**
+    ///   ([`crate::det_math::cbrt_newton_f32`]): within 3 ulp like
+    ///   `cbrt_midp`, correctly rounded more often (72.7% against 56%), with
+    ///   one division instead of two.
     ///
     /// Any live slot may move (an arithmetic era); scope and process model
     /// are Rev6's (`ZENSIM_FORMULA_REV=7`, or a bake declaring revision 7).
@@ -613,6 +617,13 @@ impl FormulaRevision {
     /// Whether the pools add columns in f32 row lanes and the central
     /// moments are two-pass per row ([`Self::Rev7`]'s `rowlanes` era).
     pub(crate) const fn row_lanes(self) -> bool {
+        matches!(self, Self::Rev7)
+    }
+
+    /// Whether the opsin conversion takes its cube root from
+    /// [`crate::det_math::cbrt_newton_f32`] (a Newton then a Halley step, one
+    /// division) instead of `cbrt_midp` ([`Self::Rev7`]).
+    pub(crate) const fn cbrt_newton(self) -> bool {
         matches!(self, Self::Rev7)
     }
 
