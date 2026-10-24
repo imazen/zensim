@@ -5093,16 +5093,36 @@ fn rev5_job_blur(
             );
         }
     }
-    crate::simd_ops::abs_diff_into(src, &mu1[..n], &mut mu1_h[..n]);
-    crate::blur::box_blur_1pass_at_revision(
-        &mu1_h[..n],
-        &mut activity[..n],
-        &mut mu2_h[..n],
-        info.plane_w,
-        info.wide_h(),
-        BLUR_RADIUS,
-        revision,
-    );
+    // The activity plane in one pass where its blurs run their per-output
+    // trees, `mu1_h` and `mu2_h` holding a panel's rows. Pools of sixteen or
+    // more threads only (paired against the fused moments alone, B at
+    // revision 7, 1507×2048 / 1024²: sixteen on eight cores −13.5% / −4.9%,
+    // 32 −8.1% / −7.9%, but eight +1.4% / +1.0%).
+    if !(fused
+        && rayon::current_num_threads() >= 16
+        && crate::blur::activity_at_revision(
+            src,
+            &mu1[..n],
+            &mut activity[..n],
+            info.plane_w,
+            info.wide_h(),
+            BLUR_RADIUS,
+            revision,
+            &mut mu1_h[..n],
+            &mut mu2_h[..n],
+        ))
+    {
+        crate::simd_ops::abs_diff_into(src, &mu1[..n], &mut mu1_h[..n]);
+        crate::blur::box_blur_1pass_at_revision(
+            &mu1_h[..n],
+            &mut activity[..n],
+            &mut mu2_h[..n],
+            info.plane_w,
+            info.wide_h(),
+            BLUR_RADIUS,
+            revision,
+        );
+    }
     crate::fold_timing::work(crate::fold_timing::Work::ActivityChain, 1);
     crate::fold_timing::work(crate::fold_timing::Work::V2Cell, 1);
     crate::fold_timing::stop(start, crate::fold_timing::Phase::PhaseAV2Planes, info.scale);

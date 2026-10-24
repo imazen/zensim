@@ -2067,6 +2067,18 @@ The changes, in order:
     horizontal pass reads each row in 1 KiB runs, shorter than the stream prefetchers like, and an uncontended L3
     absorbs the two-pass traffic. So pools below eight threads and the serial walk keep the two passes.
 
+21. **The activity plane in one pass per column panel** (strip jobs in pools of sixteen or more threads):
+    `|src − mu1|` went to one image-wide plane, its horizontal blur to another, and the vertical blur read that.
+    `blur::activity_at_revision` computes each row's panel span of `|src − mu1|` into a row buffer, its horizontal
+    sums into the panel buffer and the vertical blur from there, with the three kernels' operations at every tier.
+    Bits: 110 of 110 dumps at revisions 5/6 and at revision 7; 72 revision-7 dumps (v4x and v3, 1 to 32 threads)
+    unchanged; `fused_activity_pass_matches_the_two_passes` compares it with the two passes at every tier
+    permutation over thirteen geometries and fails when the eight-lane kernel reads a wrong vertical tap. Paired,
+    10 rounds, against item 20 (`rev7_fusedhv_vs_fusedact_*`): sixteen threads on eight cores −13.49% (−15.00..−12.52)
+    at 1507×2048 and −4.91% at 1024², 32 threads −8.09% (−13.14..+3.94) / −7.93% (−10.07..+0.77), but eight threads
+    +1.43% (−1.42..+2.30) / +1.02% (+0.32..+1.96) and v3 at eight +0.59% / +1.28%, so only pools of sixteen or more
+    threads take it.
+
 **Tried and not kept** (after 13): the three opsin cube roots interleaved step by step (bit-identical): −0.06% /
 −0.90% on v4x (`rev7_band_vs_cbrt3`, the 1507×2048 and 1024² cases), noise on v3; the conversion's inner loop runs at
 about two instructions per cycle, but interleaving did not raise it. The activity chain's `|src − mu1|` computed per
