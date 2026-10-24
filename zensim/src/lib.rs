@@ -349,6 +349,9 @@ mod feature_v2;
 // Streaming strip-plane producer for the folded-720+append walk
 // (docs/STREAMING_FOLDAPP_C0_DESIGN_2026-07-26.md).
 pub(crate) mod feature_v2_stream;
+// Pyramid rows produced by parallel chunk tasks for the strip-job pipeline.
+#[cfg(feature = "threads")]
+pub(crate) mod feature_v2_blocks;
 
 // NEIGHSTEER (lane 2026-10-04): exact local refinement of the coarse-scale
 // v2 pooled features for steering — crate-private, default-on for Rev5.

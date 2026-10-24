@@ -2217,6 +2217,9 @@ pub struct V2Scratch {
     stream_pool: Vec<Vec<f32>>,
     #[cfg(feature = "threads")]
     rev5_jobs: Vec<Rev5StripJob>,
+    /// Recycled row-block buffers for [`crate::feature_v2_blocks`].
+    #[cfg(feature = "threads")]
+    block_pool: std::sync::Arc<crate::feature_v2_blocks::BlockPool>,
     #[cfg(all(test, feature = "threads"))]
     rev5_job_budget: Option<usize>,
 }
@@ -2235,6 +2238,8 @@ impl V2Scratch {
             stream_pool: Vec::new(),
             #[cfg(feature = "threads")]
             rev5_jobs: Vec::new(),
+            #[cfg(feature = "threads")]
+            block_pool: Default::default(),
             #[cfg(all(test, feature = "threads"))]
             rev5_job_budget: None,
         }

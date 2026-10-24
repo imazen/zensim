@@ -2014,6 +2014,42 @@ The changes, in order:
     unpaired). Eight threads on one CCD remain the fastest configuration: each in-flight job's planes take about
     10 MB, so sixteen jobs no longer fit CCD0's 96 MiB L3.
 
+19. **Rows produced in parallel tasks; jobs copy their own windows and release their scratch on finishing** (every
+    revision; plain SDR walks whose live scales all run the v2 blocks, at two or more threads). With the pipeline the
+    walk's thread was the critical path at eight threads: the fold timers put 2.9 ms of a 6.2 ms walk inside row
+    production (conversion and downscale fork-joins queued behind strip jobs in the pool), and a profile put 1.3 ms
+    of its samples in copying strip windows (about 57 MB per walk at 1507×2048). Now each 64-row chunk of each image
+    is a task (`feature_v2_blocks`) that converts its rows, on the producer's 64-row lattice with its row offset, and
+    computes every deeper scale's rows from them (each child row reads two parent rows of the same chunk); each
+    plane's rows are immutable blocks, strip jobs copy their windows out of the blocks, and the walk's thread only
+    schedules, adds `globaff` rows and merges (`rev5_block_walk`). Moving work off that thread alone gained little at
+    eight threads (paired against the pipeline: −0.60%, interval −3.88..+1.34, at 1507×2048; −8.67% at 1024²;
+    `rev7_pipeline_vs_blockwalk_noearly_t8`), because a finished job kept its 9.8 MB scratch until every earlier job
+    had merged, so one long scale-0 job stalled submissions. The merge reads only a job's small results except for
+    revision-5/6 blockiness, so every other job now returns its scratch the moment it finishes and the in-flight limit
+    counts scratch in use. A limit of sixteen at sixteen threads on eight cores then overflowed CCD0's 96 MiB L3:
+    against sixteen, twelve gave −13.18% / −5.30% there and −2.46% / −2.55% at 32 threads (intervals spanning zero),
+    eight −20.81% / −0.41% and +8.79% / +13.55% (`rev7_blockwalk_cap16_vs_cap12_*`, `_cap8_*`), so at most twelve
+    jobs hold scratch; production runs at most eight chunks ahead (−3.60% / −3.68% at sixteen threads, +0.94% /
+    −7.63% at 32; `rev7_blockwalk_ahead_*`). Bits: 110 of 110 dumps at revisions 5/6 and at revision 7; revision-7
+    dumps of B and Tga on three photos at 1, 2, 3, 4, 6, 8, 12, 16, 24 and 32 threads identical to one thread; a unit
+    test (`block_producer_windows_match_the_streaming_producer`) compares every strip window of the block producer
+    with the streaming producer's at revisions 5 and 7, with and without scale-0 chroma, over seven geometries, and
+    fails with the omitted-mode X and B outputs swapped. Paired, 10 rounds, against the pipeline (18), B at revision
+    7 (`rev7_pipeline_vs_blockwalk_*`):
+
+    | Threads (cpus) | Tier | 1507×2048 photo | 1024² plot |
+    |---|---|---|---|
+    | 2 (0–1) | v4x | 16.66 → 15.97 ms, −3.59% (−5.26..−1.08) | 5.966 → 5.628 ms, −5.50% |
+    | 4 (0–3) | v4x | 10.59 → 9.039 ms, −15.20% (−17.34..−11.92) | 3.679 → 3.615 ms, −2.06% (−12.22..+0.98) |
+    | 8 (0–7) | v4x | 6.386 → 5.261 ms, −17.60% (−20.73..−17.09) | 2.175 → 1.713 ms, −21.22% |
+    | 16 (0–7, 16–23) | v4x | 9.788 → 8.814 ms, −9.99% (−11.23..−8.46) | 2.325 → 2.183 ms, −6.83% |
+    | 32 (0–31) | v4x | 16.39 → 9.197 ms, −43.89% (−46.45..−29.61) | 4.994 → 2.965 ms, −39.94% |
+    | 8 (0–7) | v3 | 8.631 → 6.933 ms, −20.41% (−21.19..−18.92) | 3.022 → 2.416 ms, −20.04% |
+
+    One thread does not use this path. Sixteen threads on eight cores remain slower than eight: each running job
+    still writes and reads eleven planes of 148 rows (9.8 MB at 1507 columns), which is the next target.
+
 **Tried and not kept** (after 13): the three opsin cube roots interleaved step by step (bit-identical): −0.06% /
 −0.90% on v4x (`rev7_band_vs_cbrt3`, the 1507×2048 and 1024² cases), noise on v3; the conversion's inner loop runs at
 about two instructions per cycle, but interleaving did not raise it. The activity chain's `|src − mu1|` computed per

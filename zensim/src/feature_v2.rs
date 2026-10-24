@@ -4931,14 +4931,8 @@ impl Rev5StripJob {
         }
     }
 
-    fn gather<S: ImageSource, D: ImageSource>(
-        &mut self,
-        producer: &crate::feature_v2_stream::StripPlaneProducer<'_, S, D>,
-        info: crate::feature_v2_stream::StripInfo,
-        ch: usize,
-        borrow_source: bool,
-    ) {
-        use crate::feature_v2_stream::Side;
+    /// Take the strip and size the scratch for its window.
+    fn prepare(&mut self, info: crate::feature_v2_stream::StripInfo, ch: usize) {
         self.info = info;
         self.ch = ch;
         let n = info.plane_w * info.wide_h();
@@ -4950,6 +4944,18 @@ impl Rev5StripJob {
             self.scratch = rev5_job_scratch(n);
             self.sized_for = n;
         }
+    }
+
+    fn gather<S: ImageSource, D: ImageSource>(
+        &mut self,
+        producer: &crate::feature_v2_stream::StripPlaneProducer<'_, S, D>,
+        info: crate::feature_v2_stream::StripInfo,
+        ch: usize,
+        borrow_source: bool,
+    ) {
+        use crate::feature_v2_stream::Side;
+        self.prepare(info, ch);
+        let n = info.plane_w * info.wide_h();
         for (side, out) in [
             (Side::Source, &mut self.scratch.src_wide),
             (Side::Distorted, &mut self.scratch.dst_wide),
@@ -5234,9 +5240,6 @@ fn rev5_merge_job(
     {
         target[scale].extend_from_slice(&strips[scale]);
     }
-    let n = info.plane_w * info.wide_h();
-    let src = rev5_cached_window(reference, info, job.ch).unwrap_or(&job.scratch.src_wide[..n]);
-    let dst = &job.scratch.dst_wide[..n];
     if fold_v1 {
         // Preserve each canonical 32-row band addition, never merge a
         // pre-reduced strip sum into the running basic accumulator.
@@ -5251,6 +5254,11 @@ fn rev5_merge_job(
             sum_v.merge_from(v);
             sum_h.merge_from(h);
         } else {
+            // Revisions 4–6 keep one running sum: the strip's windows, here.
+            let n = info.plane_w * info.wide_h();
+            let src =
+                rev5_cached_window(reference, info, job.ch).unwrap_or(&job.scratch.src_wide[..n]);
+            let dst = &job.scratch.dst_wide[..n];
             blockiness_sparse_strip_wide(
                 src,
                 dst,
@@ -5374,6 +5382,368 @@ impl Rev5Pipeline {
             self.wait(totals);
         }
     }
+}
+
+/// A finished task of [`rev5_block_walk`]: a produced chunk (side, chunk
+/// index) or a strip job (sequence number).
+#[cfg(feature = "threads")]
+enum BlockWalkMsg {
+    Chunk(
+        usize,
+        usize,
+        std::thread::Result<crate::feature_v2_blocks::ChunkPlanes>,
+    ),
+    // Boxed: a job slot is about 21 KB, a chunk message about 120 bytes.
+    Job(usize, std::thread::Result<Box<Rev5StripJob>>),
+}
+
+/// The plain revision-5+ walk with parallel row production
+/// ([`crate::feature_v2_blocks`]): chunk tasks convert rows and downscale them
+/// into immutable blocks, strip jobs copy their own windows out of the blocks,
+/// and this thread only schedules, adds the `globaff` rows and merges finished
+/// jobs. Jobs are submitted, and merged, in the streaming walk's order: strips
+/// in ascending order within each scale and channels in order within a strip,
+/// so every accumulator receives the same partials in the same order and every
+/// value keeps its bits. Production runs at most a few chunks ahead of the
+/// rows the next strip needs.
+#[cfg(feature = "threads")]
+#[allow(clippy::too_many_arguments)]
+fn rev5_block_walk<S: ImageSource, D: ImageSource, const ALL_CHANNELS: bool>(
+    source: &S,
+    distorted: &D,
+    dims: &[(usize, usize)],
+    compute: &ComputeSet,
+    toggles: V2NewFeatureToggles,
+    fold_v1: bool,
+    limit: usize,
+    omit_scale0_xb: bool,
+    slots: &mut Vec<Rev5StripJob>,
+    pool: &std::sync::Arc<crate::feature_v2_blocks::BlockPool>,
+    totals: &mut [StreamChannelAccums; 3],
+    globaff: &mut [[crate::globaff::GlobAffAccum; 3]],
+    stop: Option<&dyn enough::Stop>,
+) {
+    use crate::feature_v2_blocks::{CHUNK_ROWS, RowBlock, gather_window, produce_chunk};
+    use crate::feature_v2_stream::StripInfo;
+    use std::collections::{BTreeMap, VecDeque};
+    use std::sync::Arc;
+
+    let n_scales = dims.len();
+    let h0 = dims[0].1;
+    let n_chunks = h0.div_ceil(CHUNK_ROWS);
+    let threads = rayon::current_num_threads().max(2);
+    // Production may run this many scale-0 rows past the rows the next
+    // strip needs, with at most this many chunk tasks (one per side) queued.
+    // At most twelve strip jobs hold scratch at once: each holds about
+    // 9.8 MB at 1507 columns, and sixteen at once overflowed a 96 MiB L3 at
+    // sixteen threads on eight cores (paired, B at revision 7, 1507×2048:
+    // twelve −13.2% and eight −20.8% against sixteen; at 32 threads on two
+    // CCDs twelve −2.5% and eight +8.8%). Eight chunks of look-ahead instead
+    // of one per thread: −3.6% at sixteen threads, −7.6% at 32 (1024²).
+    let ahead = threads.min(8) * CHUNK_ROWS;
+    let prod_limit = 2 * threads.min(8);
+    let limit = limit.min(12);
+    // The streaming producer's conversion revision.
+    let revision = toggles.formula_revision;
+    let globaff_on = !globaff.is_empty();
+    let compute = *compute;
+
+    rayon::in_place_scope(|scope| {
+        let (tx, rx) = std::sync::mpsc::channel::<BlockWalkMsg>();
+        // Retained blocks per side, channel and scale, in row order; rows
+        // `[.., hi[scale])` are produced on both sides.
+        let mut planes: [[Vec<VecDeque<Arc<RowBlock>>>; 3]; 2] = core::array::from_fn(|_| {
+            core::array::from_fn(|_| (0..n_scales).map(|_| VecDeque::new()).collect())
+        });
+        let mut hi = vec![0usize; n_scales];
+        let mut arrived: BTreeMap<usize, [Option<crate::feature_v2_blocks::ChunkPlanes>; 2]> =
+            BTreeMap::new();
+        let mut appended = 0usize;
+        let mut next_chunk = 0usize;
+        let mut prod_in_flight = 0usize;
+        let mut next_ks = vec![0usize; n_scales];
+        // The next channel to submit within each scale's current strip.
+        let mut next_ch = vec![0usize; n_scales];
+        let mut free = core::mem::take(slots);
+        // Strip scratch released by finished jobs whose merge does not read
+        // it (every job but revision-5/6 blockiness, which the merge sums
+        // from the job's windows): `limit` bounds the scratch in use, so a
+        // finished job never holds its planes while it waits to merge.
+        let mut free_scratch: Vec<(ScratchV2Strip, usize)> = Vec::new();
+        let (mut in_scratch, mut pending) = (0usize, 0usize);
+        let (mut next_seq, mut merge_seq) = (0usize, 0usize);
+        let mut done: BTreeMap<usize, Rev5StripJob> = BTreeMap::new();
+        let mut stopped = false;
+        let keeps_scratch = |scale: usize| {
+            let local = compute.at_scale(scale);
+            local.blockiness && !local.formula_revision.row_lanes()
+        };
+
+        let strip_at = |s: usize, ks: usize| {
+            let (plane_w, plane_h) = dims[s];
+            let y0 = ks * STRIP_ROWS;
+            (y0 < plane_h).then(|| StripInfo {
+                scale: s,
+                y0,
+                strip_h: STRIP_ROWS.min(plane_h - y0),
+                plane_w,
+                plane_h,
+            })
+        };
+        // The scale-0 rows that make a strip's window complete.
+        let need0 = |info: &StripInfo| {
+            ((info.y0 + info.strip_h + HALO_P).min(info.plane_h) << info.scale).min(h0)
+        };
+
+        loop {
+            if !stopped && stop.is_some_and(|token| token.check().is_err()) {
+                stopped = true;
+            }
+
+            // Production, a bounded distance past the next strip's rows.
+            if !stopped {
+                let want0 = (0..n_scales)
+                    .filter_map(|s| strip_at(s, next_ks[s]).map(|info| need0(&info)))
+                    .min()
+                    .unwrap_or(h0);
+                while next_chunk < n_chunks
+                    && prod_in_flight + 2 <= prod_limit
+                    && next_chunk * CHUNK_ROWS < want0 + ahead
+                {
+                    let k = next_chunk;
+                    for side in 0..2 {
+                        let tx = tx.clone();
+                        scope.spawn(move |_| {
+                            let run =
+                                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                    if side == 0 {
+                                        produce_chunk(
+                                            source,
+                                            k,
+                                            dims,
+                                            omit_scale0_xb,
+                                            revision,
+                                            pool,
+                                        )
+                                    } else {
+                                        produce_chunk(
+                                            distorted,
+                                            k,
+                                            dims,
+                                            omit_scale0_xb,
+                                            revision,
+                                            pool,
+                                        )
+                                    }
+                                }));
+                            // The walk holds the receiver until every task reports.
+                            let _ = tx.send(BlockWalkMsg::Chunk(side, k, run));
+                        });
+                    }
+                    next_chunk += 1;
+                    prod_in_flight += 2;
+                }
+            }
+
+            // Every ready strip, shallowest scale first, while job slots last.
+            'emit: for s in 0..n_scales {
+                if stopped {
+                    break;
+                }
+                while let Some(info) = strip_at(s, next_ks[s]) {
+                    if hi[s] < (info.y0 + info.strip_h + HALO_P).min(info.plane_h) {
+                        break;
+                    }
+                    if next_ch[s] == 0 {
+                        // `globaff`: every strip of every scale, all three
+                        // channels, in strip order, before the dead-scale skip.
+                        if globaff_on {
+                            let y1 = info.y0 + info.strip_h;
+                            for (ch, acc) in globaff[s].iter_mut().enumerate() {
+                                let [src, dst] = [&planes[0][ch][s], &planes[1][ch][s]];
+                                for (bs, bd) in src.iter().zip(dst) {
+                                    let (a, b) = (bs.r0().max(info.y0), bs.end().min(y1));
+                                    if a < b {
+                                        acc.add_rows(bs.rows(a, b), bd.rows(a, b), info.plane_w);
+                                    }
+                                }
+                            }
+                        }
+                        if compute.scale_dead(s) {
+                            #[cfg(test)]
+                            SKIPPED_SCALES.with_borrow_mut(|v| *v |= 1 << s);
+                            next_ch[s] = 3;
+                        }
+                    }
+                    let local = compute.at_scale(s);
+                    let strip_toggles = V2NewFeatureToggles {
+                        v1_pools: local.v1_pools,
+                        v1_only: !local.v2_blocks,
+                        gradient_features: local.gradient,
+                        blockiness: local.blockiness,
+                        ..toggles
+                    };
+                    while next_ch[s] < 3 {
+                        let ch = next_ch[s];
+                        if !ALL_CHANNELS && !compute.channel_active(s, ch) {
+                            next_ch[s] += 1;
+                            continue;
+                        }
+                        if in_scratch >= limit {
+                            break 'emit;
+                        }
+                        let lo = info.y0.saturating_sub(HALO_P);
+                        let top = (info.y0 + info.strip_h + HALO_P).min(info.plane_h);
+                        let window = |side: usize| -> Vec<Arc<RowBlock>> {
+                            planes[side][ch][s]
+                                .iter()
+                                .filter(|b| b.end() > lo && b.r0() < top)
+                                .cloned()
+                                .collect()
+                        };
+                        let (src_blocks, dst_blocks) = (window(0), window(1));
+                        let mut job = free.pop().unwrap_or_else(|| Rev5StripJob::new(info, ch));
+                        if job.sized_for == 0
+                            && let Some((scratch, sized_for)) = free_scratch.pop()
+                        {
+                            job.scratch = scratch;
+                            job.sized_for = sized_for;
+                        }
+                        job.prepare(info, ch);
+                        let (seq, tx) = (next_seq, tx.clone());
+                        scope.spawn(move |_| {
+                            let run =
+                                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                    let n = info.plane_w * info.wide_h();
+                                    gather_window(
+                                        &src_blocks,
+                                        &info,
+                                        &mut job.scratch.src_wide[..n],
+                                    );
+                                    gather_window(
+                                        &dst_blocks,
+                                        &info,
+                                        &mut job.scratch.dst_wide[..n],
+                                    );
+                                    drop((src_blocks, dst_blocks));
+                                    rev5_execute_job(
+                                        &mut job,
+                                        None,
+                                        &compute,
+                                        strip_toggles,
+                                        fold_v1,
+                                        false,
+                                        None,
+                                    );
+                                }));
+                            let _ = tx.send(BlockWalkMsg::Job(seq, run.map(|()| Box::new(job))));
+                        });
+                        next_seq += 1;
+                        in_scratch += 1;
+                        pending += 1;
+                        next_ch[s] += 1;
+                    }
+                    next_ks[s] += 1;
+                    next_ch[s] = 0;
+                    // Retire the blocks no later strip of this scale reads.
+                    let floor = strip_at(s, next_ks[s])
+                        .map_or(usize::MAX, |next| next.y0.saturating_sub(HALO_P));
+                    for side in &mut planes {
+                        for ch in side.iter_mut() {
+                            while ch[s].front().is_some_and(|b| b.end() <= floor) {
+                                ch[s].pop_front();
+                            }
+                        }
+                    }
+                }
+            }
+
+            let emitted = (0..n_scales).all(|s| strip_at(s, next_ks[s]).is_none());
+            if (emitted || stopped) && pending == 0 && prod_in_flight == 0 {
+                break;
+            }
+
+            // Wait for at least one finished task, then take every other
+            // finished one. A rayon worker waiting here runs pending pool work.
+            let mut msg = None;
+            while msg.is_none() {
+                match rx.try_recv() {
+                    Ok(m) => msg = Some(m),
+                    Err(std::sync::mpsc::TryRecvError::Empty) => match rayon::yield_now() {
+                        Some(rayon::Yield::Executed) => {}
+                        Some(rayon::Yield::Idle) => std::thread::yield_now(),
+                        None => msg = Some(rx.recv().expect("block walk channel")),
+                    },
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        unreachable!("the walk holds a sender")
+                    }
+                }
+            }
+            while let Some(m) = msg.take() {
+                match m {
+                    BlockWalkMsg::Chunk(side, k, run) => {
+                        prod_in_flight -= 1;
+                        let chunk =
+                            run.unwrap_or_else(|payload| std::panic::resume_unwind(payload));
+                        arrived.entry(k).or_default()[side] = Some(chunk);
+                        // Append whole chunks (both sides) in order.
+                        while let Some(both) = arrived.get(&appended)
+                            && both.iter().all(Option::is_some)
+                        {
+                            let both = arrived.remove(&appended).expect("present");
+                            for (side, chunk) in both.into_iter().enumerate() {
+                                for (ch, scales) in chunk.expect("present").into_iter().enumerate()
+                                {
+                                    for (s, block) in scales.into_iter().enumerate() {
+                                        if let Some(block) = block {
+                                            if ch == 1 {
+                                                hi[s] = hi[s].max(block.end());
+                                            }
+                                            planes[side][ch][s].push_back(block);
+                                        }
+                                    }
+                                }
+                            }
+                            appended += 1;
+                        }
+                    }
+                    BlockWalkMsg::Job(seq, run) => {
+                        let mut job =
+                            *run.unwrap_or_else(|payload| std::panic::resume_unwind(payload));
+                        if !keeps_scratch(job.info.scale) {
+                            let scratch =
+                                core::mem::replace(&mut job.scratch, ScratchV2Strip::new(0));
+                            free_scratch.push((scratch, core::mem::take(&mut job.sized_for)));
+                            in_scratch -= 1;
+                        }
+                        done.insert(seq, job);
+                        while let Some(job) = done.remove(&merge_seq) {
+                            rev5_merge_job(&job, &compute, fold_v1, totals, None);
+                            if keeps_scratch(job.info.scale) {
+                                in_scratch -= 1;
+                            }
+                            merge_seq += 1;
+                            pending -= 1;
+                            free.push(job);
+                        }
+                    }
+                }
+                msg = rx.try_recv().ok();
+            }
+        }
+        // Reattach the released scratch so the next walk's first `limit`
+        // slots keep their planes.
+        free.sort_by_key(|job| core::cmp::Reverse(job.sized_for));
+        for job in free.iter_mut().filter(|job| job.sized_for == 0) {
+            let Some((scratch, sized_for)) = free_scratch.pop() else {
+                break;
+            };
+            job.scratch = scratch;
+            job.sized_for = sized_for;
+        }
+        free.sort_by_key(|job| core::cmp::Reverse(job.sized_for));
+        *slots = free;
+    });
 }
 
 #[cfg(feature = "threads")]
@@ -8421,6 +8791,8 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
         stream_pool,
         #[cfg(feature = "threads")]
         rev5_jobs,
+        #[cfg(feature = "threads")]
+        block_pool,
         ..
     } = scratch;
 
@@ -8497,15 +8869,52 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
 
     #[cfg(feature = "threads")]
     let mut queued = 0;
-    // Plain walks (nothing retained, no cached reference) run their strip
-    // jobs through the pipeline instead of batches: same merge order, no
-    // barrier between batches, production overlapped with the jobs.
+    // Plain SDR walks whose every live scale runs the v2 blocks produce their
+    // rows in parallel chunk tasks, and their strip jobs copy their own
+    // windows (`rev5_block_walk`); the streaming producer above is unused.
     #[cfg(feature = "threads")]
-    let mut pipeline = (batch_limit > 0 && retention.is_none() && ref_planes.is_none())
-        .then(|| Rev5Pipeline::new(compute, fold_v1, batch_limit, core::mem::take(rev5_jobs)));
+    let block_walk = {
+        let omit_xb = !compute.full_res_xb && !complete_distorted0 && !globaff_on;
+        batch_limit > 0
+            && retention.is_none()
+            && ref_planes.is_none()
+            && compute.sampling.is_none()
+            && matches!(front_end, crate::feature_v2_stream::FrontEnd::Sdr)
+            && !(ALL_CHANNELS && omit_xb)
+            && (0..n_scales).all(|s| compute.scale_dead(s) || compute.at_scale(s).v2_blocks)
+    };
+    // Other plain walks (nothing retained, no cached reference) run their
+    // strip jobs through the pipeline instead of batches: same merge order,
+    // no barrier between batches, production overlapped with the jobs.
+    #[cfg(feature = "threads")]
+    let mut pipeline =
+        (batch_limit > 0 && retention.is_none() && ref_planes.is_none() && !block_walk)
+            .then(|| Rev5Pipeline::new(compute, fold_v1, batch_limit, core::mem::take(rev5_jobs)));
 
     let __t_walk = crate::fold_timing::start();
+    #[cfg(feature = "threads")]
+    if block_walk {
+        rev5_block_walk::<S, D, ALL_CHANNELS>(
+            source,
+            distorted,
+            &dims,
+            &compute,
+            toggles,
+            fold_v1,
+            batch_limit,
+            !compute.full_res_xb && !complete_distorted0 && !globaff_on,
+            rev5_jobs,
+            block_pool,
+            &mut accums,
+            &mut globaff,
+            stop,
+        );
+    }
     loop {
+        #[cfg(feature = "threads")]
+        if block_walk {
+            break;
+        }
         if stop.is_some_and(|token| token.check().is_err()) {
             break;
         }

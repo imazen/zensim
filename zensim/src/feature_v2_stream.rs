@@ -1636,6 +1636,94 @@ mod tests {
     /// materialized planes; interior strips' zero-copy windows equal the
     /// filled ones; every kernel strip of every scale is emitted exactly
     /// once, ascending per scale; capacity budget holds.
+    /// The block producer (`crate::feature_v2_blocks`, the parallel walk's
+    /// rows) against this producer: every strip window of every scale, both
+    /// sides and every stored channel, bit for bit, at revisions 5 and 7 with
+    /// and without scale-0 chroma, over odd, tall, short and non-multiple-of-64
+    /// heights.
+    #[cfg(feature = "threads")]
+    #[test]
+    fn block_producer_windows_match_the_streaming_producer() {
+        use crate::feature_defs::FormulaRevision;
+        use crate::feature_v2_blocks::{BlockPool, CHUNK_ROWS, gather_window, produce_chunk};
+        use std::sync::Arc;
+        let cases = [
+            (96usize, 64usize),
+            (127, 93),
+            (208, 144),
+            (200, 150),
+            (96, 1030),
+            (320, 517),
+            (77, 300),
+        ];
+        for revision in [FormulaRevision::Rev5, FormulaRevision::Rev7] {
+            for omit in [false, true] {
+                for (w, h) in cases {
+                    let src = textured_image(w, h, 11);
+                    let dst = distort(&src);
+                    let s_img = RgbSlice::new(&src, w, h);
+                    let d_img = RgbSlice::new(&dst, w, h);
+                    let dims: Vec<(usize, usize)> =
+                        (0..crate::NUM_SCALES).map(|s| (w >> s, h >> s)).collect();
+                    let pool = Arc::new(BlockPool::default());
+                    let chunks: Vec<[crate::feature_v2_blocks::ChunkPlanes; 2]> = (0..h
+                        .div_ceil(CHUNK_ROWS))
+                        .map(|k| {
+                            [
+                                produce_chunk(&s_img, k, &dims, omit, revision, &pool),
+                                produce_chunk(&d_img, k, &dims, omit, revision, &pool),
+                            ]
+                        })
+                        .collect();
+                    let mut spool = Vec::new();
+                    let mut prod = StripPlaneProducer::new_with_ref_feed(
+                        &s_img,
+                        &d_img,
+                        false,
+                        &mut spool,
+                        FrontEnd::Sdr,
+                        None,
+                        None,
+                        revision,
+                        omit,
+                    );
+                    let (mut wide, mut wide_blk) = (Vec::new(), Vec::new());
+                    let mut strips = 0;
+                    while let Some(info) = prod.next_strip() {
+                        strips += 1;
+                        let n_wide = info.plane_w * info.wide_h();
+                        wide.resize(n_wide, 0.0);
+                        wide_blk.resize(n_wide, 0.0);
+                        for (side, si) in [(Side::Source, 0), (Side::Distorted, 1)] {
+                            for ch in 0..3 {
+                                if omit && info.scale == 0 && ch != 1 {
+                                    continue;
+                                }
+                                let blocks: Vec<_> = chunks
+                                    .iter()
+                                    .filter_map(|c| c[si][ch][info.scale].clone())
+                                    .collect();
+                                gather_window(&blocks, &info, &mut wide_blk);
+                                prod.fill_wide(side, ch, &info, &mut wide);
+                                for i in 0..n_wide {
+                                    assert_eq!(
+                                        wide_blk[i].to_bits(),
+                                        wide[i].to_bits(),
+                                        "{revision:?} omit={omit} {w}x{h} scale {} y0={} \
+                                         side {side:?} ch {ch} idx {i}",
+                                        info.scale,
+                                        info.y0
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    assert!(strips > 0);
+                }
+            }
+        }
+    }
+
     #[test]
     fn producer_windows_byte_equal_materialized() {
         // Odd dims, sub-one-strip, multi-strip, tall-thin, and >2-strip
