@@ -1,6 +1,8 @@
 """Formula revision 7 candidates: score every pair of `pairs_scoring.tsv` with the default scorer and the
-stable-forms scorer (`score_pair_with_bake` built with `--cfg zensim_stable_forms`) for each bake, and report the score
-differences. Exploration record: benchmarks/byconstruction_2026-10-22.md ("Formula revision 7").
+stable-forms scorer for each bake, and report the score differences. Exploration record:
+benchmarks/byconstruction_2026-10-22.md ("Formula revision 7"). The 2026-10-24 run built the second scorer with
+`--cfg zensim_stable_forms`, since removed: revision 7 now selects the forms, so the two binaries today are one build
+scoring a revision-6 and a revision-7 stamp of the same bake (`bake_stamp_revision`).
 
   python3 rev7_score_compare.py DIR NAME=BAKE [NAME=BAKE ...]
 

@@ -2,14 +2,14 @@
 # Before/after bit identity for speed work: the score and every emitted feature's bits for B (revision 5) and Tga
 # (revision 6) on synthetic odd geometries and five gb82 photos, at every x86-64 tier with one thread, plus v4x with
 # eight. Compare two output dirs with perf_bits_compare.py. Record: benchmarks/byconstruction_2026-10-22.md.
-# Usage: perf_bits.sh BIN OUT_DIR
+# Usage: perf_bits.sh BIN OUT_DIR   (B_BAKE / TGA_BAKE override the two bakes, e.g. revision-7 stamps)
 set -euo pipefail
 BIN=$1
 OUT=$2
 mkdir -p "$OUT"
 cd ~/work/zen/zensim--byconstruction
-B=$PWD/zensim/weights/b_sdr_diff_frag_820_rev5_2026-10-19.bin
-TGA=$HOME/tmp/byc/parity/tga_full_rev6.bin
+B=${B_BAKE:-$PWD/zensim/weights/b_sdr_diff_frag_820_rev5_2026-10-19.bin}
+TGA=${TGA_BAKE:-$HOME/tmp/byc/parity/tga_full_rev6.bin}
 G=$HOME/.cache/codec-corpus/v1/gb82
 unset ZENSIM_FORMULA_REV ZENSIM_RING_FORM
 run() { # name bake tier threads tag args...

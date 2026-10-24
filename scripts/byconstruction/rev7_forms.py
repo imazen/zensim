@@ -1,12 +1,14 @@
-"""Formula revision 7 candidates: how far each feature of the current arithmetic and of the cancellation-free forms
-(`--cfg zensim_stable_forms`) sits from the exact f64 reference, on near-identical pairs.
+"""Formula revision 7: how far each feature of revision 6's arithmetic ("current") and of revision 7's ("stable")
+sits from the exact f64 reference, on near-identical pairs.
 
 Exploration record: benchmarks/byconstruction_2026-10-22.md ("Formula revision 7"). Inputs are the dumps of
-`tier_audit_features` (`ZENSIM_FEATCANON_DUMP`, one tier): `prod_<tier>_<pair>.f64bin` from the default build and
-from the stable-forms build, and `exact_<tier>_<pair>.f64bin` (`ZENSIM_FEATCANON=exact`, the f64 oracle bodies),
-plus `names_<pair>.tsv`.
+`tier_audit_features` (`ZENSIM_FEATCANON_DUMP`, one tier): `prod_<tier>_<pair>.f64bin` at each revision
+(`ZENSIM_FORMULA_REV`), and `exact_<tier>_<pair>.f64bin` (`ZENSIM_FEATCANON=exact`, the f64 oracle bodies, built with
+`--features featcanon-oracle`), plus `names_<pair>.tsv`. `--exact-stable` gives the second arm its own exact dumps
+(revision 7's); without it both arms are measured against `--exact`. The first measurement (2026-10-24, before
+revision 7 existed) compared two builds of one revision, the second with the forms behind a since-removed cfg.
 
-  python3 rev7_forms.py --current DIR --stable DIR --exact DIR [--tier v4x] [--out OUT.json]
+  python3 rev7_forms.py --current DIR --stable DIR --exact DIR [--exact-stable DIR] [--tier v4x] [--out OUT.json]
 
 Per feature: the median over pairs of |x - exact| / max(|exact|, floor), floor = 1e-12; per family: the worst
 feature's median and the share of the family's features whose median error exceeds 1e-3.
@@ -30,26 +32,30 @@ def main() -> int:
     ap.add_argument("--current", required=True)
     ap.add_argument("--stable", required=True)
     ap.add_argument("--exact", required=True)
+    ap.add_argument("--exact-stable", help="exact dumps for the --stable arm (default: --exact)")
     ap.add_argument("--tier", default="v4x")
     ap.add_argument("--out")
     a = ap.parse_args()
     cur, sta, exa = Path(a.current), Path(a.stable), Path(a.exact)
+    exs = Path(a.exact_stable) if a.exact_stable else exa
     pairs = sorted(p.name[len("names_"):-len(".tsv")] for p in cur.glob("names_*.tsv"))
     names = None
     rel_c, rel_s = defaultdict(list), defaultdict(list)
     for pair in pairs:
         if names is None:
             names = [line.split("\t") for line in (cur / f"names_{pair}.tsv").read_text().splitlines()]
-        c, s, e = load(cur, "prod", a.tier, pair), load(sta, "prod", a.tier, pair), load(exa, "exact", a.tier, pair)
-        if c is None or s is None or e is None:
+        c, s = load(cur, "prod", a.tier, pair), load(sta, "prod", a.tier, pair)
+        e, es = load(exa, "exact", a.tier, pair), load(exs, "exact", a.tier, pair)
+        if c is None or s is None or e is None or es is None:
             continue
-        n = min(len(c), len(s), len(e))
+        n = min(len(c), len(s), len(e), len(es))
         floor = np.maximum(np.abs(e[:n]), 1e-12)
+        floor_s = np.maximum(np.abs(es[:n]), 1e-12)
         for i in range(n):
-            if not (np.isfinite(e[i]) and np.isfinite(c[i]) and np.isfinite(s[i])):
+            if not (np.isfinite(e[i]) and np.isfinite(es[i]) and np.isfinite(c[i]) and np.isfinite(s[i])):
                 continue
             rel_c[i].append(abs(c[i] - e[i]) / floor[i])
-            rel_s[i].append(abs(s[i] - e[i]) / floor[i])
+            rel_s[i].append(abs(s[i] - es[i]) / floor_s[i])
     fam = defaultdict(list)
     per_feature = []
     for i in sorted(rel_c):
@@ -59,6 +65,13 @@ def main() -> int:
         per_feature.append({"id": fid, "family": family, "name": name, "current": mc, "stable": ms,
                             "current_p90": float(np.quantile(rel_c[i], 0.9)), "stable_p90": float(np.quantile(rel_s[i], 0.9))})
     print(f"{len(pairs)} pairs, {len(per_feature)} features")
+    allc = np.array([f["current"] for f in per_feature])
+    alls = np.array([f["stable"] for f in per_feature])
+    for label, v in (("current", allc), ("stable", alls)):
+        print(f"{label:8s} per-feature median error: p50 {np.quantile(v, 0.5):.2e} p90 {np.quantile(v, 0.9):.2e} "
+              f"p99 {np.quantile(v, 0.99):.2e} max {v.max():.2e}")
+    print(f"stable better on {int((alls < allc).sum())}, worse on {int((alls > allc).sum())}, "
+          f"tied on {int((alls == allc).sum())} features")
     print(f"{'family':24s} {'n':>5s} {'worst cur':>11s} {'worst stb':>11s} {'cur>1e-3':>9s} {'stb>1e-3':>9s}  worst feature (current)")
     summary = {}
     for family, rows in sorted(fam.items()):
