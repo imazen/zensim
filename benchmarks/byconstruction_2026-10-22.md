@@ -1994,9 +1994,25 @@ The changes, in order:
     at revision 7, v4x: 1.40× at two threads, 1.85× at four). Batching now starts at two threads, one job per thread
     and at least four per batch; the merge order is unchanged, so every value keeps its bits (110 of 110 dumps at
     revisions 5/6 and 7; revision-7 dumps at 2, 3, 4 and 6 threads identical to one thread). Unpaired medians:
-    2 threads 21.2 → 18.7 ms, 3 → 17.9 → 15.1, 4 → 16.2 → 11.4, 6 → 14.9 → 9.4, 1 and 8 unchanged. Paired
-    (`rev7_blockpar_vs_batch2_t2`, `_t4`): two threads −13.01% / −9.89% (1507×2048 / 1024²), four −30.15% /
-    −28.05%. Batches of twice the thread count were slower at eight threads (7.8 → 10.1 ms) and at sixteen.
+    2 threads 21.2 → 18.7 ms, 3 → 17.9 → 15.1, 4 → 16.2 → 11.4, 6 → 14.9 → 9.4, 1 and 8 unchanged. Paired, 8 rounds
+    (`rev7_blockpar_vs_batch2_t2`, `_t4`; the commit message of `8b3c06ed` says ten): two threads −13.01% / −9.89%
+    (1507×2048 / 1024²), four −30.15% / −28.05%. Batches of twice the thread count were slower at eight threads
+    (7.8 → 10.1 ms) and at sixteen.
+
+18. **Strip jobs flow through a pipeline** (every revision): the batch runner gathered a batch of strip jobs on the
+    walk's thread, ran the batch in parallel and merged it, so the workers idled while the walk's thread gathered the
+    next batch's windows and converted its rows, and each batch waited for its slowest job. Walks that retain nothing
+    and read no cached reference now spawn each job as soon as it is gathered (`Rev5Pipeline`); finished jobs come
+    back over a channel and merge in the producer's order, and the producer waits only when the in-flight limit (the
+    batch size: one job per thread, 4 to 16) is reached. The merge order is the batch runner's, so every value keeps
+    its bits (110 of 110 dumps at revisions 5/6 and 7; revision-7 dumps at 2, 4, 8 and 16 threads identical to one
+    thread). Paired, 8 rounds, B at revision 7, v4x (`rev7_batch2_vs_pipeline_t8`, `_t4`): eight threads (cpus 0–7)
+    7.960 → 6.387 ms, −20.31% (−21.95..−18.66) at 1507×2048 and 2.548 → 2.188 ms, −14.22% at 1024²; four threads
+    (cpus 0–3) −8.06% / −7.36%. Unpaired medians of 20 iterations at 1507×2048: sixteen threads on CCD0's cores and
+    their SMT siblings (cpus 0–7, 16–23) 11.36 → 9.69 ms, sixteen over both CCDs (cpus 0–15) 18.17 → 11.86 ms,
+    32 threads 15.67 → 11.03 ms. Lower in-flight limits were slower at eight threads (4: 9.10 ms, 6: 7.53, 8: 6.33,
+    unpaired). Eight threads on one CCD remain the fastest configuration: each in-flight job's planes take about
+    10 MB, so sixteen jobs no longer fit CCD0's 96 MiB L3.
 
 **Tried and not kept** (after 13): the three opsin cube roots interleaved step by step (bit-identical): −0.06% /
 −0.90% on v4x (`rev7_band_vs_cbrt3`, the 1507×2048 and 1024² cases), noise on v3; the conversion's inner loop runs at

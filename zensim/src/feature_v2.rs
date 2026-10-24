@@ -5071,6 +5071,311 @@ fn rev5_job_blur(
     crate::fold_timing::stop(start, crate::fold_timing::Phase::PhaseAV2Planes, info.scale);
 }
 
+/// One queued strip job's work: phase A into its own planes, phase B into its
+/// own partials (and its retained rows when `output` is given). Runs on any
+/// thread; [`rev5_merge_job`] adds the partials to the walk's totals.
+#[cfg(feature = "threads")]
+#[allow(clippy::too_many_arguments)]
+fn rev5_execute_job(
+    job: &mut Rev5StripJob,
+    mut output: Option<RetainedRows<'_>>,
+    compute: &ComputeSet,
+    toggles: V2NewFeatureToggles,
+    fold_v1: bool,
+    retain: bool,
+    reference: Option<&[crate::streaming::XybPyramidLevel]>,
+) {
+    let busy = crate::fold_timing::start();
+    let info = &job.info;
+    let scale = info.scale;
+    let local = compute.at_scale(scale);
+    let toggles = V2NewFeatureToggles {
+        v1_pools: local.v1_pools,
+        v1_only: false,
+        gradient_features: local.gradient,
+        // This running sum must be accumulated in original pixel order.
+        blockiness: false,
+        ..toggles
+    };
+    job.result.dense[scale] = DenseAccum::default();
+    job.result.grad[scale] = GradientAccum::default();
+    if retain && (1..=3).contains(&scale) {
+        let strips = job
+            .result
+            .retained_strips
+            .get_or_insert_with(|| (0..crate::NUM_SCALES).map(|_| Vec::new()).collect());
+        strips[scale].clear();
+        if strips[scale].capacity() == 0 {
+            strips[scale].reserve_exact(1);
+        }
+    } else if !retain {
+        job.result.retained_strips = None;
+    }
+    let cached_source = rev5_cached_window(reference, info, job.ch);
+    // Revision 7: the strip's blockiness lane partials, here in the
+    // parallel job (both branches below); the merge after the batch adds
+    // them in strip order.
+    if local.blockiness && local.formula_revision.row_lanes() {
+        let n = info.plane_w * info.wide_h();
+        let src = cached_source.unwrap_or(&job.scratch.src_wide[..n]);
+        let mode = crate::featcanon::mode(local.formula_revision);
+        let (v, h) = &mut job.result.block[scale];
+        *v = crate::featcanon::SumVar::f64_elems(mode);
+        *h = crate::featcanon::SumVar::f64_elems(mode);
+        blockiness_sparse_strip_wide(
+            src,
+            &job.scratch.dst_wide[..n],
+            info.plane_w,
+            info.y0,
+            info.strip_h,
+            local.formula_revision,
+            v,
+            h,
+        );
+    }
+    if let Some(output) = output.as_mut()
+        && retained_core_admits(&local)
+    {
+        rev5_blur_into_retained(info, &mut job.scratch, [cached_source, None], output);
+        let n = info.plane_w * info.wide_h();
+        let src = cached_source.unwrap_or(&job.scratch.src_wide[..n]);
+        rev5_retained_phase_b(
+            info,
+            [src, &job.scratch.dst_wide[..n]],
+            output.moment_rows(),
+            RetainedCoreWork {
+                toggles,
+                fold_v1,
+                free: local.free_work(job.ch, scale),
+            },
+            &mut job.result,
+            &mut job.bands,
+        );
+        crate::fold_timing::stop(busy, crate::fold_timing::Phase::BBusy, scale);
+        return;
+    }
+    rev5_job_blur(
+        info,
+        &mut job.scratch,
+        compute.formula_revision,
+        cached_source,
+    );
+    let n = info.plane_w * info.wide_h();
+    let src = cached_source.unwrap_or(&job.scratch.src_wide[..n]);
+    if let Some(output) = &mut output {
+        output.copy(info, &job.scratch, src, &job.scratch.dst_wide[..n], false);
+    }
+    stream_phase_b(
+        &job.scratch,
+        src,
+        &job.scratch.dst_wide[..n],
+        info,
+        toggles,
+        false,
+        true,
+        false,
+        false,
+        false,
+        &[],
+        None,
+        None,
+        None,
+        local.free_work(job.ch, scale),
+        local.rev4_work(scale, job.ch, None, None),
+        &mut job.result,
+    );
+    if fold_v1 {
+        let raw = [src, &job.scratch.dst_wide[..n]];
+        let vertical = FoldHSource::Vertical([
+            &job.scratch.mu1[..n],
+            &job.scratch.mu2[..n],
+            &job.scratch.ssq[..n],
+            &job.scratch.s12[..n],
+        ]);
+        let mut b0 = info.y0;
+        for band in &mut job.bands[..info.strip_h.div_ceil(V1_BAND_ROWS)] {
+            *band = V1BasicSums::at_revision(FormulaRevision::Rev5);
+            b0 = fold_v1_one_band(
+                b0,
+                info.plane_w,
+                info.y0 + info.strip_h,
+                info.y0,
+                HALO_P,
+                info.plane_h,
+                vertical,
+                raw,
+                band,
+                None,
+                local.free_work(job.ch, scale),
+            );
+        }
+    }
+    crate::fold_timing::stop(busy, crate::fold_timing::Phase::BBusy, scale);
+}
+
+/// Add one executed strip job's partials to the walk's totals. Jobs merge
+/// once each, in the producer's order; do not reorder or tree-reduce them.
+#[cfg(feature = "threads")]
+fn rev5_merge_job(
+    job: &Rev5StripJob,
+    compute: &ComputeSet,
+    fold_v1: bool,
+    totals: &mut [StreamChannelAccums; 3],
+    reference: Option<&[crate::streaming::XybPyramidLevel]>,
+) {
+    let info = &job.info;
+    let scale = info.scale;
+    let local = compute.at_scale(scale);
+    let total = &mut totals[job.ch];
+    total.dense[scale].accumulate(&job.result.dense[scale]);
+    total.grad[scale].accumulate(&job.result.grad[scale]);
+    if let Some(target) = &mut total.retained_strips
+        && let Some(strips) = &job.result.retained_strips
+    {
+        target[scale].extend_from_slice(&strips[scale]);
+    }
+    let n = info.plane_w * info.wide_h();
+    let src = rev5_cached_window(reference, info, job.ch).unwrap_or(&job.scratch.src_wide[..n]);
+    let dst = &job.scratch.dst_wide[..n];
+    if fold_v1 {
+        // Preserve each canonical 32-row band addition, never merge a
+        // pre-reduced strip sum into the running basic accumulator.
+        for band in &job.bands[..info.strip_h.div_ceil(V1_BAND_ROWS)] {
+            total.v1[scale].merge(band);
+        }
+    }
+    if local.blockiness {
+        let (sum_v, sum_h) = &mut total.block[scale];
+        if local.formula_revision.row_lanes() {
+            let (v, h) = &job.result.block[scale];
+            sum_v.merge_from(v);
+            sum_h.merge_from(h);
+        } else {
+            blockiness_sparse_strip_wide(
+                src,
+                dst,
+                info.plane_w,
+                info.y0,
+                info.strip_h,
+                local.formula_revision,
+                sum_v,
+                sum_h,
+            );
+        }
+    }
+}
+
+/// Queued strip jobs without batch barriers, for walks that retain nothing
+/// and read no cached reference: each gathered job is spawned on the rayon
+/// pool at once, finished jobs come back over a channel and merge in the
+/// producer's order ([`rev5_merge_job`], the batch runner's merge), and the
+/// producer waits only when `limit` jobs are in flight. The merge order is the
+/// batch runner's, so every value has the batch runner's bits; the producer
+/// gathers and converts while the pool computes.
+#[cfg(feature = "threads")]
+struct Rev5Pipeline {
+    compute: ComputeSet,
+    fold_v1: bool,
+    limit: usize,
+    free: Vec<Rev5StripJob>,
+    in_flight: usize,
+    next_seq: usize,
+    merge_seq: usize,
+    done: std::collections::BTreeMap<usize, Rev5StripJob>,
+    tx: std::sync::mpsc::Sender<(usize, std::thread::Result<Rev5StripJob>)>,
+    rx: std::sync::mpsc::Receiver<(usize, std::thread::Result<Rev5StripJob>)>,
+}
+
+#[cfg(feature = "threads")]
+impl Rev5Pipeline {
+    fn new(compute: ComputeSet, fold_v1: bool, limit: usize, free: Vec<Rev5StripJob>) -> Self {
+        let (tx, rx) = std::sync::mpsc::channel();
+        Self {
+            compute,
+            fold_v1,
+            limit,
+            free,
+            in_flight: 0,
+            next_seq: 0,
+            merge_seq: 0,
+            done: std::collections::BTreeMap::new(),
+            tx,
+            rx,
+        }
+    }
+
+    /// A job slot for the next strip, merging finished jobs (oldest first)
+    /// until fewer than `limit` are in flight.
+    fn slot(
+        &mut self,
+        info: crate::feature_v2_stream::StripInfo,
+        ch: usize,
+        totals: &mut [StreamChannelAccums; 3],
+    ) -> Rev5StripJob {
+        while self.in_flight >= self.limit {
+            self.wait(totals);
+        }
+        self.free
+            .pop()
+            .unwrap_or_else(|| Rev5StripJob::new(info, ch))
+    }
+
+    /// Spawn a gathered job.
+    fn submit(&mut self, mut job: Rev5StripJob, toggles: V2NewFeatureToggles) {
+        let (seq, tx, compute, fold_v1) =
+            (self.next_seq, self.tx.clone(), self.compute, self.fold_v1);
+        self.next_seq += 1;
+        self.in_flight += 1;
+        rayon::spawn(move || {
+            let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                rev5_execute_job(&mut job, None, &compute, toggles, fold_v1, false, None);
+            }));
+            // The walk owns the receiver until every spawned job reports.
+            let _ = tx.send((seq, run.map(|()| job)));
+        });
+    }
+
+    /// Take at least one finished job and merge every job that is next in
+    /// order. A rayon worker waiting here runs pending pool work instead of
+    /// blocking, so a walk called from inside the pool cannot starve its own
+    /// jobs.
+    fn wait(&mut self, totals: &mut [StreamChannelAccums; 3]) {
+        let mut got = None;
+        while got.is_none() {
+            match self.rx.try_recv() {
+                Ok(m) => got = Some(m),
+                Err(std::sync::mpsc::TryRecvError::Empty) => match rayon::yield_now() {
+                    Some(rayon::Yield::Executed) => {}
+                    Some(rayon::Yield::Idle) => std::thread::yield_now(),
+                    None => got = Some(self.rx.recv().expect("strip job channel")),
+                },
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    unreachable!("the pipeline holds a sender")
+                }
+            }
+        }
+        let mut next = got;
+        while let Some((seq, run)) = next.take() {
+            let job = run.unwrap_or_else(|payload| std::panic::resume_unwind(payload));
+            self.done.insert(seq, job);
+            next = self.rx.try_recv().ok();
+        }
+        while let Some(job) = self.done.remove(&self.merge_seq) {
+            rev5_merge_job(&job, &self.compute, self.fold_v1, totals, None);
+            self.merge_seq += 1;
+            self.in_flight -= 1;
+            self.free.push(job);
+        }
+    }
+
+    /// Finish and merge every job in flight; returns the job slots.
+    fn drain(&mut self, totals: &mut [StreamChannelAccums; 3]) {
+        while self.in_flight > 0 {
+            self.wait(totals);
+        }
+    }
+}
+
 #[cfg(feature = "threads")]
 fn rev5_run_jobs(
     jobs: &mut [Rev5StripJob],
@@ -5085,133 +5390,8 @@ fn rev5_run_jobs(
     let wall = crate::fold_timing::start();
     let retain = retention.is_some();
     let outputs = retention.map(|r| r.job_sinks(jobs));
-    let execute = |job: &mut Rev5StripJob, mut output: Option<RetainedRows<'_>>| {
-        let busy = crate::fold_timing::start();
-        let info = &job.info;
-        let scale = info.scale;
-        let local = compute.at_scale(scale);
-        let toggles = V2NewFeatureToggles {
-            v1_pools: local.v1_pools,
-            v1_only: false,
-            gradient_features: local.gradient,
-            // This running sum must be accumulated in original pixel order.
-            blockiness: false,
-            ..toggles
-        };
-        job.result.dense[scale] = DenseAccum::default();
-        job.result.grad[scale] = GradientAccum::default();
-        if retain && (1..=3).contains(&scale) {
-            let strips = job
-                .result
-                .retained_strips
-                .get_or_insert_with(|| (0..crate::NUM_SCALES).map(|_| Vec::new()).collect());
-            strips[scale].clear();
-            if strips[scale].capacity() == 0 {
-                strips[scale].reserve_exact(1);
-            }
-        } else if !retain {
-            job.result.retained_strips = None;
-        }
-        let cached_source = rev5_cached_window(reference, info, job.ch);
-        // Revision 7: the strip's blockiness lane partials, here in the
-        // parallel job (both branches below); the merge after the batch adds
-        // them in strip order.
-        if local.blockiness && local.formula_revision.row_lanes() {
-            let n = info.plane_w * info.wide_h();
-            let src = cached_source.unwrap_or(&job.scratch.src_wide[..n]);
-            let mode = crate::featcanon::mode(local.formula_revision);
-            let (v, h) = &mut job.result.block[scale];
-            *v = crate::featcanon::SumVar::f64_elems(mode);
-            *h = crate::featcanon::SumVar::f64_elems(mode);
-            blockiness_sparse_strip_wide(
-                src,
-                &job.scratch.dst_wide[..n],
-                info.plane_w,
-                info.y0,
-                info.strip_h,
-                local.formula_revision,
-                v,
-                h,
-            );
-        }
-        if let Some(output) = output.as_mut()
-            && retained_core_admits(&local)
-        {
-            rev5_blur_into_retained(info, &mut job.scratch, [cached_source, None], output);
-            let n = info.plane_w * info.wide_h();
-            let src = cached_source.unwrap_or(&job.scratch.src_wide[..n]);
-            rev5_retained_phase_b(
-                info,
-                [src, &job.scratch.dst_wide[..n]],
-                output.moment_rows(),
-                RetainedCoreWork {
-                    toggles,
-                    fold_v1,
-                    free: local.free_work(job.ch, scale),
-                },
-                &mut job.result,
-                &mut job.bands,
-            );
-            crate::fold_timing::stop(busy, crate::fold_timing::Phase::BBusy, scale);
-            return;
-        }
-        rev5_job_blur(
-            info,
-            &mut job.scratch,
-            compute.formula_revision,
-            cached_source,
-        );
-        let n = info.plane_w * info.wide_h();
-        let src = cached_source.unwrap_or(&job.scratch.src_wide[..n]);
-        if let Some(output) = &mut output {
-            output.copy(info, &job.scratch, src, &job.scratch.dst_wide[..n], false);
-        }
-        stream_phase_b(
-            &job.scratch,
-            src,
-            &job.scratch.dst_wide[..n],
-            info,
-            toggles,
-            false,
-            true,
-            false,
-            false,
-            false,
-            &[],
-            None,
-            None,
-            None,
-            local.free_work(job.ch, scale),
-            local.rev4_work(scale, job.ch, None, None),
-            &mut job.result,
-        );
-        if fold_v1 {
-            let raw = [src, &job.scratch.dst_wide[..n]];
-            let vertical = FoldHSource::Vertical([
-                &job.scratch.mu1[..n],
-                &job.scratch.mu2[..n],
-                &job.scratch.ssq[..n],
-                &job.scratch.s12[..n],
-            ]);
-            let mut b0 = info.y0;
-            for band in &mut job.bands[..info.strip_h.div_ceil(V1_BAND_ROWS)] {
-                *band = V1BasicSums::at_revision(FormulaRevision::Rev5);
-                b0 = fold_v1_one_band(
-                    b0,
-                    info.plane_w,
-                    info.y0 + info.strip_h,
-                    info.y0,
-                    HALO_P,
-                    info.plane_h,
-                    vertical,
-                    raw,
-                    band,
-                    None,
-                    local.free_work(job.ch, scale),
-                );
-            }
-        }
-        crate::fold_timing::stop(busy, crate::fold_timing::Phase::BBusy, scale);
+    let execute = |job: &mut Rev5StripJob, output: Option<RetainedRows<'_>>| {
+        rev5_execute_job(job, output, compute, toggles, fold_v1, retain, reference)
     };
     if let Some(outputs) = outputs {
         jobs.par_iter_mut()
@@ -5223,47 +5403,8 @@ fn rev5_run_jobs(
     crate::fold_timing::stop(wall, crate::fold_timing::Phase::BWall, 0);
     // Every cell's kernel partial is merged once, in the producer's order.
     // Do not replace this loop with a parallel/tree reduction.
-    for job in jobs {
-        let info = &job.info;
-        let scale = info.scale;
-        let local = compute.at_scale(scale);
-        let total = &mut totals[job.ch];
-        total.dense[scale].accumulate(&job.result.dense[scale]);
-        total.grad[scale].accumulate(&job.result.grad[scale]);
-        if let Some(target) = &mut total.retained_strips
-            && let Some(strips) = &job.result.retained_strips
-        {
-            target[scale].extend_from_slice(&strips[scale]);
-        }
-        let n = info.plane_w * info.wide_h();
-        let src = rev5_cached_window(reference, info, job.ch).unwrap_or(&job.scratch.src_wide[..n]);
-        let dst = &job.scratch.dst_wide[..n];
-        if fold_v1 {
-            // Preserve each canonical 32-row band addition, never merge a
-            // pre-reduced strip sum into the running basic accumulator.
-            for band in &job.bands[..info.strip_h.div_ceil(V1_BAND_ROWS)] {
-                total.v1[scale].merge(band);
-            }
-        }
-        if local.blockiness {
-            let (sum_v, sum_h) = &mut total.block[scale];
-            if local.formula_revision.row_lanes() {
-                let (v, h) = &job.result.block[scale];
-                sum_v.merge_from(v);
-                sum_h.merge_from(h);
-            } else {
-                blockiness_sparse_strip_wide(
-                    src,
-                    dst,
-                    info.plane_w,
-                    info.y0,
-                    info.strip_h,
-                    local.formula_revision,
-                    sum_v,
-                    sum_h,
-                );
-            }
-        }
+    for job in jobs.iter() {
+        rev5_merge_job(job, compute, fold_v1, totals, reference);
     }
 }
 
@@ -8252,7 +8393,9 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
             // One job per thread, at least four (measured on a 1507×2048
             // photo, B at revision 7: two threads 21.2 → 18.7 ms with batches
             // of four; at eight threads batches of sixteen were slower, 7.8 →
-            // 10.1 ms, their scratch no longer fitting the cache).
+            // 10.1 ms, their scratch no longer fitting the cache). The
+            // pipeline uses the same number as its in-flight limit; at eight
+            // threads limits of four and six were slower than eight.
             rev5_job_limit(strip_max_n, rayon::current_num_threads().max(4), job_budget)
         }
     } else {
@@ -8354,6 +8497,12 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
 
     #[cfg(feature = "threads")]
     let mut queued = 0;
+    // Plain walks (nothing retained, no cached reference) run their strip
+    // jobs through the pipeline instead of batches: same merge order, no
+    // barrier between batches, production overlapped with the jobs.
+    #[cfg(feature = "threads")]
+    let mut pipeline = (batch_limit > 0 && retention.is_none() && ref_planes.is_none())
+        .then(|| Rev5Pipeline::new(compute, fold_v1, batch_limit, core::mem::take(rev5_jobs)));
 
     let __t_walk = crate::fold_timing::start();
     loop {
@@ -8436,7 +8585,25 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
         }
 
         #[cfg(feature = "threads")]
-        if batch_limit > 0 {
+        if let Some(pipe) = pipeline.as_mut() {
+            // A basic-only cell keeps its existing path; finish every queued
+            // cell first so per-channel/scale ordering is never disturbed.
+            if !v2_blocks {
+                pipe.drain(&mut accums);
+            } else {
+                for ch in 0..3 {
+                    if !ALL_CHANNELS && !compute.channel_active(scale, ch) {
+                        continue;
+                    }
+                    let mut job = pipe.slot(info, ch, &mut accums);
+                    job.gather(&producer, info, ch, false);
+                    pipe.submit(job, toggles);
+                }
+                continue;
+            }
+        }
+        #[cfg(feature = "threads")]
+        if batch_limit > 0 && pipeline.is_none() {
             // A basic-only cell keeps its existing path; finish older queued
             // cells first so per-channel/scale ordering is never disturbed.
             if !v2_blocks && queued > 0 {
@@ -8997,6 +9164,11 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
             retention.as_deref_mut(),
             ref_planes.filter(|_| compute.sampling.is_none()),
         );
+    }
+    #[cfg(feature = "threads")]
+    if let Some(mut pipe) = pipeline.take() {
+        pipe.drain(&mut accums);
+        *rev5_jobs = core::mem::take(&mut pipe.free);
     }
 
     if let Some(t) = __t_walk {
