@@ -1928,7 +1928,11 @@ fn ssim_d_local(mu1: f64, mu2: f64, s12: f64, ssq: f64, direct: bool) -> f64 {
     if direct {
         let mu_diff = mu1 - mu2;
         let err_var = (s12 - mu_diff * mu_diff).max(0.0);
-        ((d * (b - a) + a * err_var) / (b * d)).max(0.0)
+        #[cfg(not(zensim_stable_forms))]
+        let lum = b - a;
+        #[cfg(zensim_stable_forms)]
+        let lum = mu_diff * mu_diff;
+        ((d * lum + a * err_var) / (b * d)).max(0.0)
     } else {
         let cov = s12 - mu1 * mu2;
         let c = 2.0 * cov + C2_V2;
@@ -1940,8 +1944,40 @@ fn ssim_d_local(mu1: f64, mu2: f64, s12: f64, ssq: f64, direct: bool) -> f64 {
 /// GMSD/FSIM/DISTS canonical bounded-similarity form: `(2ab+c)/(a²+b²+c)`.
 /// Bounded `(0, 1]`, `=1` iff `a == b`. Requires `a, b >= 0`.
 #[inline]
+#[cfg_attr(zensim_stable_forms, allow(dead_code))]
 pub(crate) fn bounded_sim(a: f64, b: f64, c: f64) -> f64 {
     (2.0 * a * b + c) / (a * a + b * b + c)
+}
+
+/// `1 − bounded_sim(a, b, c)`, the bounded dissimilarity `(a−b)²/(a²+b²+c)`.
+/// Formed as `1 − ratio` it cancels when `a ≈ b` (the ratio rounds near 1);
+/// the research build (`--cfg zensim_stable_forms`) forms the exact quotient
+/// instead (proposed for formula revision 7).
+#[inline]
+pub(crate) fn bounded_dissim(a: f64, b: f64, c: f64) -> f64 {
+    #[cfg(not(zensim_stable_forms))]
+    {
+        1.0 - bounded_sim(a, b, c)
+    }
+    #[cfg(zensim_stable_forms)]
+    {
+        let d = a - b;
+        d * d / (a * a + b * b + c)
+    }
+}
+
+/// [`bounded_dissim`] in f32, op for op `1 − (2ab + c)/(a² + b² + c)` by default.
+#[inline(always)]
+pub(crate) fn bounded_dissim32(a: f32, b: f32, c: f32) -> f32 {
+    #[cfg(not(zensim_stable_forms))]
+    {
+        1.0 - (2.0 * a * b + c) / (a * a + b * b + c)
+    }
+    #[cfg(zensim_stable_forms)]
+    {
+        let d = a - b;
+        d * d / (a * a + b * b + c)
+    }
 }
 
 /// Bounded, SIGNED normalized-difference form: `max(0, a-b) / (a+b+c)`.
@@ -4188,7 +4224,7 @@ pub(crate) fn compute_v2_diffmap_channel_scale(
 
                 let diff_src = (s - m1).abs();
                 let diff_dst = (dd - m2).abs();
-                let edge_dissim = 1.0 - bounded_sim(diff_src, diff_dst, C_EDGE);
+                let edge_dissim = bounded_dissim(diff_src, diff_dst, C_EDGE);
                 if diff_dst > diff_src {
                     acc += weights[idx::ART] * edge_dissim;
                 } else if diff_dst < diff_src {
@@ -4270,7 +4306,7 @@ pub(crate) fn compute_v2_diffmap_channel_scale(
                 let gy_dst = dyd - dyu;
                 let grad_dst_mag = (gx_dst * gx_dst + gy_dst * gy_dst).sqrt();
 
-                acc += weights[idx::GMS] * (1.0 - bounded_sim(grad_src_mag, grad_dst_mag, C_GMS));
+                acc += weights[idx::GMS] * (bounded_dissim(grad_src_mag, grad_dst_mag, C_GMS));
 
                 let ring_err = if ring_hp {
                     ((s - m1) - (dd - m2)).abs()
@@ -9285,7 +9321,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                     + (scale - 1) * 3 * FEATURES_PER_CHANNEL_V2_TOTAL
                     + ch * FEATURES_PER_CHANNEL_V2_TOTAL;
                 features_v12[prev_base + idx::EDGE_WIDTH_CHANGE] =
-                    1.0 - bounded_sim(decay_src, decay_dst, C_EDGEWIDTH);
+                    bounded_dissim(decay_src, decay_dst, C_EDGEWIDTH);
             }
             prev_grad[ch] = Some((gsrc, gdst));
 
@@ -9729,7 +9765,7 @@ fn compute_v2_features_with_ref_impl_inner(
                 let prev_base = (scale - 1) * 3 * FEATURES_PER_CHANNEL_V2_TOTAL
                     + ch * FEATURES_PER_CHANNEL_V2_TOTAL;
                 features[prev_base + idx::EDGE_WIDTH_CHANGE] =
-                    1.0 - bounded_sim(decay_src, decay_dst, C_EDGEWIDTH);
+                    bounded_dissim(decay_src, decay_dst, C_EDGEWIDTH);
             }
             prev_grad[ch] = Some((gsrc, gdst));
 
@@ -10563,7 +10599,7 @@ fn attr_pass_b_rows(
             let d = ssim_d_local(m1, m2, s12v, sq, direct);
             let diff_src = (s - m1).abs();
             let diff_dst = (dd - m2).abs();
-            let edge_dissim = 1.0 - bounded_sim(diff_src, diff_dst, C_EDGE);
+            let edge_dissim = bounded_dissim(diff_src, diff_dst, C_EDGE);
             let (art_i, det_i) = if diff_dst > diff_src {
                 (edge_dissim, 0.0)
             } else if diff_dst < diff_src {
@@ -10625,7 +10661,7 @@ fn attr_pass_b_rows(
             a_res += co.c_mscn2 * saturate(dn * dn, C_MSCN_SQ);
             let (cg, cl) = bounded_excess_pair(var2, var1, C_CONTRAST);
             a_win += co.c_cgain * cg + co.c_closs * cl;
-            a_win += co.c_tex * (1.0 - bounded_sim(var1, var2, C_CONTRAST));
+            a_win += co.c_tex * (bounded_dissim(var1, var2, C_CONTRAST));
 
             if cross_on {
                 let ry = ref_y[i] as f64;
@@ -10701,7 +10737,7 @@ fn attr_pass_b_rows(
                 let gx_d = dxr - dxl;
                 let gy_d = dyd - dyu;
                 let gmag_d = (gx_d * gx_d + gy_d * gy_d).sqrt();
-                let g = 1.0 - bounded_sim(gmag_s, gmag_d, C_GMS);
+                let g = bounded_dissim(gmag_s, gmag_d, C_GMS);
                 let mut acc = co.c_gms * g;
                 acc += gq_density(&co.gq_gms, g);
                 if co.c_ringing != 0.0 {
@@ -10986,7 +11022,11 @@ fn ssim_d_px(na: f32, nb: f32, nd: f32, m1: f32, m2: f32, s12v: f32, direct: boo
     if direct {
         let mu_diff = m1 - m2;
         let err_var = (s12v - mu_diff * mu_diff).max(0.0);
-        ((nd * (nb - na) + na * err_var) / (nb * nd)).max(0.0)
+        #[cfg(not(zensim_stable_forms))]
+        let lum = nb - na;
+        #[cfg(zensim_stable_forms)]
+        let lum = mu_diff * mu_diff;
+        ((nd * lum + na * err_var) / (nb * nd)).max(0.0)
     } else {
         let nc = 2.0 * (s12v - m1 * m2) + C2_V2 as f32;
         (1.0 - (na * nc) / (nb * nd)).max(0.0)
@@ -11047,7 +11087,7 @@ fn attr_pass_b_main_px(
     let diff_src = (s - m1).abs();
     let diff_dst = (dd - m2).abs();
     let edge_dissim =
-        1.0 - (2.0 * diff_src * diff_dst + CE) / (diff_src * diff_src + diff_dst * diff_dst + CE);
+        bounded_dissim32(diff_src, diff_dst, CE);
     let art_i = if diff_dst > diff_src {
         edge_dissim
     } else {
@@ -11112,7 +11152,7 @@ fn attr_pass_b_main_px(
             ((var2 - var1).max(0.0) * r, (var1 - var2).max(0.0) * r)
         };
         a_win += co.c_cgain * cg + co.c_closs * cl;
-        a_win += co.c_tex * (1.0 - (2.0 * var1 * var2 + CC) / (var1 * var1 + var2 * var2 + CC));
+        a_win += co.c_tex * (bounded_dissim32(var1, var2, CC));
         // Luminance transducer + cross-mask (coefficients zero off-Y).
         let t = sat(ry, CLT);
         if co.c_lumt != 0.0 {
@@ -11231,7 +11271,7 @@ fn attr_pass_b_main_kernel_generic<T: F32x8Backend + Copy>(
             let d = ssim_d_local_v(token, m1, m2, ld!(s12), sq, c1, c2, direct);
             let diff_src = (s - m1).abs();
             let diff_dst = (dd - m2).abs();
-            let edge_dissim = one - bounded_sim_v(token, diff_src, diff_dst, c_edge);
+            let edge_dissim = bounded_dissim_v(token, diff_src, diff_dst, c_edge);
             let art_i = V8::<T>::blend(diff_dst.simd_gt(diff_src), edge_dissim, zero);
             let det_i = V8::<T>::blend(diff_dst.simd_lt(diff_src), edge_dissim, zero);
             let raw_diff = s - dd;
@@ -11279,7 +11319,7 @@ fn attr_pass_b_main_kernel_generic<T: F32x8Backend + Copy>(
                 a_res += sp(co.c_mscn2) * sat_v(dn * dn, c_mscn_sq);
                 let (cg, cl) = bounded_excess_pair_v(token, var2, var1, c_contrast);
                 a_win += sp(co.c_cgain) * cg + sp(co.c_closs) * cl;
-                a_win += sp(co.c_tex) * (one - bounded_sim_v(token, var1, var2, c_contrast));
+                a_win += sp(co.c_tex) * (bounded_dissim_v(token, var1, var2, c_contrast));
                 // Luminance transducer + cross-mask (Y only; uniform branches).
                 let ry = ld!(ref_y);
                 let t = sat_v(ry, c_lum_t);
@@ -11460,7 +11500,7 @@ fn attr_pass_b_grad_px(
     let gx_d = dxr - dxl;
     let gy_d = dyd - dyu;
     let gmag_d = (gx_d * gx_d + gy_d * gy_d).sqrt();
-    let g = 1.0 - (2.0 * gmag_s * gmag_d + CG) / (gmag_s * gmag_s + gmag_d * gmag_d + CG);
+    let g = bounded_dissim32(gmag_s, gmag_d, CG);
     let mut acc = co.c_gms * g;
     let eg = g - co.gg[3];
     acc += co.gg[0] + eg * (co.gg[1] + eg * co.gg[2]);
@@ -11614,7 +11654,7 @@ fn attr_pass_b_grad_kernel_generic<T: F32x8Backend + Copy>(
             let gx_d = dxr - dxl;
             let gy_d = dyd - dyu;
             let gmag_d = (gx_d * gx_d + gy_d * gy_d).sqrt();
-            let g = one - bounded_sim_v(token, gmag_s, gmag_d, c_gms);
+            let g = bounded_dissim_v(token, gmag_s, gmag_d, c_gms);
             let mut acc = sp(co.c_gms) * g;
             let eg = g - sp(co.gg[3]);
             acc += sp(co.gg[0]) + eg * (sp(co.gg[1]) + eg * sp(co.gg[2]));
@@ -12585,7 +12625,7 @@ fn compute_v2_append_attribution_impl(
                 let prev_b = (scale - 1) * 3 * FEATURES_PER_CHANNEL_V2_TOTAL
                     + ch * FEATURES_PER_CHANNEL_V2_TOTAL;
                 v2_features[prev_b + idx::EDGE_WIDTH_CHANGE] =
-                    1.0 - bounded_sim(decay_src, decay_dst, C_EDGEWIDTH);
+                    bounded_dissim(decay_src, decay_dst, C_EDGEWIDTH);
                 if scale == n_scales - 1 && n_scales >= 2 {
                     let this_b = scale * 3 * FEATURES_PER_CHANNEL_V2_TOTAL
                         + ch * FEATURES_PER_CHANNEL_V2_TOTAL;

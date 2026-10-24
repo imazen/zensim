@@ -96,7 +96,11 @@ fn ssim_d_local_v<T: F32x8Backend + Copy>(
     if direct {
         let mu_diff = mu1 - mu2;
         let err_var = (s12 - mu_diff * mu_diff).max(zero);
-        ((d * (b - a) + a * err_var) / (b * d)).max(zero)
+        #[cfg(not(zensim_stable_forms))]
+        let lum = b - a;
+        #[cfg(zensim_stable_forms)]
+        let lum = mu_diff * mu_diff;
+        ((d * lum + a * err_var) / (b * d)).max(zero)
     } else {
         let cov = s12 - mu1 * mu2;
         let c = two * cov + c2;
@@ -107,9 +111,26 @@ fn ssim_d_local_v<T: F32x8Backend + Copy>(
 
 /// Vectorized [`bounded_sim`] — `(2ab+c)/(a²+b²+c)`. Bounded `(0, 1]`.
 #[inline(always)]
+#[cfg_attr(zensim_stable_forms, allow(dead_code))]
 fn bounded_sim_v<T: F32x8Backend + Copy>(token: T, a: V8<T>, b: V8<T>, c: V8<T>) -> V8<T> {
     let two = V8::<T>::splat_t(token, 2.0);
     (two * a * b + c) / (a * a + b * b + c)
+}
+
+/// Vectorized [`bounded_dissim`]: `one − bounded_sim_v` by default, the exact
+/// `(a−b)²/(a²+b²+c)` in the `zensim_stable_forms` research build.
+#[inline(always)]
+fn bounded_dissim_v<T: F32x8Backend + Copy>(token: T, a: V8<T>, b: V8<T>, c: V8<T>) -> V8<T> {
+    #[cfg(not(zensim_stable_forms))]
+    {
+        V8::<T>::splat_t(token, 1.0) - bounded_sim_v(token, a, b, c)
+    }
+    #[cfg(zensim_stable_forms)]
+    {
+        let _ = token;
+        let d = a - b;
+        d * d / (a * a + b * b + c)
+    }
 }
 
 /// Vectorized [`bounded_excess`] — `max(0, a-b) / (a+b+c)`. Standalone (no
@@ -2861,7 +2882,7 @@ fn dense_block_kernel_generic<T: F32x8Backend + Copy, const POOL_SIMD: bool>(
 
             let diff_src = (s - m1).abs();
             let diff_dst = (dd - m2).abs();
-            let edge_dissim = one - bounded_sim_v(token, diff_src, diff_dst, c_edge);
+            let edge_dissim = bounded_dissim_v(token, diff_src, diff_dst, c_edge);
             let gt = diff_dst.simd_gt(diff_src);
             let lt = diff_dst.simd_lt(diff_src);
             let art_i = V8::<T>::blend(gt, edge_dissim, zero);
@@ -3054,7 +3075,7 @@ fn dense_block_kernel_generic<T: F32x8Backend + Copy, const POOL_SIMD: bool>(
 
             let diff_src = (s - m1).abs();
             let diff_dst = (dd - m2).abs();
-            let edge_dissim = 1.0 - bounded_sim(diff_src, diff_dst, C_EDGE);
+            let edge_dissim = bounded_dissim(diff_src, diff_dst, C_EDGE);
             let (mut art_i, mut det_i) = (0.0, 0.0);
             if diff_dst > diff_src {
                 art_i = edge_dissim;
@@ -3989,7 +4010,7 @@ fn gradient_block_kernel_generic<
 
         acc.sum_grad_src += grad_src_mag;
         acc.sum_grad_dst += grad_dst_mag;
-        let g = 1.0 - bounded_sim(grad_src_mag, grad_dst_mag, C_GMS);
+        let g = bounded_dissim(grad_src_mag, grad_dst_mag, C_GMS);
         acc.sum_gms += g;
         acc.sum_gms2 += g * g;
 
@@ -4132,7 +4153,7 @@ fn gradient_block_kernel_generic<
 
                 r_gsrc += grad_src_mag;
                 r_gdst += grad_dst_mag;
-                let g = one - bounded_sim_v(token, grad_src_mag, grad_dst_mag, c_gms);
+                let g = bounded_dissim_v(token, grad_src_mag, grad_dst_mag, c_gms);
                 r_gms += g;
                 r_gms2 += g * g;
 
@@ -4461,7 +4482,7 @@ pub(crate) fn gradient_terms64<const BANDVIS: bool, const BV_DSTACT: bool, const
     let gx_dst = dxr - dxl;
     let gy_dst = dyd - dyu;
     let gdst = (gx_dst * gx_dst + gy_dst * gy_dst).sqrt();
-    let g = 1.0 - bounded_sim(gsrc, gdst, C_GMS);
+    let g = bounded_dissim(gsrc, gdst, C_GMS);
 
     // `RingForm::HighPassMu` (HPR): the error with each image's local mean removed.
     let raw_abs_err = if HPR {
@@ -4973,7 +4994,7 @@ fn gradient_terms32_v<
     let gy_dst = dyd - dyu;
     let gdst = (gx_dst * gx_dst + gy_dst * gy_dst).sqrt();
 
-    let g = one - bounded_sim_v(token, gsrc, gdst, c_gms);
+    let g = bounded_dissim_v(token, gsrc, gdst, c_gms);
     let g2 = g * g;
 
     let raw_abs_err = if HPR {
@@ -6216,7 +6237,7 @@ fn append_block_kernel_generic<T: F32x8Backend + Copy, const CROSS: bool, const 
 
             let diff_src = (s - m1).abs();
             let diff_dst = (dd - m2).abs();
-            let edge_dissim = one - bounded_sim_v(token, diff_src, diff_dst, c_edge);
+            let edge_dissim = bounded_dissim_v(token, diff_src, diff_dst, c_edge);
             let gt = diff_dst.simd_gt(diff_src);
             let lt = diff_dst.simd_lt(diff_src);
             let art_i = V8::<T>::blend(gt, edge_dissim, zero);
@@ -6286,7 +6307,7 @@ fn append_block_kernel_generic<T: F32x8Backend + Copy, const CROSS: bool, const 
             let (cg, cl) = bounded_excess_pair_v(token, var2, var1, c_con);
             r_cg += cg;
             r_cl += cl;
-            r_tex += one - bounded_sim_v(token, var1, var2, c_con);
+            r_tex += bounded_dissim_v(token, var1, var2, c_con);
 
             r_s += s;
             r_d += dd;
@@ -6342,7 +6363,7 @@ fn append_block_kernel_generic<T: F32x8Backend + Copy, const CROSS: bool, const 
 
             let diff_src = (s - m1).abs();
             let diff_dst = (dd - m2).abs();
-            let ed = 1.0 - bounded_sim(diff_src, diff_dst, C_EDGE);
+            let ed = bounded_dissim(diff_src, diff_dst, C_EDGE);
             let art_i = if diff_dst > diff_src { ed } else { 0.0 };
             let det_i = if diff_dst < diff_src { ed } else { 0.0 };
             acc.sum_art2 += art_i * art_i;
@@ -6390,7 +6411,7 @@ fn append_block_kernel_generic<T: F32x8Backend + Copy, const CROSS: bool, const 
             let (cg, cl) = bounded_excess_pair(var2, var1, C_CONTRAST);
             acc.sum_cgain += cg;
             acc.sum_closs += cl;
-            acc.sum_tex += 1.0 - bounded_sim(var1, var2, C_CONTRAST);
+            acc.sum_tex += bounded_dissim(var1, var2, C_CONTRAST);
 
             acc.sum_s += s;
             acc.sum_d += dd;
@@ -6628,7 +6649,7 @@ fn append_block_kernel_exact<const CROSS: bool, const HL: bool>(
             let sq = ssq[i] as f64;
             let diff_src = (s - m1).abs();
             let diff_dst = (dd - m2).abs();
-            let ed = 1.0 - bounded_sim(diff_src, diff_dst, C_EDGE);
+            let ed = bounded_dissim(diff_src, diff_dst, C_EDGE);
             let art_i = if diff_dst > diff_src { ed } else { 0.0 };
             let det_i = if diff_dst < diff_src { ed } else { 0.0 };
             r[12].add64(lane, art_i * art_i);
@@ -6684,7 +6705,7 @@ fn append_block_kernel_exact<const CROSS: bool, const HL: bool>(
             let (cg, cl) = bounded_excess_pair(var2, var1, C_CONTRAST);
             r[9].add64(lane, cg);
             r[10].add64(lane, cl);
-            r[11].add64(lane, 1.0 - bounded_sim(var1, var2, C_CONTRAST));
+            r[11].add64(lane, bounded_dissim(var1, var2, C_CONTRAST));
             r[14].add64(lane, s);
             r[15].add64(lane, dd);
             r[16].add64(lane, s * s);

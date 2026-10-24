@@ -875,13 +875,13 @@ impl LocalRefineSnapshot {
                     let ds = bs / (ps + C_GRAD_DECAY);
                     let dd = bd / (pd + C_GRAD_DECAY);
                     outs_base[si][ch][idx::EDGE_WIDTH_CHANGE] =
-                        1.0 - feature_v2::bounded_sim(ds, dd, C_EDGEWIDTH);
+                        feature_v2::bounded_dissim(ds, dd, C_EDGEWIDTH);
                     let (bs, bd) = mg_new[si + 1][ch];
                     let (ps, pd) = mg_new[si][ch];
                     let ds = bs / (ps + C_GRAD_DECAY);
                     let dd = bd / (pd + C_GRAD_DECAY);
                     outs_new[si][ch][idx::EDGE_WIDTH_CHANGE] =
-                        1.0 - feature_v2::bounded_sim(ds, dd, C_EDGEWIDTH);
+                        feature_v2::bounded_dissim(ds, dd, C_EDGEWIDTH);
                 } else {
                     outs_base[si][ch][idx::EDGE_WIDTH_CHANGE] =
                         outs_base[si - 1][ch][idx::EDGE_WIDTH_CHANGE];

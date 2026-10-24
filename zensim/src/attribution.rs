@@ -1558,7 +1558,10 @@ fn basic_combine_channel(
         let m2 = bufs.mu2[i] as f64;
         let d1 = (sv - m1).abs();
         let d2 = (dv - m2).abs();
+        #[cfg(not(zensim_stable_forms))]
         let ed = (1.0 + d2) / (1.0 + d1) - 1.0;
+        #[cfg(zensim_stable_forms)]
+        let ed = (d2 - d1) / (1.0 + d1);
         let art = ed.max(0.0);
         let det = (-ed).max(0.0);
         let sd2 = sd * sd;
@@ -4819,7 +4822,10 @@ fn combine_basic_and_l8<const L8: bool>(
         let m2 = mu2[i];
         let d1 = (sv - m1).abs();
         let d2 = (dv - m2).abs();
+        #[cfg(not(zensim_stable_forms))]
         let ed = (1.0 + d2) / (1.0 + d1) - 1.0;
+        #[cfg(zensim_stable_forms)]
+        let ed = (d2 - d1) / (1.0 + d1);
         let art = ed.max(0.0);
         let det = (-ed).max(0.0);
         let sd2 = sdv * sdv;

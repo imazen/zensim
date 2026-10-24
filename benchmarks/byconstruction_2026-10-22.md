@@ -1566,6 +1566,53 @@ the descriptor adds image-wide mass that butteraugli's local block distances do 
 port reports held-out r 0.51–0.69 for the Haar diffmaps and 0.83 for DVIFM-min on the same encodes; on screenshots
 butteraugli's map agrees with no other map in the study.
 
+### Formula revision 7: the batch (2026-10-24, in progress)
+
+Owner, 2026-10-24: "let's do a revision 7 - but also figure out what else we can batch with it." Every item changes
+feature bits, so one revision and one retrain carry them all. Inventory:
+
+1. **v2 SSIM luminance term**: `nb − na = (m1² + m2² + C1) − (2·m1·m2 + C1)` becomes `(m1 − m2)²`. Measured above
+   (+336% / −87% on near-identical chroma at scales 1–3); with the stable form the walk agrees with f64 on its own
+   moments to 4.3e-6 or better in every cell of all four diagnostic pairs.
+2. **Bounded dissimilarities**: `1 − (2ab + c)/(a² + b² + c)` becomes `(a − b)²/(a² + b² + c)`, its exact value,
+   for v2 edge artifact and detail loss, GMS, texture and the edge-width decay terms (walk, map and steering replay).
+3. **v1 edge ratio**: `(1 + x)/(1 + y) − 1` becomes `(x − y)/(1 + y)` (v1 basic edge artifact and detail loss and the
+   pools built on them, every kernel tier).
+4. **DENSEPOOL f32 lanes**: 11.3–13.9% faster end to end on i265 (AVX2, one thread), features move by at most
+   6.05e-8 relative (`524a04c28` on main). The blocked interchange (8.4–8.6%, bit-identical) needs no revision.
+
+Not needed, already fixed: the XYB chunk-versus-remainder divergence (revision 4's canonical opsin conversion), the
+running-sum drift and the raw-moment deviation pools (revision 5). Every era the registry marks "proposed" is already
+in revisions 2–6.
+
+Candidates that need an experiment before they join (from the HaarPSI / HaarXYB comparison): coarse scales averaged
+in linear light, a joint-channel distance, distorted-side unmasking, orientation-selective bands (new families,
+append-only).
+
+Items 1–3 are implemented as helpers (`bounded_dissim`, `bounded_dissim_v`, `bounded_dissim32`) and paired forms
+behind `--cfg zensim_stable_forms` (a custom cfg rather than a cargo feature, so `--all-features` in CI never turns a
+measurement form on); the default build is unchanged. Measurement: `tier_audit_features` dumps of the full research
+vector at revision 6 on 93 near-identical pairs (KADID level 1 of all 25 types on three TRAIN references; 18 JPEG XL
+d=0.6 corpus encodes), default and stable-forms builds against the exact f64 oracle (`ZENSIM_FEATCANON=exact`);
+`scripts/byconstruction/rev7_forms.py`; scores: `scripts/byconstruction/rev7_score_compare.py`. Outputs:
+`/mnt/v/output/zensim/byconstruction-2026-10-22/rev7/`.
+
+**Results (revision 5, AVX-512 tier).** Against the exact oracle, today's arithmetic is already within 5.1e-5 (median
+relative error over the 93 pairs) for every basic, peaks and v2 feature; the stable forms give 4.7e-5. They help where
+they apply, by 2–4× at the 90th percentile on the coarse SSIM pools (Y at scale 3: deviation 1.5–1.7e-4 → 4.1–7.1e-5,
+soft peak 1.8e-4 → 4.9e-5). The largest real-content errors come from two other shapes, both tiny in absolute terms:
+the HF magnitude loss turns blur rounding into positive mass through its `max(0, ·)` (3.3e-6 where the exact value
+is 0, screenshot crops) and v1's `var_loss`/`tex_loss` take a difference of sums of squares (1e-2 relative, about 2e-6
+absolute).
+
+**Score impact** (default against stable-forms scorer, the 93 pairs plus the three synthetic extremes of the SSIM
+diagnostic): B moves by at most **7.9e-5** points (median 3.0e-6), Tga by at most **2.3e-5**. The extreme feature
+errors (+336% / −87%) sit in features of 1e-8 to 1e-9 that both models map to zero either way.
+
+**So the cancellation fixes are hygiene, not a reason for a revision.** They cost nothing to batch into a revision
+that happens for other reasons. The value changes worth a retrain are DENSEPOOL's f32 lanes (11–14% faster) and any
+feature change that proves out in an experiment, starting with linear-light coarse scales.
+
 ### DVIFM 0.3 on the E21 sets and the mixture test (2026-10-23)
 
 Owner request: "eval dvifm 0.3 on kadid and other distortion//corrputions". Scorer: the frozen runtime of the

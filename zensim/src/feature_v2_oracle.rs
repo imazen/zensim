@@ -289,7 +289,7 @@ pub(crate) mod oracle {
 
                 let diff_src = (sv - m1).abs();
                 let diff_dst = (dv - m2).abs();
-                let edge_dissim = 1.0 - bounded_sim(diff_src, diff_dst, C_EDGE);
+                let edge_dissim = bounded_dissim(diff_src, diff_dst, C_EDGE);
                 let (mut art_i, mut det_i) = (0.0, 0.0);
                 if diff_dst > diff_src {
                     art_i = edge_dissim;
@@ -853,7 +853,7 @@ fn dense_block_kernel_era2_generic<T: F32x8Backend + Copy, const FUSED: bool>(
                     let d2 = d * d;
                     let diff_src = (s - m1).abs();
                     let diff_dst = (dd - m2).abs();
-                    let edge_dissim = one - bounded_sim_v(token, diff_src, diff_dst, c_edge);
+                    let edge_dissim = bounded_dissim_v(token, diff_src, diff_dst, c_edge);
                     let gt = diff_dst.simd_gt(diff_src);
                     let lt = diff_dst.simd_lt(diff_src);
                     let art_i = V8::<T>::blend(gt, edge_dissim, zero);
@@ -1152,7 +1152,11 @@ pub(crate) fn dense_terms32(
         if direct {
             let mu_diff = m1 - m2;
             let err_var = (p - mu_diff * mu_diff).max(0.0);
-            ((dl * (b - a) + a * err_var) / (b * dl)).max(0.0)
+            #[cfg(not(zensim_stable_forms))]
+            let lum = b - a;
+            #[cfg(zensim_stable_forms)]
+            let lum = mu_diff * mu_diff;
+            ((dl * lum + a * err_var) / (b * dl)).max(0.0)
         } else {
             let cov = p - m1 * m2;
             let c = 2.0f32 * cov + c2;
@@ -1399,7 +1403,7 @@ fn dense_terms32_v<T: F32x8Backend + Copy>(
     let d2 = d * d;
     let diff_src = (s - m1).abs();
     let diff_dst = (dd - m2).abs();
-    let edge_dissim = one - bounded_sim_v(token, diff_src, diff_dst, c_edge);
+    let edge_dissim = bounded_dissim_v(token, diff_src, diff_dst, c_edge);
     let gt = diff_dst.simd_gt(diff_src);
     let lt = diff_dst.simd_lt(diff_src);
     let art_i = V8::<T>::blend(gt, edge_dissim, zero);
@@ -1908,7 +1912,7 @@ fn dense_block_kernel_exact(
                 let d2 = d * d;
                 let diff_src = (s - m1).abs();
                 let diff_dst = (dd - m2).abs();
-                let edge_dissim = 1.0 - bounded_sim(diff_src, diff_dst, C_EDGE);
+                let edge_dissim = bounded_dissim(diff_src, diff_dst, C_EDGE);
                 let (art_i, det_i) = if diff_dst > diff_src {
                     (edge_dissim, 0.0)
                 } else if diff_dst < diff_src {

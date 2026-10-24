@@ -1498,7 +1498,10 @@ fn fused_vblur_ssim_inner_v4(
                 // === Edge ===
                 let diff1 = (s - mu1).abs();
                 let diff2 = (d - mu2).abs();
+                #[cfg(not(zensim_stable_forms))]
                 let ed = (one + diff2) / (one + diff1) - one;
+                #[cfg(zensim_stable_forms)]
+                let ed = (diff2 - diff1) / (one + diff1);
                 let artifact = ed.max(zero);
                 let detail_lost = (-ed).max(zero);
                 let a2 = artifact * artifact;
@@ -1720,7 +1723,10 @@ fn fused_vblur_ssim_inner_v4(
                 // Edge
                 let diff1 = (s - mu1).abs();
                 let diff2 = (d - mu2).abs();
+                #[cfg(not(zensim_stable_forms))]
                 let ed = (one8 + diff2) / (one8 + diff1) - one8;
+                #[cfg(zensim_stable_forms)]
+                let ed = (diff2 - diff1) / (one8 + diff1);
                 let artifact = ed.max(zero8);
                 let detail_lost = (-ed).max(zero8);
                 let a2 = artifact * artifact;
@@ -1915,7 +1921,10 @@ fn fused_vblur_ssim_inner_v4(
                 // Edge (f32 to match SIMD paths)
                 let diff1 = (sv - mu1).abs();
                 let diff2 = (dv - mu2).abs();
+                #[cfg(not(zensim_stable_forms))]
                 let ed = (1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32;
+                #[cfg(zensim_stable_forms)]
+                let ed = (diff2 - diff1) / (1.0f32 + diff1);
                 let artifact = ed.max(0.0f32);
                 let detail_lost = (-ed).max(0.0f32);
                 let a2 = artifact * artifact;
@@ -2212,7 +2221,10 @@ fn fused_vblur_ssim_inner_v4x(
                 // === Edge ===
                 let diff1 = (s - mu1).abs();
                 let diff2 = (d - mu2).abs();
+                #[cfg(not(zensim_stable_forms))]
                 let ed = (one + diff2) / (one + diff1) - one;
+                #[cfg(zensim_stable_forms)]
+                let ed = (diff2 - diff1) / (one + diff1);
                 let artifact = ed.max(zero);
                 let detail_lost = (-ed).max(zero);
                 let a2 = artifact * artifact;
@@ -2434,7 +2446,10 @@ fn fused_vblur_ssim_inner_v4x(
                 // Edge
                 let diff1 = (s - mu1).abs();
                 let diff2 = (d - mu2).abs();
+                #[cfg(not(zensim_stable_forms))]
                 let ed = (one8 + diff2) / (one8 + diff1) - one8;
+                #[cfg(zensim_stable_forms)]
+                let ed = (diff2 - diff1) / (one8 + diff1);
                 let artifact = ed.max(zero8);
                 let detail_lost = (-ed).max(zero8);
                 let a2 = artifact * artifact;
@@ -2629,7 +2644,10 @@ fn fused_vblur_ssim_inner_v4x(
                 // Edge (f32 to match SIMD paths)
                 let diff1 = (sv - mu1).abs();
                 let diff2 = (dv - mu2).abs();
+                #[cfg(not(zensim_stable_forms))]
                 let ed = (1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32;
+                #[cfg(zensim_stable_forms)]
+                let ed = (diff2 - diff1) / (1.0f32 + diff1);
                 let artifact = ed.max(0.0f32);
                 let detail_lost = (-ed).max(0.0f32);
                 let a2 = artifact * artifact;
@@ -2922,7 +2940,10 @@ fn fused_vblur_ssim_inner_v3(
                 // Edge
                 let diff1 = (s - mu1).abs();
                 let diff2 = (d - mu2).abs();
+                #[cfg(not(zensim_stable_forms))]
                 let ed = (one + diff2) / (one + diff1) - one;
+                #[cfg(zensim_stable_forms)]
+                let ed = (diff2 - diff1) / (one + diff1);
                 let artifact = ed.max(zero);
                 let detail_lost = (-ed).max(zero);
                 let a2 = artifact * artifact;
@@ -3120,7 +3141,10 @@ fn fused_vblur_ssim_inner_v3(
                 // Edge
                 let diff1 = (sv - mu1).abs();
                 let diff2 = (dv - mu2).abs();
+                #[cfg(not(zensim_stable_forms))]
                 let ed = (1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32;
+                #[cfg(zensim_stable_forms)]
+                let ed = (diff2 - diff1) / (1.0f32 + diff1);
                 let artifact = ed.max(0.0f32);
                 let detail_lost = (-ed).max(0.0f32);
                 let a2 = artifact * artifact;
@@ -3373,7 +3397,10 @@ fn fused_vblur_ssim_inner(
                 // Edge
                 let diff1 = (s - mu1).abs();
                 let diff2 = (d - mu2).abs();
+                #[cfg(not(zensim_stable_forms))]
                 let ed = (one + diff2) / (one + diff1) - one;
+                #[cfg(zensim_stable_forms)]
+                let ed = (diff2 - diff1) / (one + diff1);
                 let artifact = ed.max(zero);
                 let detail_lost = (-ed).max(zero);
                 let a2 = artifact * artifact;
@@ -3577,7 +3604,10 @@ fn fused_vblur_ssim_inner(
                 // Edge
                 let diff1 = (sv - mu1).abs();
                 let diff2 = (dv - mu2).abs();
+                #[cfg(not(zensim_stable_forms))]
                 let ed = (1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32;
+                #[cfg(zensim_stable_forms)]
+                let ed = (diff2 - diff1) / (1.0f32 + diff1);
                 let artifact = ed.max(0.0f32);
                 let detail_lost = (-ed).max(0.0f32);
                 let a2 = artifact * artifact;
@@ -3734,7 +3764,10 @@ fn fused_vblur_edge_inner_v4(
                 // Edge
                 let diff1 = (s - mu1).abs();
                 let diff2 = (d - mu2).abs();
+                #[cfg(not(zensim_stable_forms))]
                 let ed = (one + diff2) / (one + diff1) - one;
+                #[cfg(zensim_stable_forms)]
+                let ed = (diff2 - diff1) / (one + diff1);
                 let artifact = ed.max(zero);
                 let detail_lost = (-ed).max(zero);
                 let a2 = artifact * artifact;
@@ -3816,7 +3849,10 @@ fn fused_vblur_edge_inner_v4(
 
                 let diff1 = (s - mu1).abs();
                 let diff2 = (d - mu2).abs();
+                #[cfg(not(zensim_stable_forms))]
                 let ed = (one8 + diff2) / (one8 + diff1) - one8;
+                #[cfg(zensim_stable_forms)]
+                let ed = (diff2 - diff1) / (one8 + diff1);
                 let artifact = ed.max(zero8);
                 let detail_lost = (-ed).max(zero8);
                 let a2 = artifact * artifact;
@@ -3883,7 +3919,10 @@ fn fused_vblur_edge_inner_v4(
                 // Edge
                 let diff1 = (sv - mu1).abs();
                 let diff2 = (dv - mu2).abs();
+                #[cfg(not(zensim_stable_forms))]
                 let ed = (1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32;
+                #[cfg(zensim_stable_forms)]
+                let ed = (diff2 - diff1) / (1.0f32 + diff1);
                 let artifact = ed.max(0.0f32);
                 let detail_lost = (-ed).max(0.0f32);
                 let a2 = artifact * artifact;
@@ -3977,7 +4016,10 @@ fn fused_vblur_edge_inner_v4x(
                 // Edge
                 let diff1 = (s - mu1).abs();
                 let diff2 = (d - mu2).abs();
+                #[cfg(not(zensim_stable_forms))]
                 let ed = (one + diff2) / (one + diff1) - one;
+                #[cfg(zensim_stable_forms)]
+                let ed = (diff2 - diff1) / (one + diff1);
                 let artifact = ed.max(zero);
                 let detail_lost = (-ed).max(zero);
                 let a2 = artifact * artifact;
@@ -4059,7 +4101,10 @@ fn fused_vblur_edge_inner_v4x(
 
                 let diff1 = (s - mu1).abs();
                 let diff2 = (d - mu2).abs();
+                #[cfg(not(zensim_stable_forms))]
                 let ed = (one8 + diff2) / (one8 + diff1) - one8;
+                #[cfg(zensim_stable_forms)]
+                let ed = (diff2 - diff1) / (one8 + diff1);
                 let artifact = ed.max(zero8);
                 let detail_lost = (-ed).max(zero8);
                 let a2 = artifact * artifact;
@@ -4126,7 +4171,10 @@ fn fused_vblur_edge_inner_v4x(
                 // Edge
                 let diff1 = (sv - mu1).abs();
                 let diff2 = (dv - mu2).abs();
+                #[cfg(not(zensim_stable_forms))]
                 let ed = (1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32;
+                #[cfg(zensim_stable_forms)]
+                let ed = (diff2 - diff1) / (1.0f32 + diff1);
                 let artifact = ed.max(0.0f32);
                 let detail_lost = (-ed).max(0.0f32);
                 let a2 = artifact * artifact;
@@ -4220,7 +4268,10 @@ fn fused_vblur_edge_inner_v3(
 
                 let diff1 = (s - mu1).abs();
                 let diff2 = (d - mu2).abs();
+                #[cfg(not(zensim_stable_forms))]
                 let ed = (one + diff2) / (one + diff1) - one;
+                #[cfg(zensim_stable_forms)]
+                let ed = (diff2 - diff1) / (one + diff1);
                 let artifact = ed.max(zero);
                 let detail_lost = (-ed).max(zero);
                 let a2 = artifact * artifact;
@@ -4289,7 +4340,10 @@ fn fused_vblur_edge_inner_v3(
                 // Edge
                 let diff1 = (sv - mu1).abs();
                 let diff2 = (dv - mu2).abs();
+                #[cfg(not(zensim_stable_forms))]
                 let ed = (1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32;
+                #[cfg(zensim_stable_forms)]
+                let ed = (diff2 - diff1) / (1.0f32 + diff1);
                 let artifact = ed.max(0.0f32);
                 let detail_lost = (-ed).max(0.0f32);
                 let a2 = artifact * artifact;
@@ -4395,7 +4449,10 @@ fn fused_vblur_edge_inner(
 
                 let diff1 = (s - mu1).abs();
                 let diff2 = (d - mu2).abs();
+                #[cfg(not(zensim_stable_forms))]
                 let ed = (one + diff2) / (one + diff1) - one;
+                #[cfg(zensim_stable_forms)]
+                let ed = (diff2 - diff1) / (one + diff1);
                 let artifact = ed.max(zero);
                 let detail_lost = (-ed).max(zero);
                 let a2 = artifact * artifact;
@@ -4467,7 +4524,10 @@ fn fused_vblur_edge_inner(
                 // Edge
                 let diff1 = (sv - mu1).abs();
                 let diff2 = (dv - mu2).abs();
+                #[cfg(not(zensim_stable_forms))]
                 let ed = (1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32;
+                #[cfg(zensim_stable_forms)]
+                let ed = (diff2 - diff1) / (1.0f32 + diff1);
                 let artifact = ed.max(0.0f32);
                 let detail_lost = (-ed).max(0.0f32);
                 let a2 = artifact * artifact;
@@ -5148,7 +5208,10 @@ fn vblur_ssim_elem_canon<P: crate::featcanon::Pool>(
     // Edge
     let diff1 = (s - mu1).abs();
     let diff2 = (d - mu2).abs();
+    #[cfg(not(zensim_stable_forms))]
     let ed = (1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32;
+    #[cfg(zensim_stable_forms)]
+    let ed = (diff2 - diff1) / (1.0f32 + diff1);
     let artifact = ed.max(0.0f32);
     let detail_lost = (-ed).max(0.0f32);
     let a2 = artifact * artifact;
@@ -5829,7 +5892,10 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
                 // Edge
                 let diff1 = (sv - m1v).abs();
                 let diff2 = (dv - m2v).abs();
+                #[cfg(not(zensim_stable_forms))]
                 let ed = (one + diff2) / (one + diff1) - one;
+                #[cfg(zensim_stable_forms)]
+                let ed = (diff2 - diff1) / (one + diff1);
                 let artifact = ed.max(zero);
                 let detail_lost = (-ed).max(zero);
                 let a2 = artifact * artifact;
@@ -6607,7 +6673,10 @@ fn fused_vblur_ssim_exact(
 
                 let diff1 = (s - mu1).abs();
                 let diff2 = (d - mu2).abs();
+                #[cfg(not(zensim_stable_forms))]
                 let ed = (1.0f64 + diff2) / (1.0f64 + diff1) - 1.0f64;
+                #[cfg(zensim_stable_forms)]
+                let ed = (diff2 - diff1) / (1.0f64 + diff1);
                 let artifact = ed.max(0.0f64);
                 let detail_lost = (-ed).max(0.0f64);
                 let a2 = artifact * artifact;
@@ -6827,7 +6896,10 @@ fn vblur_edge_elem_canon<P: crate::featcanon::Pool>(
     }
     let diff1 = (s - mu1).abs();
     let diff2 = (d - mu2).abs();
+    #[cfg(not(zensim_stable_forms))]
     let ed = (1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32;
+    #[cfg(zensim_stable_forms)]
+    let ed = (diff2 - diff1) / (1.0f32 + diff1);
     let artifact = ed.max(0.0f32);
     let detail_lost = (-ed).max(0.0f32);
     let a2 = artifact * artifact;
@@ -6997,7 +7069,10 @@ fn fused_vblur_edge_canon64_vec(
                 let dv = f32x8::load_t(token, drow[x0..x0 + 8].try_into().unwrap());
                 let diff1 = (sv - m1v).abs();
                 let diff2 = (dv - m2v).abs();
+                #[cfg(not(zensim_stable_forms))]
                 let ed = (one + diff2) / (one + diff1) - one;
+                #[cfg(zensim_stable_forms)]
+                let ed = (diff2 - diff1) / (one + diff1);
                 let artifact = ed.max(zero);
                 let detail_lost = (-ed).max(zero);
                 let a2 = artifact * artifact;
@@ -7226,7 +7301,10 @@ fn fused_vblur_edge_exact(
                 }
                 let diff1 = (s - mu1).abs();
                 let diff2 = (d - mu2).abs();
+                #[cfg(not(zensim_stable_forms))]
                 let ed = (1.0f64 + diff2) / (1.0f64 + diff1) - 1.0f64;
+                #[cfg(zensim_stable_forms)]
+                let ed = (diff2 - diff1) / (1.0f64 + diff1);
                 let artifact = ed.max(0.0f64);
                 let detail_lost = (-ed).max(0.0f64);
                 let a2 = artifact * artifact;
