@@ -37,6 +37,7 @@ CELLS = Path.home() / "tmp/byc/cells"
 BIN = os.environ.get("AIC_BIN", "/var/tmp/byconstruction-bin/58a4d100ad36")
 GROOT = "/mnt/v/output/zensim/byconstruction-2026-10-22/ringhpm/root_globaff"
 MIX = "/mnt/v/output/zensim/byconstruction-2026-10-22/mixture"
+MIXG = "/mnt/v/output/zensim/byconstruction-2026-10-22/mixture_global"  # global edits, then noise
 SCORES = Path("/home/lilith/tmp/aic-full-repro/scores")
 LOGS = Path.home() / "tmp/aictrain"
 
@@ -51,7 +52,9 @@ ARMS = {
     "Tga128": ("Tga128 (AIC weight 128)", "monotone in damage inputs, descriptor sign-free", 128),
 }
 # Same model classes without the AIC leg, for the arms table.
-CONTROLS = {"Tghpm": "Tghpm (no AIC leg)", "Bghpm": "Bghpm (B + descriptor, no AIC leg)"}
+CONTROLS = {"Thpm": "Thpm (monotone, no descriptor, no AIC leg)", "Tghpm": "Tghpm (no AIC leg)",
+            "Bghpm": "Bghpm (B + descriptor, no AIC leg)", "Tgg": "Tgg (gated damage, every weight >= 0, no AIC leg)",
+            "M64": "M64 (certified max pairs, no AIC leg)", "Mgg64": "Mgg64 (max pairs on gated damage, no AIC leg)"}
 COMMIT_SUMMARY = {
     "d24c2ec6": "AIC2026 feature tables, source-held-out fits, band-feature prototypes",
     "31e3ba97": "AIC2026 as a research training leg through the Rust trainer (strict refusal kept)",
@@ -88,6 +91,8 @@ EXPOSURE = [
      "Fits or model choices", 0, "none"),
 ]
 CANDIDATE = O / "full" / "Tga"
+A_E34 = Path("/mnt/v/output/zensim/e34-launch-2026-10-15/evaluation/panel-input.json")
+DVIFM_DIR = Path("/mnt/v/output/zensim/byconstruction-2026-10-22/dvifm03")
 
 
 def slug(s: str, n: int = 60) -> str:
@@ -232,16 +237,20 @@ def main() -> int:
     have = [x for x in list(CONTROLS) + arms if (CELLS / x).is_dir()]
     sc = run_json([sys.executable, str(REPO / "scripts/rev4_featpot/byc_cells.py"), "score", "--arms", ",".join(have)], env)
     mix = run_json([sys.executable, str(HERE / "mixture_test.py"), "report", "--out", MIX], env)
+    mixg = run_json([sys.executable, str(HERE / "mixture_test.py"), "report", "--out", MIXG], env)
     for arm in have:
         s = sc[arm]
         cells = [v for k, v in mix.items() if k.startswith(arm + "_")]
+        gcells = [v for k, v in mixg.items() if k.startswith(arm + "_")]
         lab = CONTROLS.get(arm) or ARMS[arm][0]
         add("arms", id=slug(arm), arm=lab, aic_weight=None if arm in CONTROLS else ARMS[arm][2], e21_delta=s["delta"],
             e21_se=s["seed_unit_se"], **{d: s["per_dataset_delta"][d] for d in ("kadid", "tid2013", "konfig", "cid22_a25")},
             aic_oof=None if arm in CONTROLS else aicscore[arm]["global"],
             mix_min=min(v["inversions"] for v in cells) if cells else None,
             mix_max=max(v["inversions"] for v in cells) if cells else None,
-            mix_max_rise=max(v["max_rise"] for v in cells) if cells else None, status="done")
+            mix_max_rise=max(v["max_rise"] for v in cells) if cells else None,
+            gmix_max=max(v["inversions"] for v in gcells) if gcells else None,
+            gmix_max_rise=max(v["max_rise"] for v in gcells) if gcells else None, status="done")
 
     pc_b = zs["B"]["per_codec"]
     pc_t = json.loads((O / "rust/folds_train/T/oof_panel.json").read_text())["per_codec"]
@@ -325,7 +334,7 @@ def main() -> int:
 
     panel_json = O / "panel_mohammadi.json"
     subprocess.run([sys.executable, str(HERE / "aic_panel.py"), "--out", str(panel_json), "--arms",
-                    ",".join(["base-c", "Thpm", "Mhpm"] + [x for x in have]), "--dvifm", "--geo", "--per-type",
+                    ",".join(dict.fromkeys(["base-c", "Thpm", "Mhpm", *have])), "--dvifm", "--geo", "--per-type",
                     "--no-public-test"], check=True, capture_output=True, env=env)
     pj = json.loads(panel_json.read_text())
     frozen = json.loads((O / "panel_public_test_frozen.json").read_text())["rows"]
@@ -383,8 +392,34 @@ def main() -> int:
         pn = panel_batch([(sid, sign * v, -jnd_tr)], stats="full")[0]
         views[f"f_{sid}"], views[f"r_{sid}"] = arr["fit"], arr["rank"]
         views[f"a_{sid}"] = jnd_tr.mean() + (worse - worse.mean()) * (jnd_tr.std() / worse.std())
-        add("scatter", id=sid, model=lab, n=int(pn["n"]), srocc=pn["srocc_signed"], plcc=pn["plcc"],
-            z_rmse=pn["z_rmse"], **{"or": pn["or"]}, **st)
+        add("scatter", id=sid, dataset="AIC2026 public_train", key=sid, model=lab, n=int(pn["n"]),
+            srocc=pn["srocc_signed"], plcc=pn["plcc"], z_rmse=pn["z_rmse"], **{"or": pn["or"]}, **st)
+    # The same views for the E21 sets: each dataset's out-of-sample seed-0 predictions on its own label scale
+    # (quality orientation, as E34's panel input stores the targets).
+    panel_in = {d["name"]: d for d in json.loads(A_E34.read_text())["datasets"]}
+    dvr = pd.read_parquet(DVIFM_DIR / "rows.parquet")
+    dvj = pd.read_csv(DVIFM_DIR / "dvifm.tsv", sep="\t").set_index(["ref_path", "dist_path"]).jnd
+    e21rows = []
+    for ds in ("kadid", "tid2013", "konfig", "cid22_a25"):
+        y = np.asarray(panel_in[ds]["target"], np.float64)
+        sel = dvr[dvr.dataset == ds]
+        frame = {"ds": ds, "label": np.round(y, 4), "type": [TYPE_NAMES.get(t, t) for t in sel.type]}
+        models = [("basec", "B’s recipe (base-c), seed 0", np.asarray(panel_in[ds]["predictions"]["base-c"][0], np.float64))]
+        for arm, sid, lab in (("Tga", "tga", "Tga, seed 0"), ("mono-thr-mp64", "m64", "M64 (certified max pairs), seed 0"),
+                              ("Mgg64", "mgg64", "Mgg64 (max pairs, gated damage), seed 0"), ("Tgg", "tgg", "Tgg, seed 0")):
+            f = CELLS / arm / f"without_{ds}_s0" / f"pred_{ds}.tsv"
+            if f.is_file():
+                models.append((sid, lab, pd.read_csv(f, sep="\t").pred.to_numpy(np.float64)))
+        models.append(("dvifm", "DVIFM 0.3 (zero-shot)", -dvj.loc[list(zip(sel.ref_path, sel.dist_path))].to_numpy(np.float64)))
+        for sid, lab, x in models:
+            st, arr = geometry(x, y, arrays=True)
+            pn = panel_batch([(sid, x, y)], stats="full")[0]
+            frame[f"f_{sid}"], frame[f"r_{sid}"] = np.round(arr["fit"], 4), np.round(arr["rank"], 4)
+            frame[f"a_{sid}"] = np.round(y.mean() + (x - x.mean()) * (y.std() / x.std()), 4)
+            add("scatter", id=f"{ds}_{sid}", dataset=names[ds], key=sid, model=lab, n=int(pn["n"]),
+                srocc=pn["srocc_signed"], plcc=pn["plcc"], z_rmse=pn["z_rmse"], **{"or": pn["or"]}, **st)
+        e21rows.append(pd.DataFrame(frame))
+    e21 = pd.concat(e21rows, ignore_index=True)
     for i, (ph, labels, what, runs, use) in enumerate(EXPOSURE):
         add("exposure", id=f"e{i}", phase=ph, labels=labels, what=what, runs=runs, use=use)
 
@@ -400,6 +435,7 @@ def main() -> int:
                        "tga128": tga128.round(5).to_numpy(), "butter": bu.loc[keys].butteraugli_pnorm3.round(4).to_numpy(),
                        "dvifm": dv.loc[keys].jnd.round(5).to_numpy(), **{k: np.round(v, 3) for k, v in views.items()}})
     pr.sample(frac=1, random_state=0).reset_index(drop=True).to_json(out / "predictions.json", orient="records")
+    e21.sample(frac=1, random_state=0).reset_index(drop=True).to_json(out / "e21predictions.json", orient="records")
     print(f"{len(rows)} result rows; {len(pr)} prediction rows; arms {have}")
     return 0
 

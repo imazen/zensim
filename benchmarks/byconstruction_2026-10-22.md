@@ -1236,6 +1236,67 @@ AIC2026 public_train (T, Tga, Tga128 and Bga out of fold; the rest fixed models)
 The dashboard's scatter tab plots every model on one JND scale three ways (the logistic fit, the zenstats rank map, and
 raw output with mean and SD matched), with these statistics beside each plot.
 
+### Global edits in the mixture test: the sign-free descriptor inverts (2026-10-23)
+
+The mixture test's base distortions (blur, luma noise, chroma noise, posterize) never fire the global-change
+descriptor, so they could not test the arms that use it. `mixture_test.py generate --d1 global` uses six global edits
+instead (luma offset ±8, luma contrast ×0.85 / ×1.15 about the mean, chroma ×0.8 / ×1.25) with the same six noise
+steps on top: 48 references, 1,728 steps per cell, `mixture_global/` on dev. RGB MSE rises in 1,727 of them.
+
+| Model | Inversions per cell (all cells) | Over 1 point | Largest rise | Main steps |
+|---|---|---|---|---|
+| Thpm (monotone, no descriptor) | **0** (12 cells) | 0 | −3.8 | — |
+| DVIFM 0.3 | **0** | 0 | −0.09 JND | — |
+| Tga128 | 0–27 (60 in all) | 0–12 | +3.7 | saturation ×0.8 / ×1.25, then chroma noise σ8 |
+| Tga | 4–47 (291) | 0–33 | +9.8 | the same; brighten/darken then chroma noise σ8 |
+| Tghpm | 5–72 (385) | 2–56 | +11.9 | the same |
+| B | 88 | 74 | +18.3 | saturation/contrast, then luma or chroma noise |
+| Bga | 41–368 (2,052) | 36–341 | +48.4 | contrast ×0.85, then chroma noise |
+
+**The sign-free descriptor reopens an inversion route.** Without it (Thpm) no step inverts; with it, adding chroma
+noise to a saturation-changed image raises the score by up to 9.8 points (Tga). The "1–4 inversions" reported for Tga
+above hold only for the original base distortions. The candidate's monotonicity claim is therefore weaker than stated
+there: it is monotone in its 820 damage inputs, and the free descriptor moves in the wrong direction under exactly these
+steps.
+
+### Gated damage (`fx1gg`): a global discount with every weight non-negative (2026-10-23)
+
+**Design (fixed before any result).** Instead of feeding the descriptor sign-free, gate the damage with it. For each
+of fx1's 410 differences `d` (cell `k` = its scale and channel, E33 §5.1), add the input `d·(1 − share_k)`, where
+`share_k` is the byc_globaff share of cell `k`; the descriptor itself is not an input. With `W1 ≥ 0` on all 820 direct
+inputs (and fx1's fragility products), a hinge sees `a·d + b·d·(1 − share)` with `a, b ≥ 0`. Adding unexplained error
+raises `d` and lowers `share`, so it can only lower the score; a global edit lowers the gate, so the model can learn a
+discount `a/(a + b)`. Identity keeps the pin (`d = 0`). The gated columns are exact f32 products
+(`ring_root.py gated`, root `ringhpm/root_globaff_gated`, era `rev5_localwin_ringhpm_globaffgate` `#45e0e84c`;
+declaration `byc_fx1gg`, 820 direct inputs). On KADID the median gated/direct damage ratio is 0.06 for color
+saturation 1, 0.15 mean shift, 0.21 brighten, 0.29 contrast change, 0.85–0.90 blur and 0.96–0.99 noise; jitter is 0.14
+(a small shift is mostly an affine match), the one surprise.
+
+Arm **Tgg** (`mono:thr` on fx1gg, no AIC leg, trainer `70eba638`): same 12 E21 cells, compared with Thpm (same class
+without the descriptor) and Tghpm (descriptor sign-free). Reported as measured: E21 Δ, smoothness, both mixture tests,
+AIC2026 public_train zero-shot.
+
+**Result.** Out of sample (seeds 0–2); Z-RMSE is the smoothness statistic of the previous section:
+
+| Arm | E21 Δ (SE) | KADID / TID2013 / KonFiG / CID22-A Δ | Mean Z-RMSE | Standard mixture / cell (max rise) | Global-edit mixture / cell (max rise) |
+|---|---|---|---|---|---|
+| Thpm (no descriptor) | −0.0221 (0.0032) | −0.019 / −0.045 / −0.030 / +0.006 | 0.512 | 0–4 (+4.2) | **0** (−3.8) |
+| **Tgg** (gated, every weight ≥ 0) | −0.0194 (0.0029) | −0.010 / −0.044 / −0.029 / +0.005 | 0.511 | 1–9 (+7.9) | **0** (−4.0) |
+| Tghpm (descriptor sign-free) | −0.0101 (0.0024) | −0.007 / −0.024 / −0.018 / +0.007 | 0.495 | 2–7 (+7.1) | 5–72 (+11.9) |
+| M (max pairs, mp32) | −0.0144 | — | 0.502 | up to 24 references (blur + luma σ4) | **0** (−0.6) |
+| M64 (max pairs, mp64) | −0.0131 | — | 0.502 | 1–6 | **0** (−0.05) |
+| Mhpm (mp32, hpm ringing) | −0.0158 | — | 0.504 | 2–35 (+8.0) | **0** (−0.06) |
+
+- The gate does what it was built for: no global-edit step inverts, and KADID's gap halves (−0.019 → −0.010). It
+  recovers nothing on TID2013 or KonFiG. KonFiG has no global edits at all, so the sign-free descriptor's gain there
+  is not a global-edit discount: the free share acts as a distortion-kind signal for cross-type calibration, the same
+  freedom that lets added chroma noise raise the score. Tgg's standard-mixture steps (posterize or blur, then noise)
+  are damage features falling when noise refills lost detail; Thpm shows the same pattern, less often.
+- AIC2026 public_train zero-shot: Tgg 0.908 (12 cells, 0.903–0.912), Tghpm 0.907.
+- **Strictly monotone frontier.** The certified max-pair arms show no global-edit inversion either, so among arms with
+  0 global-edit inversions M64 leads on E21 (−0.0131) and on smoothness (0.502, against 0.483 for B's recipe). Next:
+  max pairs on the gated inputs (Mgg64), which combines the two strictly monotone gains.
+
 ### DVIFM 0.3 on the E21 sets and the mixture test (2026-10-23)
 
 Owner request: "eval dvifm 0.3 on kadid and other distortion//corrputions". Scorer: the frozen runtime of the
