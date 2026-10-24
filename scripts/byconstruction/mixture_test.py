@@ -2,13 +2,16 @@
 
 Exploration record: benchmarks/byconstruction_2026-10-22.md. No human label is read.
 
-  generate --out DIR [--refs 48]      write ref / D1 / D2∘D1 PNGs and manifest.json
+  generate --out DIR [--refs 48] [--d1 standard|global]
+                                      write ref / D1 / D2∘D1 PNGs and manifest.json
   score    --out DIR --bake NAME=PATH [--bake ...] [--jobs 6] [--post raw]
   report   --out DIR
 
 References: TRAIN-eligible E34 inventory origins (256 px, `p4-inventory-r2/references`), excluding E34's 128
 augmentation and 8 development origins, chosen by sha256(origin) order within each category prefix.
-D1 (base distortion): Gaussian blur σ 1.2, luma noise σ 4, chroma noise σ 8, posterize to 12 levels.
+D1 (base distortion): Gaussian blur σ 1.2, luma noise σ 4, chroma noise σ 8, posterize to 12 levels. `--d1 global`
+uses global edits instead, where a global-change descriptor acts: luma offset ±8, luma contrast ×0.85 / ×1.15 about the
+image's mean luma, and chroma (saturation) ×0.8 / ×1.25.
 D2 (added on top): luma noise σ 4 / 8 / 16 and chroma noise σ 8 / 16 / 32, fixed seeds. Noise is added in a
 BT.601 YCbCr decomposition and the result rounded and clipped to 8 bits. Every D2 adds error energy against the
 reference, so a score that rises from D1 to D2∘D1 is an inversion.
@@ -79,6 +82,24 @@ def posterize(a, levels):
 
 D1 = {"blur1.2": lambda a, s: blur(a, 1.2), "luma4": lambda a, s: luma_noise(a, 4, s),
       "chroma8": lambda a, s: chroma_noise(a, 8, s), "poster12": lambda a, s: posterize(a, 12)}
+def luma_offset(a, d):
+    y, cb, cr = ycc(a.astype(np.float64))
+    return rgb(y + d, cb, cr)
+
+
+def luma_contrast(a, k):
+    y, cb, cr = ycc(a.astype(np.float64))
+    return rgb(y.mean() + k * (y - y.mean()), cb, cr)
+
+
+def saturation(a, k):
+    y, cb, cr = ycc(a.astype(np.float64))
+    return rgb(y, k * cb, k * cr)
+
+
+D1_GLOBAL = {"bright8": lambda a, s: luma_offset(a, 8), "dark8": lambda a, s: luma_offset(a, -8),
+             "contrast0.85": lambda a, s: luma_contrast(a, 0.85), "contrast1.15": lambda a, s: luma_contrast(a, 1.15),
+             "sat0.8": lambda a, s: saturation(a, 0.8), "sat1.25": lambda a, s: saturation(a, 1.25)}
 D2 = {f"luma{s}": (lambda a, seed, s=s: luma_noise(a, s, seed)) for s in (4, 8, 16)}
 D2.update({f"chroma{s}": (lambda a, seed, s=s: chroma_noise(a, s, seed)) for s in (8, 16, 32)})
 
@@ -112,7 +133,7 @@ def cmd_generate(a):
         ref = np.asarray(Image.open(INV / "references" / f"{origin}.png").convert("RGB"))
         rp = out / "img" / f"{origin}_ref.png"
         Image.fromarray(ref).save(rp)
-        for di, (d1, f1) in enumerate(D1.items()):
+        for di, (d1, f1) in enumerate((D1_GLOBAL if a.d1 == "global" else D1).items()):
             base = to8(f1(ref, 1000 * ri + di))
             bp = out / "img" / f"{origin}_{d1}.png"
             Image.fromarray(base).save(bp)
@@ -123,7 +144,7 @@ def cmd_generate(a):
                 rows.append({"origin": origin, "d1": d1, "d2": d2, "ref": rp.name, "base": bp.name, "more": mp.name,
                              "mse_base": float(np.mean((base.astype(float) - ref) ** 2)),
                              "mse_more": float(np.mean((more.astype(float) - ref) ** 2))})
-    (out / "manifest.json").write_text(json.dumps({"refs": a.refs, "rows": rows}, indent=1) + "\n")
+    (out / "manifest.json").write_text(json.dumps({"refs": a.refs, "d1": a.d1, "rows": rows}, indent=1) + "\n")
     worse = sum(r["mse_more"] > r["mse_base"] for r in rows)
     print(f"{len(rows)} compositions; RGB MSE rises from D1 to D2∘D1 in {worse} of them")
     return 0
@@ -182,6 +203,7 @@ def main():
     g = sub.add_parser("generate")
     g.add_argument("--out", required=True)
     g.add_argument("--refs", type=int, default=48)
+    g.add_argument("--d1", choices=("standard", "global"), default="standard")
     s = sub.add_parser("score")
     s.add_argument("--out", required=True)
     s.add_argument("--bake", action="append", required=True, help="NAME=PATH")

@@ -44,14 +44,17 @@ E34 = Path("/mnt/v/output/zensim/e34-launch-2026-10-15/evaluation/panel-input.js
 E34_CELLS = Path("/var/tmp/rev4-featpot/e34-controlc-results/cells/sel:3b7bd5ebe929@h32:H128:cv16:cf98:fx1__N")
 ROOTS = {"raw": Path("/mnt/v/output/zensim/v40r4-2026-10-08/v2e29"),
          "hpm": Path("/mnt/v/output/zensim/byconstruction-2026-10-22/ringhpm/root"),
-         "g": Path("/mnt/v/output/zensim/byconstruction-2026-10-22/ringhpm/root_globaff")}
+         "g": Path("/mnt/v/output/zensim/byconstruction-2026-10-22/ringhpm/root_globaff"),
+         "gg": Path("/mnt/v/output/zensim/byconstruction-2026-10-22/ringhpm/root_globaff_gated")}
 
 
 def arm_root(arm: str, spec: str) -> str:
-    """The training root of an arm's cells: B's control is the raw root; fx1g/fx1gs1 arms the hpm + descriptor root."""
+    """The training root of an arm's cells: B's control is the raw root; fx1g/fx1gs1 arms the hpm + descriptor root;
+    fx1gg arms the gated root."""
     if arm == "base-c":
         return "raw"
-    return "g" if research_decl(spec) is not None else "hpm"
+    decl = research_decl(spec)
+    return "hpm" if decl is None else "gg" if decl.name == "byc_fx1gg_declaration.json" else "g"
 FOLDS = ("kadid", "tid2013", "konfig", "cid22_a25")
 POP = {"kadid": "KADID TRAIN+SELECT", "tid2013": "TID2013 (train-only by ruling)", "konfig": "KonFiG TRAIN+VAL",
        "cid22_a25": "CID22-A, 25 references"}
@@ -110,8 +113,8 @@ def geometry(x, y, arrays: bool = False):
 
 
 def research_decl(spec: str):
-    for tok in ("fx1gs1", "fx1g"):
-        if f":{tok}" in spec:
+    for tok in ("fx1gs1", "fx1gg", "fx1g"):
+        if f":{tok}:" in f"{spec}:":
             return HERE.parent / "rev4_featpot" / f"byc_{tok}_declaration.json"
     return None
 

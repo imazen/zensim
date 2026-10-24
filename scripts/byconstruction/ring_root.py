@@ -12,6 +12,12 @@ what proves each row joined to the right pixels and that the form moved nothing 
   globaff-pairs --bank DIR --pool DIR --out DIR   one pairs TSV per bank set (row_id = bank row) and the pool's
   globaff --root ROOT --bank DIR --sidecars DIR --out ROOT2
                                                widen a derived root with the byc_globaff descriptor at f1867-f1890
+  gate-table --table T.parquet --decl FX1G.json --out T2.parquet
+                                               the same gating for one width-1891 table (mixture tables, AIC folds)
+  gated --root ROOT2 --decl FX1G.json --out ROOT3
+                                               widen a descriptor root with gated damage at f1891-f2300: for each of
+                                               fx1's 410 differences d (ascending), d x (1 - share) of its own scale and
+                                               channel cell, as an f32 product of f32 factors
 
 The HDR legs (`hdr_hb4`, `hdr_hc4`, leg `hdr_consensus`) are not re-extracted and are left out of the derived root.
 """
@@ -387,6 +393,109 @@ def cmd_globaff(a) -> int:
     return 0
 
 
+GATED_FIRST = GLOBAFF_WIDTH
+GATED_WIDTH = GATED_FIRST + 410
+# `byc_fsid basic+peaks+v2 2301 rev5_localwin_ringhpm_globaffgate 0-227,372-719,1867-2300` (hash from zensim::feature_set_id).
+GATED_FSID = "basic+peaks+v2@w2301/rev5_localwin_ringhpm_globaffgate#45e0e84c"
+
+
+def gated_plan(decl: Path) -> tuple[list[int], list[int]]:
+    """fx1's differences in ascending order and the share id of each one's (scale, channel) cell: the declaration
+    pairs each difference with the `pjnd_fragility` slot of its own cell, `372 + 29k + 21` (E33 section 5.1), and
+    the descriptor's share of cell k sits at `1867 + 2k`."""
+    pairs = json.loads(decl.read_text())["products"]
+    diffs = [a for a, _ in pairs]
+    if diffs != sorted(diffs) or len(diffs) != GATED_WIDTH - GATED_FIRST:
+        raise ValueError(f"{decl}: expected 410 differences in ascending order")
+    cells = []
+    for _, f in pairs:
+        k, rem = divmod(f - 372 - 21, 29)
+        if rem or not 0 <= k < 12:
+            raise ValueError(f"{decl}: {f} is not a pjnd_fragility slot")
+        cells.append(GLOBAFF_IDS[0] + 2 * k)
+    return diffs, cells
+
+
+def gate_table(table: pa.Table, diffs: list[int], shares: list[int], what: str) -> pa.Table:
+    width = sum(1 for c in table.column_names if c.startswith("f") and c[1:].isdigit())
+    if width != GATED_FIRST:
+        raise ValueError(f"{what}: width {width}, expected the descriptor root's {GATED_FIRST}")
+    for j, (d, sh) in enumerate(zip(diffs, shares)):
+        dv = table.column(f"f{d}").to_numpy(zero_copy_only=False).astype(np.float32)
+        u = np.float32(1) - table.column(f"f{sh}").to_numpy(zero_copy_only=False).astype(np.float32)
+        g = dv * u
+        if not np.isfinite(g).all() or (g < 0).any():
+            raise ValueError(f"{what}: f{d} x (1 - f{sh}) is negative or nonfinite")
+        table = table.append_column(f"f{GATED_FIRST + j}", pa.array(g))
+    return table
+
+
+def cmd_gate_table(a) -> int:
+    src, out = Path(a.table), Path(a.out)
+    if out.exists():
+        raise ValueError(f"{out} exists")
+    diffs, shares = gated_plan(Path(a.decl))
+    out.parent.mkdir(parents=True, exist_ok=True)
+    write(gate_table(pq.read_table(src), diffs, shares, src.name), out)
+    log(f"gated {src} -> {out} ({sha(out)[:12]})")
+    return 0
+
+
+def cmd_gated(a) -> int:
+    root, out = Path(a.root), Path(a.out)
+    if out.exists():
+        raise ValueError(f"{out} exists")
+    diffs, shares = gated_plan(Path(a.decl))
+    shutil.copytree(root, out)
+    real = out / "wide/main/real"
+    record = {"source_root": str(root), "source_frozen_sha256": sha(root / "wide/frozen.json"),
+              "declaration_sha256": sha(Path(a.decl)), "ids": list(range(GATED_FIRST, GATED_WIDTH)),
+              "differences": diffs, "share_ids": shares, "tables": {}}
+    tables = [t for t in sorted(real.glob("*.parquet")) if not t.name.endswith(".keys.parquet")]
+    for t in [*tables, out / "e15/coverage_pool.parquet"]:
+        write(gate_table(pq.read_table(t), diffs, shares, t.stem), t)
+        record["tables"][t.name if t.parent == real else "e15/coverage_pool.parquet"] = sha(t)
+        log(f"gated {t.name}")
+    note = "; gated damage at f1891-f2300 (each fx1 difference x (1 - byc_globaff share of its cell))"
+    ids = list(range(GLOBAFF_IDS[0], GATED_WIDTH))
+    for name in list(record["tables"]):
+        path = out / name if name.startswith("e15/") else real / name
+        mp = Path(f"{path}.manifest.json")
+        m = json.loads(mp.read_text())
+        m["byc_gated_derived_from"] = {"table_sha256": m.get("table_sha256"), "manifest_sha256": sha(mp)}
+        m["table_sha256"] = sha(path)
+        if "source_table_sha256" in m:
+            m["source_table_sha256"] = m["table_sha256"]
+        m["byc_globaff_ids"] = ids
+        m["feature_set_id"] = GATED_FSID
+        m["source_bank_feature_set_id"] = GATED_FSID
+        m["composite"] = m.get("composite", "") + note
+        m["immutable_input_roots"] = [*m.get("immutable_input_roots", []), str(root.resolve())]
+        mp.write_text(json.dumps(m, indent=1) + "\n")
+    receipt = json.loads((real / "receipt.json").read_text())
+    for leg in receipt["legs"].values():
+        for part in leg.values():
+            if isinstance(part, dict) and "rel" in part:
+                q = out / part["rel"]
+                part["sha256"] = sha(q)
+                part["manifest_sha256"] = sha(Path(f"{q}.manifest.json"))
+    receipt["width"] = GATED_WIDTH
+    receipt["feature_set_id"] = GATED_FSID
+    receipt["byc_gated"] = record
+    view = dict(receipt["admission_view"])
+    view["immutable_input_roots"] = [*view["immutable_input_roots"], str(root.resolve())]
+    receipt["admission_view"] = view
+    (real / "receipt.json").write_text(json.dumps(receipt, indent=1) + "\n")
+    frozen = json.loads((out / "wide/frozen.json").read_text())
+    frozen["admission_view"] = view
+    frozen["wide_receipts"] = {"main/real": sha(real / "receipt.json")}
+    frozen["auxiliary_files"] = {rel: sha(out / rel) for rel in frozen["auxiliary_files"]}
+    frozen["byc_gated"] = record
+    (out / "wide/frozen.json").write_text(json.dumps(frozen, indent=1) + "\n")
+    log(f"gated root written: {out}")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -411,6 +520,16 @@ def main() -> int:
     w.add_argument("--sidecars", required=True)
     w.add_argument("--out", required=True)
     w.set_defaults(fn=cmd_globaff)
+    t = sub.add_parser("gate-table")
+    t.add_argument("--table", required=True)
+    t.add_argument("--decl", required=True)
+    t.add_argument("--out", required=True)
+    t.set_defaults(fn=cmd_gate_table)
+    q = sub.add_parser("gated")
+    q.add_argument("--root", required=True)
+    q.add_argument("--decl", required=True)
+    q.add_argument("--out", required=True)
+    q.set_defaults(fn=cmd_gated)
     a = ap.parse_args()
     return a.fn(a)
 
