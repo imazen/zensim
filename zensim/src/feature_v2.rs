@@ -11999,7 +11999,7 @@ fn attr_pass_b_for_scale(
     spread_tmp: &mut Vec<f64>,
     lattice: &mut crate::attribution::LatticeSet,
 ) {
-    let tpb = std::time::Instant::now();
+    let tpb = crate::perf_clock::Instant::now();
     let (ws, hs) = dims[scale];
     let n = ws * hs;
     scale_density[..n].fill(0.0);
@@ -12122,7 +12122,7 @@ fn attr_pass_b_for_scale_f32(
     paint: crate::map_paint::MapPaint,
     revision: FormulaRevision,
 ) {
-    let tpb = std::time::Instant::now();
+    let tpb = crate::perf_clock::Instant::now();
     let (ws, hs) = dims[scale];
     let n = ws * hs;
     scale_density[..n].fill(0.0);
@@ -12321,7 +12321,7 @@ fn compute_v2_append_attribution_impl(
 > {
     // ZENSIM_ATTR_PERF=1: coarse section timing to stderr (perf lever triage).
     let perf_log = std::env::var("ZENSIM_ATTR_PERF").as_deref() == Ok("1");
-    let t0 = std::time::Instant::now();
+    let t0 = crate::perf_clock::Instant::now();
     let rprep = prepare_v2_reference_impl(reference, max_pixels, parallel, false)?;
     let dprep = prepare_v2_reference_impl(distorted, max_pixels, parallel, false)?;
     let t_prep = t0.elapsed();
@@ -12398,7 +12398,7 @@ fn compute_v2_append_attribution_impl(
     ) {
         let (ref rplanes, ws, hs) = rprep.scales[scale];
         let dplanes = &dprep.scales[scale].0;
-        let tb = std::time::Instant::now();
+        let tb = crate::perf_clock::Instant::now();
         // Channel-parallel blur+cache (C2b Part 2): the three channels are
         // independent given per-channel scratch.
         #[cfg(feature = "threads")]
@@ -12458,7 +12458,7 @@ fn compute_v2_append_attribution_impl(
             }
         }
         PERF_BLUR.with(|c| c.set(c.get() + tb.elapsed().as_secs_f64()));
-        let tk = std::time::Instant::now();
+        let tk = crate::perf_clock::Instant::now();
         for ch in 0..3 {
             let append_active = append_cell_active(want_append, ch, scale);
             let cross: Option<(&[f32], &[f32])> = if ch == 1 {

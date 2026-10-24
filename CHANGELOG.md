@@ -189,6 +189,7 @@ None.
 ### Fixed
 
 - The candidate attribution map's pass B read the SSIM and ringing forms from the process revision instead of the bake's: B (revision 5) in a default process produced a map summing to about −1.8e19 (`ec9289df`, branch `explore/byconstruction`; the same code is on main). The SSIM deviation-pool polynomials are now evaluated centred at the pool mean in every kernel; in raw powers their f32 maps missed the feature by up to 2.2% ([record](benchmarks/byconstruction_2026-10-22.md), "Attribution-map correctness").
+- Attribution maps panicked on `wasm32-unknown-unknown`: the map path's always-on timing counters called `std::time::Instant::now`, which has no clock there. They now read `perf_clock::Instant`, which reads zero without a clock; the counters only report time. Found by the workbench module's native-against-wasm smoke check (branch `explore/byconstruction`).
 - The revision-6 `globaff` descriptor sums the error `s − d` and its moments instead of raw moments of `s` and `d`, which cancelled for small errors over large planes (share 0.99971 instead of 1 on a 2-megapixel tiny offset). Served Tga matches its training route to 5.0e-7 on AIC2026 public_train (branch `explore/byconstruction`).
 
 - Isolate E34 harvest jobset errors, retain bounded ledger-sync diagnostics and retries, and persist per-jobset installed counts without admitting failed verification (`d9bd4953`, `0dddffd5`).
