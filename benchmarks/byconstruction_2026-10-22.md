@@ -1882,6 +1882,78 @@ Not measured: multithreaded paired rounds, aarch64, wasm and an Intel host at re
 finalized: the speed pass continues, and the models need re-extraction and a retrain at revision 7 before any of it
 serves.
 
+### Revision 7 speed after the implementation (2026-10-24)
+
+Owner, 2026-10-24: "i actually just care about a fully optimized rev7", then "please only benchmark dimensions that
+matter". After one 18-case size × content matrix (synthetic 64² to 4096², photos, web and mobile screenshots, a GUI,
+a plot, clipart, a text scan and a 4096² brochure crop) showed content type does not change the results while size
+and tier do, timings cover revision 7 only: B (Tga runs the same kernels), v4x and v3, a 256² photo crop, a 1024² plot
+and a 1507×2048 photo (`scripts/byconstruction/perf_cases.py`, `cases_focus.tsv`; case images and raw rounds with
+SHA256SUMS on dev under `/mnt/v/output/zensim/byconstruction-2026-10-22/perf/`). Every change was checked against the
+110 dumps at revisions 5/6 (identical unless the change is revision 7's) and at revision 7 (identical across tiers).
+
+**Cumulative** (paired, 8 rounds, one thread; the revision-7 commit `bad544a3` against `b6a7e510`;
+`benchmarks/byconstruction_perf_2026-10-24/rev7_bad544a3_vs_b6a7e510/grid.tsv`):
+
+| Tier | 256² photo | 1024² plot | 1507×2048 photo |
+|---|---|---|---|
+| v4x | 1.356 → 1.071 ms, −20.97% (−21.61..−20.64) | 15.61 → 12.29 ms, −21.30% (−21.56..−20.86) | 43.19 → 34.09 ms, −21.01% (−21.18..−20.48) |
+| v3 | 1.659 → 1.282 ms, −22.70% (−22.95..−19.88) | 21.12 → 16.94 ms, −20.03% (−20.10..−19.60) | 59.71 → 46.46 ms, −22.17% (−22.45..−22.00) |
+
+The changes, in order:
+
+1. **Sixteen columns per step on AVX-512** in the dense, gradient and fused-SSIM kernels (`01b2677e`, `4e17ba37`):
+   every term is element-wise, so a lane computes the eight-wide step's bits; revision 7 adds a step's sixteen values to
+   the sixteen f32 row lanes in one op. Measured slower at revision 5 (its f64 lanes split each step back into two), so
+   since `db964918` the wide steps run at revision 7 only. The gradient chunks also load from windows cut to their
+   exact span; the term helpers are generic over a `Vf32` trait (magetypes' 8- and 16-lane types have the same
+   per-lane ops).
+2. **sRGB8 → linear through byte permutes, 64 pixels per step** on v4x (`98fc621b`, every revision): the table as
+   four byte planes, two 128-entry `vpermt2b` per plane blended on index bit 7, a deinterleave whose permute tables
+   are transposed so two unpack levels yield pixels in order. 50.8 → 48.5 ms on the synthetic 2048² pair.
+3. Matrix after 1–2 against `bad544a3` (`matrix_rev7_bad544a3_vs_db964918/grid.tsv`, B and Tga): v4x −13% to −18% for
+   images of 576² and up, −8% to −9% at 256², about −1% at 64², for every content class alike; v3 +0.3% to +1.2%
+   (recovered by 5–6).
+4. **Difference forms and the cube root** (`819e2c49`, revision 7): the v1 HF sums and the edge-width gradient sums
+   move to the f32 row lanes as source sums plus differences, `(vd − vs)(vd + vs)`, `|vd| − |vs|`, `gdst − gsrc`
+   (exact subtractions when the two are within a factor of 2), folded as source → both sums, difference → the
+   distorted sum; the opsin cube root is `det_math::cbrt_newton_f32` (a reciprocal-root seed, one Newton step, one
+   residual Halley step: one division; within 3 ulp below 2^126 and correctly rounded for 72.7% of [1, 8), against
+   `cbrt_midp`'s 3 ulp and 56%). Paired against `db964918`: v4x −0.78% / −2.05% / −3.03%, v3 −1.37% / −2.62% /
+   −2.63% (256² / 1024² / 1507×2048).
+5. **v3/v4 horizontal blurs read one checked window per block** (`ea78465e`, every revision), as the v4x versions did:
+   v3 −7.69% / −10.52% / −13.20%.
+6. **Vertical blurs cut each row's tile span once** (`cb4dba9b`, every revision): v3 −1.66% / −2.30% / −2.73%; v4x
+   −0.58% / −0.26% / −0.44% (the last two inside their intervals).
+7. **A one-thread rayon pool runs the sequential paths** (`77ac5c2a`): every parallel section had still injected its
+   work into the pool and blocked the caller on a futex. 64² 0.2535 → 0.2203 ms, 256² 1.232 → 1.140 ms (one thread,
+   unpaired medians). With eight threads parallel work still wins at 64² (0.163 against 0.219 ms).
+8. **BakeScorer caches its composed plan** (`d7282076`): it was rebuilt several times per score. 64² 0.2198 →
+   0.1867 ms, 256² 1.137 → 1.096 ms.
+9. **Folds only written pools; a revision-7 dense kernel without the eight-lane buffers** (`5e706fc9`): 64² 0.1875 →
+   0.1813 ms, 256² 1.096 → 1.060 ms, 1024² 12.16 → 11.97 ms.
+
+**Accuracy of 4 against the exact f64 oracle** (`rev7_forms.py --exact-stable`, the 93 near-identical pairs; outputs
+under `/mnt/v/output/zensim/byconstruction-2026-10-22/rev7/rev7c1_accuracy/`): per-feature median error p90 2.80e-6
+(revision 6) → 2.39e-6, p99 3.80e-5 → 3.78e-5; HF magnitude loss 9.2e-6 → 4.4e-6, edge-width change 1.6e-5 → 9.5e-6;
+the worst feature, `peaks_ssim_max_s3_b`, 4.65e-5 → 5.91e-5 (the B-channel SSIM peaks move with the cube root's error
+pattern).
+
+**Tried and not kept**: a division-free cube root (two Newton steps and a scaled correction; within 1 ulp, 91.4%
+correctly rounded) made the opsin step slower, because it is bound by FP op count rather than the divider (13.1% →
+15.1% of samples); spreading revision 7's vertical blockiness lattice over eight lanes removed the lane-0 add chain but
+not the time (1.09 against 1.11 ms; the scalar divisions bound it); a 16-wide loop at revision 5 (above).
+
+**Where the time goes now** (B, revision 7, 2048², one thread): v4x — the dense kernel 18%, sRGB → XYB 15% (opsin math
+and the cube root), the vertical blur 13%, the horizontal fused blur 10%, the fused SSIM pools 8%, the gradient kernel
+6%, the box blurs of the activity plane 4.5%, blockiness 4%; v3 — dense 22%, XYB 15% (scalar table loads: no safe AVX2
+gather exists), vertical blur 13%, horizontal fused blur 13%, fused SSIM 8%, gradient 7%. For 64² images the per-row
+pool folds and finishes and the scalar gradient head and tail are what remains above the pixel work.
+
+Open: NEON still runs the scalar canonical bodies (magetypes' NEON `max`/`min` propagate NaN where the canon's
+`f32::max` does not; `FMAXNM`/`FMINNM` would match it); multithreaded scaling is bound by the strips' memory traffic
+(about 430 bytes per pixel move from L3 to L2 at 2048²; a line-buffer walk would keep them in L2).
+
 ### DVIFM 0.3 on the E21 sets and the mixture test (2026-10-23)
 
 Owner request: "eval dvifm 0.3 on kadid and other distortion//corrputions". Scorer: the frozen runtime of the
