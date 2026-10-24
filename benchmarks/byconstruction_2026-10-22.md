@@ -1307,6 +1307,72 @@ AIC2026 public_train zero-shot.
   0 global-edit inversions M64 leads on E21 (−0.0131) and on smoothness (0.502, against 0.483 for B's recipe). Next:
   max pairs on the gated inputs (Mgg64), which combines the two strictly monotone gains.
 
+**Mgg64** (`mono:thr:mp64` on fx1gg, no AIC leg, trainer `70eba638`): E21 Δ **−0.0161** (SE 0.0019): KADID **−0.003**,
+TID2013 −0.028, KonFiG −0.032, CID22-A −0.001. Mean Z-RMSE 0.507 (KADID 0.462, TID2013 0.456, KonFiG 0.611, CID22-A
+0.497). Global-edit mixture 0 inversions in all 12 cells; standard mixture 2–36 per cell (88 in all, max +7.6; blur or
+posterize, then light noise). AIC2026 public_train zero-shot 0.903 (0.899–0.910).
+
+The gate gives the monotone class its best KADID result (Δ −0.003 and Z-RMSE 0.462, against M64's −0.017 and 0.487),
+where global edits are, and costs KonFiG (−0.032 against −0.015) and TID2013. Net, it is worse than M64 on E21
+(−0.0161 against −0.0131) and on smoothness (0.507 against 0.502). M64, which reads no descriptor at all, stays the
+best arm with no global-edit inversion.
+
+### Map todo: guided redistribution and coarse-upsample kernels for JXL map utility (2026-10-24)
+
+Owner, 2026-10-24: "On the todo list for maps: Can we get the new features into a fully-optimized scalar + map path?
+guided_coarse_redistribution < helpful on no on map utility for jxl? Also can we investigate better interpolation
+methods, for diffmaps as well as what might help for the laplacian."
+
+**What the JXL loop's map is.** jxl-encoder's zensim loop (`JXL_ZENSIM_RD_PROFILE=b`) steers with zensim's fused
+`DiffmapWeighting::Trained` map. Under profile B that map is the legacy `WEIGHTS_PREVIEW_V0_2` basic-plane map (B's
+network supplies the score, not the map). The loop pools it per 8×8 block as an L2 norm (`compute_tile_dist`). Guided
+redistribution (E-JBU) keeps every coarse cell's mass inside its own footprint (at most 8 px), so it changes a block's L2
+only by concentrating that mass.
+
+**Setup.** `ZENSIM_DIFFMAP_UPSAMPLE` (custom-profiles research knob, default unchanged, `1a8f3ebc`) selects bilinear,
+Catmull-Rom, cubic B-spline or Lanczos-3 sampling of each coarse plane at pixel centres, optionally `-mass` (each
+footprint keeps its nearest-neighbour mass, with the interpolation as guide). jxl-encoder gained
+`JXL_ZENSIM_GUIDED_COARSE` (`32e42f9b`, default off). The harness binary was built from a symlink mirror so that every
+path dependency resolves to this branch's zensim (`/var/tmp/byconstruction-bin/jxl-maprd-e37ed3ee/`, PROVENANCE
+there). Corpus: 24 TRAIN images (`jxl_map_corpus.py`: 10 CID22 training photos, 2 CID22 training graphics, 6 gb82-sc
+screen crops, 6 imazen-26 TRAIN illustration crops; 512 px, pixel-exact crops). Seven distances 0.6–10, 4 loop
+iterations, 9 arms (no-loop baseline, nearest, guided, four kernels, two `-mass` forms). Judges: SSIMULACRA2 and
+butteraugli 3-norm from an independent zenmetrics build (`/var/tmp/byconstruction-bin/zenmetrics-judge-7a0f8394/`), and
+that build's zensim (home turf). Run: `jxl_map_rd.sh`, outputs `/mnt/v/output/zensim/byconstruction-2026-10-22/jxl-maprd/`.
+
+**The map against no loop** (bytes saved at equal judged score, median over matched points): nearest saves +2.3% /
++0.1% / +0.1% (SSIMULACRA2 / butteraugli / zensim) on photos, +4.4 / +2.8 / +1.9 on screens, +1.0 / −2.2 / −0.8 on
+illustrations. Comparing modes through these unpaired medians is noisy; the paired comparison below is the measurement.
+
+**Against today's nearest map** (bytes saved at equal judged score, mean over images of each image's median, 95%
+bootstrap CI over the 24 images; positive is better):
+
+| Mode | SSIMULACRA2 | butteraugli | zensim |
+|---|---|---|---|
+| guided redistribution | −0.29 [−0.76, +0.20] | −0.51 [−1.71, +0.24] | −0.15 [−0.85, +0.50] |
+| bilinear | +0.01 [−0.68, +0.72] | +0.33 [−1.17, +1.83] | −0.15 [−0.62, +0.36] |
+| bilinear-mass | −0.12 [−0.42, +0.13] | −0.66 [−1.84, +0.11] | −0.21 [−0.57, +0.12] |
+| Catmull-Rom | +0.06 [−0.27, +0.40] | +0.61 [−0.39, +1.88] | −0.09 [−0.65, +0.38] |
+| Catmull-Rom-mass | −0.24 [−0.50, −0.03] | +0.34 [−0.68, +1.60] | −0.04 [−0.30, +0.20] |
+| cubic B-spline | +0.03 [−0.39, +0.46] | −0.61 [−1.78, +0.36] | −0.01 [−0.54, +0.48] |
+| Lanczos-3 | +0.12 [−0.28, +0.53] | +1.22 [−0.31, +3.00] | +0.12 [−0.36, +0.63] |
+
+- **Guided redistribution does not help JXL.** It is slightly worse overall, clearly worse on screens (SSIMULACRA2
+  −0.66% [−0.91, −0.41], butteraugli −2.41% [−6.63, +0.30]), and gains only on photos under the home-turf zensim judge
+  (+0.57% [+0.11, +1.00]). Leave it off.
+- **No interpolation kernel reliably beats nearest.** All CIs include zero except Catmull-Rom-mass, which is slightly
+  worse on SSIMULACRA2. Lanczos-3 has the best butteraugli point estimate (+1.2%, larger on illustrations, +2.8%
+  [−0.5, +7.5]); only a larger corpus could separate it from zero. Sub-block shape matters little to a loop that pools
+  each 8×8 block with an L2 norm.
+- **Not covered:** the attribution-map arms (`JXL_ZENSIM_MODEL_MAP`, a map that follows the model's own gradient) do
+  not use this fusion path, so these kernels do not reach them.
+
+**New features in the scalar and map paths.** Not built. The global-change descriptor helps only the sign-free arms,
+which invert on global edits; gated into a monotone model it helps KADID and costs TID2013 and KonFiG (Tgg, Mgg64), and
+the strictly monotone frontier (M64) reads neither it nor the hpm ringing. Serving it (a research family at f1867–f1890
+like palette's, five running sums per channel and scale fused into the walk, closed-form map derivatives) waits for a
+model that needs it.
+
 ### DVIFM 0.3 on the E21 sets and the mixture test (2026-10-23)
 
 Owner request: "eval dvifm 0.3 on kadid and other distortion//corrputions". Scorer: the frozen runtime of the
