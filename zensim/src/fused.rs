@@ -5777,6 +5777,51 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
         f32x8::from_array_t(token, std::array::from_fn(|i| a[i] as f32))
     };
 
+    // Revision-7 candidate (measurement only, `--cfg zensim_rev7_pools`):
+    // each pool's chunk adds go to f32 lanes for the row, folded into the
+    // f64 lanes before the scalar tail. The default build keeps the f64
+    // per-chunk update of revisions 5 and 6.
+    let rev7 = cfg!(zensim_rev7_pools) && local;
+    macro_rules! pool_add {
+        ($tgt:ident, $tgt32:ident, $field:ident, $x0:expr, $v:expr) => {{
+            let v: f32x8 = $v;
+            if rev7 {
+                let off = $x0 & 15;
+                let lanes: &mut [f32; 8] = (&mut $tgt32.$field[off..off + 8]).try_into().unwrap();
+                (f32x8::load_t(token, lanes) + v).store(lanes);
+            } else {
+                let values = v.to_array();
+                let lanes = $tgt.$field.chunk8($x0 & (P::LANES - 1));
+                for l in 0..8 {
+                    lanes[l] += values[l] as f64;
+                }
+            }
+        }};
+    }
+    // Pools whose features difference or ratio large sums (v1 variance,
+    // texture and contrast terms; the band raw moments) keep f64 lanes: f32
+    // row sums lose up to 2.4e-4 of those features to the cancellation.
+    macro_rules! pool_add64 {
+        ($tgt:ident, $field:ident, $x0:expr, $v:expr) => {{
+            let values = ($v).to_array();
+            let lanes = $tgt.$field.chunk8($x0 & (P::LANES - 1));
+            for l in 0..8 {
+                lanes[l] += values[l] as f64;
+            }
+        }};
+    }
+    macro_rules! pool_fold {
+        ($tgt:ident, $tgt32:ident, [$($field:ident),*]) => {{
+            $(
+                for off in [0usize, 8] {
+                    let lanes = $tgt.$field.chunk8(off);
+                    let a: [f64; 8] = std::array::from_fn(|l| $tgt32.$field[off + l] as f64);
+                    (f64x8::load_t(token, lanes) + f64x8::from_array_t(token, a)).store(lanes);
+                    $tgt32.$field[off..off + 8].fill(0.0);
+                }
+            )*
+        }};
+    }
     for y in if local {
         inner_start..inner_end
     } else {
@@ -5785,6 +5830,39 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
         if y >= inner_start && y < inner_end {
             let base = y * width;
             let mut row = VblurPools::<P>::zero();
+            let mut row32 = VblurPools::<[f32; 16]> {
+                ssim_d: [0.0; 16],
+                ssim_d4: [0.0; 16],
+                ssim_d2: [0.0; 16],
+                ssim_d8: [0.0; 16],
+                edge_art: [0.0; 16],
+                edge_art4: [0.0; 16],
+                edge_art2: [0.0; 16],
+                edge_art8: [0.0; 16],
+                edge_det: [0.0; 16],
+                edge_det4: [0.0; 16],
+                edge_det2: [0.0; 16],
+                edge_det8: [0.0; 16],
+                // Unused: these pools keep f64 lanes (`pool_add64`).
+                hf_sq_src: [0.0; 16],
+                hf_sq_dst: [0.0; 16],
+                hf_abs_src: [0.0; 16],
+                hf_abs_dst: [0.0; 16],
+                mse: [0.0; 16],
+                act_sum: [0.0; 16],
+                masked_ssim_d: [0.0; 16],
+                masked_ssim_d4: [0.0; 16],
+                masked_ssim_d2: [0.0; 16],
+                masked_art4: [0.0; 16],
+                masked_det4: [0.0; 16],
+                masked_mse: [0.0; 16],
+                iw_ssim_d: [0.0; 16],
+                iw_ssim_d4: [0.0; 16],
+                iw_ssim_d2: [0.0; 16],
+                iw_art4: [0.0; 16],
+                iw_det4: [0.0; 16],
+                iw_mse: [0.0; 16],
+            };
             let [wm1, wm2, wsq, ws12, wact] = win.f64_states().unwrap_or([&[]; 5]);
             // Provable-length slices: `x0 + 8 <= full * 8` is then literal,
             // so `narrow`'s window reads and the plane loads compile with
@@ -5844,35 +5922,11 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
                 .max(zero);
                 let sd2 = sd * sd;
                 let sd4 = sd2 * sd2;
-                {
-                    let values = sd.to_array();
-                    let lanes = row.ssim_d.chunk8(x0 & (P::LANES - 1));
-                    for l in 0..8 {
-                        lanes[l] += values[l] as f64;
-                    }
-                }
-                {
-                    let values = sd4.to_array();
-                    let lanes = row.ssim_d4.chunk8(x0 & (P::LANES - 1));
-                    for l in 0..8 {
-                        lanes[l] += values[l] as f64;
-                    }
-                }
-                {
-                    let values = sd2.to_array();
-                    let lanes = row.ssim_d2.chunk8(x0 & (P::LANES - 1));
-                    for l in 0..8 {
-                        lanes[l] += values[l] as f64;
-                    }
-                }
+                pool_add!(row, row32, ssim_d, x0, sd);
+                pool_add!(row, row32, ssim_d4, x0, sd4);
+                pool_add!(row, row32, ssim_d2, x0, sd2);
                 if !free.local_only && !free.omit_peaks {
-                    {
-                        let values = (sd4 * sd4).to_array();
-                        let lanes = row.ssim_d8.chunk8(x0 & (P::LANES - 1));
-                        for l in 0..8 {
-                            lanes[l] += values[l] as f64;
-                        }
-                    }
+                    pool_add!(row, row32, ssim_d8, x0, sd4 * sd4);
                     for v in sd.to_array() {
                         acc.ssim_max = acc.ssim_max.max(v);
                     }
@@ -5903,63 +5957,15 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
                 let a4 = a2 * a2;
                 let dl4 = dl2 * dl2;
                 if !free.omit_edges {
-                    {
-                        let values = artifact.to_array();
-                        let lanes = row.edge_art.chunk8(x0 & (P::LANES - 1));
-                        for l in 0..8 {
-                            lanes[l] += values[l] as f64;
-                        }
-                    }
-                    {
-                        let values = a4.to_array();
-                        let lanes = row.edge_art4.chunk8(x0 & (P::LANES - 1));
-                        for l in 0..8 {
-                            lanes[l] += values[l] as f64;
-                        }
-                    }
-                    {
-                        let values = a2.to_array();
-                        let lanes = row.edge_art2.chunk8(x0 & (P::LANES - 1));
-                        for l in 0..8 {
-                            lanes[l] += values[l] as f64;
-                        }
-                    }
-                    {
-                        let values = detail_lost.to_array();
-                        let lanes = row.edge_det.chunk8(x0 & (P::LANES - 1));
-                        for l in 0..8 {
-                            lanes[l] += values[l] as f64;
-                        }
-                    }
-                    {
-                        let values = dl4.to_array();
-                        let lanes = row.edge_det4.chunk8(x0 & (P::LANES - 1));
-                        for l in 0..8 {
-                            lanes[l] += values[l] as f64;
-                        }
-                    }
-                    {
-                        let values = dl2.to_array();
-                        let lanes = row.edge_det2.chunk8(x0 & (P::LANES - 1));
-                        for l in 0..8 {
-                            lanes[l] += values[l] as f64;
-                        }
-                    }
+                    pool_add!(row, row32, edge_art, x0, artifact);
+                    pool_add!(row, row32, edge_art4, x0, a4);
+                    pool_add!(row, row32, edge_art2, x0, a2);
+                    pool_add!(row, row32, edge_det, x0, detail_lost);
+                    pool_add!(row, row32, edge_det4, x0, dl4);
+                    pool_add!(row, row32, edge_det2, x0, dl2);
                     if !free.omit_peaks {
-                        {
-                            let values = (a4 * a4).to_array();
-                            let lanes = row.edge_art8.chunk8(x0 & (P::LANES - 1));
-                            for l in 0..8 {
-                                lanes[l] += values[l] as f64;
-                            }
-                        }
-                        {
-                            let values = (dl4 * dl4).to_array();
-                            let lanes = row.edge_det8.chunk8(x0 & (P::LANES - 1));
-                            for l in 0..8 {
-                                lanes[l] += values[l] as f64;
-                            }
-                        }
+                        pool_add!(row, row32, edge_art8, x0, a4 * a4);
+                        pool_add!(row, row32, edge_det8, x0, dl4 * dl4);
                         for v in artifact.to_array() {
                             acc.edge_art_max = acc.edge_art_max.max(v);
                         }
@@ -5973,253 +5979,117 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
                 let vs = sv - m1v;
                 let vd = dv - m2v;
                 if !free.local_only {
-                    {
-                        let values = (vs * vs).to_array();
-                        let lanes = row.hf_sq_src.chunk8(x0 & (P::LANES - 1));
-                        for l in 0..8 {
-                            lanes[l] += values[l] as f64;
-                        }
-                    }
-                    {
-                        let values = (vd * vd).to_array();
-                        let lanes = row.hf_sq_dst.chunk8(x0 & (P::LANES - 1));
-                        for l in 0..8 {
-                            lanes[l] += values[l] as f64;
-                        }
-                    }
-                    {
-                        let values = diff1.to_array();
-                        let lanes = row.hf_abs_src.chunk8(x0 & (P::LANES - 1));
-                        for l in 0..8 {
-                            lanes[l] += values[l] as f64;
-                        }
-                    }
-                    {
-                        let values = diff2.to_array();
-                        let lanes = row.hf_abs_dst.chunk8(x0 & (P::LANES - 1));
-                        for l in 0..8 {
-                            lanes[l] += values[l] as f64;
-                        }
-                    }
+                    pool_add64!(row, hf_sq_src, x0, vs * vs);
+                    pool_add64!(row, hf_sq_dst, x0, vd * vd);
+                    pool_add64!(row, hf_abs_src, x0, diff1);
+                    pool_add64!(row, hf_abs_dst, x0, diff2);
                 }
 
                 // MSE + ext pools
                 let pd = sv - dv;
                 let d2 = pd * pd;
-                {
-                    let values = d2.to_array();
-                    let lanes = row.mse.chunk8(x0 & (P::LANES - 1));
-                    for l in 0..8 {
-                        lanes[l] += values[l] as f64;
-                    }
-                }
+                pool_add!(row, row32, mse, x0, d2);
                 if ext.on {
-                    {
-                        let values = actv.to_array();
-                        let lanes = row.act_sum.chunk8(x0 & (P::LANES - 1));
-                        for l in 0..8 {
-                            lanes[l] += values[l] as f64;
-                        }
-                    }
+                    pool_add!(row, row32, act_sum, x0, actv);
                     if ext.mask {
                         let w = one / km.mul_add(actv, one);
                         let da = (sd * w).max(zero);
                         let d2a = da * da;
-                        {
-                            let values = da.to_array();
-                            let lanes = row.masked_ssim_d.chunk8(x0 & (P::LANES - 1));
-                            for l in 0..8 {
-                                lanes[l] += values[l] as f64;
-                            }
-                        }
-                        {
-                            let values = d2a.to_array();
-                            let lanes = row.masked_ssim_d2.chunk8(x0 & (P::LANES - 1));
-                            for l in 0..8 {
-                                lanes[l] += values[l] as f64;
-                            }
-                        }
-                        {
-                            let values = (d2a * d2a).to_array();
-                            let lanes = row.masked_ssim_d4.chunk8(x0 & (P::LANES - 1));
-                            for l in 0..8 {
-                                lanes[l] += values[l] as f64;
-                            }
-                        }
+                        pool_add!(row, row32, masked_ssim_d, x0, da);
+                        pool_add!(row, row32, masked_ssim_d2, x0, d2a);
+                        pool_add!(row, row32, masked_ssim_d4, x0, d2a * d2a);
                         let e = ed * w;
                         let ep = e.max(zero);
                         let en = (-e).max(zero);
                         let a2m = ep * ep;
                         let dl2m = en * en;
-                        {
-                            let values = (a2m * a2m).to_array();
-                            let lanes = row.masked_art4.chunk8(x0 & (P::LANES - 1));
-                            for l in 0..8 {
-                                lanes[l] += values[l] as f64;
-                            }
-                        }
-                        {
-                            let values = (dl2m * dl2m).to_array();
-                            let lanes = row.masked_det4.chunk8(x0 & (P::LANES - 1));
-                            for l in 0..8 {
-                                lanes[l] += values[l] as f64;
-                            }
-                        }
-                        {
-                            let values = (d2 * w).to_array();
-                            let lanes = row.masked_mse.chunk8(x0 & (P::LANES - 1));
-                            for l in 0..8 {
-                                lanes[l] += values[l] as f64;
-                            }
-                        }
+                        pool_add!(row, row32, masked_art4, x0, a2m * a2m);
+                        pool_add!(row, row32, masked_det4, x0, dl2m * dl2m);
+                        pool_add!(row, row32, masked_mse, x0, d2 * w);
                     }
                     if ext.iw {
                         let w = kiw.mul_add(actv, one);
                         let db = (sd * w).max(zero);
                         let d2b = db * db;
-                        {
-                            let values = db.to_array();
-                            let lanes = row.iw_ssim_d.chunk8(x0 & (P::LANES - 1));
-                            for l in 0..8 {
-                                lanes[l] += values[l] as f64;
-                            }
-                        }
-                        {
-                            let values = d2b.to_array();
-                            let lanes = row.iw_ssim_d2.chunk8(x0 & (P::LANES - 1));
-                            for l in 0..8 {
-                                lanes[l] += values[l] as f64;
-                            }
-                        }
-                        {
-                            let values = (d2b * d2b).to_array();
-                            let lanes = row.iw_ssim_d4.chunk8(x0 & (P::LANES - 1));
-                            for l in 0..8 {
-                                lanes[l] += values[l] as f64;
-                            }
-                        }
+                        pool_add!(row, row32, iw_ssim_d, x0, db);
+                        pool_add!(row, row32, iw_ssim_d2, x0, d2b);
+                        pool_add!(row, row32, iw_ssim_d4, x0, d2b * d2b);
                         let e = ed * w;
                         let ep = e.max(zero);
                         let en = (-e).max(zero);
                         let a2i = ep * ep;
                         let dl2i = en * en;
-                        {
-                            let values = (a2i * a2i).to_array();
-                            let lanes = row.iw_art4.chunk8(x0 & (P::LANES - 1));
-                            for l in 0..8 {
-                                lanes[l] += values[l] as f64;
-                            }
-                        }
-                        {
-                            let values = (dl2i * dl2i).to_array();
-                            let lanes = row.iw_det4.chunk8(x0 & (P::LANES - 1));
-                            for l in 0..8 {
-                                lanes[l] += values[l] as f64;
-                            }
-                        }
-                        {
-                            let values = (d2 * w).to_array();
-                            let lanes = row.iw_mse.chunk8(x0 & (P::LANES - 1));
-                            for l in 0..8 {
-                                lanes[l] += values[l] as f64;
-                            }
-                        }
+                        pool_add!(row, row32, iw_art4, x0, a2i * a2i);
+                        pool_add!(row, row32, iw_det4, x0, dl2i * dl2i);
+                        pool_add!(row, row32, iw_mse, x0, d2 * w);
                     }
                 }
 
                 // Free raw moments — band-lifetime canonical lanes.
                 if free.raw_moments {
-                    {
-                        let values = sv.to_array();
-                        let lanes = band.fm_s.chunk8(x0 & (P::LANES - 1));
-                        for l in 0..8 {
-                            lanes[l] += values[l] as f64;
-                        }
-                    }
-                    {
-                        let values = dv.to_array();
-                        let lanes = band.fm_d.chunk8(x0 & (P::LANES - 1));
-                        for l in 0..8 {
-                            lanes[l] += values[l] as f64;
-                        }
-                    }
-                    {
-                        let values = (sv * sv).to_array();
-                        let lanes = band.fm_s2.chunk8(x0 & (P::LANES - 1));
-                        for l in 0..8 {
-                            lanes[l] += values[l] as f64;
-                        }
-                    }
-                    {
-                        let values = (dv * dv).to_array();
-                        let lanes = band.fm_d2.chunk8(x0 & (P::LANES - 1));
-                        for l in 0..8 {
-                            lanes[l] += values[l] as f64;
-                        }
-                    }
+                    pool_add64!(band, fm_s, x0, sv);
+                    pool_add64!(band, fm_d, x0, dv);
+                    pool_add64!(band, fm_s2, x0, sv * sv);
+                    pool_add64!(band, fm_d2, x0, dv * dv);
                     let df = dv - sv;
-                    {
-                        let values = (df * (dv + sv)).to_array();
-                        let lanes = band.fm_dd.chunk8(x0 & (P::LANES - 1));
-                        for l in 0..8 {
-                            lanes[l] += values[l] as f64;
-                        }
-                    }
-                    {
-                        let values = df.to_array();
-                        let lanes = band.fm_ds.chunk8(x0 & (P::LANES - 1));
-                        for l in 0..8 {
-                            lanes[l] += values[l] as f64;
-                        }
-                    }
+                    pool_add64!(band, fm_dd, x0, df * (dv + sv));
+                    pool_add64!(band, fm_ds, x0, df);
                 }
                 // Free bounded error + luminance bins.
                 if free.bounded_err {
                     let sqm = (pd * pd).max(zero);
                     let be_i = sqm / (sqm + c_mse);
-                    {
-                        let values = be_i.to_array();
-                        let lanes = band.be_m.chunk8(x0 & (P::LANES - 1));
-                        for l in 0..8 {
-                            lanes[l] += values[l] as f64;
-                        }
-                    }
+                    pool_add64!(band, be_m, x0, be_i);
                     if free.lum_bins {
                         let ry = sv.max(zero);
                         let t = ry / (ry + c_lumt);
                         let omt = one - t;
                         let wd = omt * omt;
                         let wb = t * t;
-                        {
-                            let values = (wd * be_i).to_array();
-                            let lanes = band.wd_num.chunk8(x0 & (P::LANES - 1));
-                            for l in 0..8 {
-                                lanes[l] += values[l] as f64;
-                            }
-                        }
-                        {
-                            let values = wd.to_array();
-                            let lanes = band.wd_den.chunk8(x0 & (P::LANES - 1));
-                            for l in 0..8 {
-                                lanes[l] += values[l] as f64;
-                            }
-                        }
-                        {
-                            let values = (wb * be_i).to_array();
-                            let lanes = band.wb_num.chunk8(x0 & (P::LANES - 1));
-                            for l in 0..8 {
-                                lanes[l] += values[l] as f64;
-                            }
-                        }
-                        {
-                            let values = wb.to_array();
-                            let lanes = band.wb_den.chunk8(x0 & (P::LANES - 1));
-                            for l in 0..8 {
-                                lanes[l] += values[l] as f64;
-                            }
-                        }
+                        pool_add64!(band, wd_num, x0, wd * be_i);
+                        pool_add64!(band, wd_den, x0, wd);
+                        pool_add64!(band, wb_num, x0, wb * be_i);
+                        pool_add64!(band, wb_den, x0, wb);
                     }
                 }
+            }
+            if rev7 {
+                pool_fold!(
+                    row,
+                    row32,
+                    [
+                        ssim_d,
+                        ssim_d4,
+                        ssim_d2,
+                        ssim_d8,
+                        edge_art,
+                        edge_art4,
+                        edge_art2,
+                        edge_art8,
+                        edge_det,
+                        edge_det4,
+                        edge_det2,
+                        edge_det8,
+                        hf_sq_src,
+                        hf_sq_dst,
+                        hf_abs_src,
+                        hf_abs_dst,
+                        mse,
+                        act_sum,
+                        masked_ssim_d,
+                        masked_ssim_d4,
+                        masked_ssim_d2,
+                        masked_art4,
+                        masked_det4,
+                        masked_mse,
+                        iw_ssim_d,
+                        iw_ssim_d4,
+                        iw_ssim_d2,
+                        iw_art4,
+                        iw_det4,
+                        iw_mse
+                    ]
+                );
             }
             // Scalar tail — the canonical element step verbatim.
             for x in full * 8..width {

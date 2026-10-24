@@ -5085,6 +5085,50 @@ fn gradient_block_kernel_canon64_vec<
     let mut bank_acc: [GmsBankCellVar; 5] = std::array::from_fn(|_| GmsBankCellVar::for_mode(mode));
     let mut chroma_acc: [GmsBankCellVar; 5] =
         std::array::from_fn(|_| GmsBankCellVar::for_mode(mode));
+    // Revision-7 candidate (measurement only, `--cfg zensim_rev7_pools`):
+    // each pool's chunk adds go to f32 lanes for the row, folded into the
+    // f64 lanes before the scalar tail. The default build keeps revisions 5
+    // and 6 exactly.
+    let rev7 = cfg!(zensim_rev7_pools) && P::LANES == 16;
+    macro_rules! gpool_add {
+        ($pool:ident, $pool32:ident, $x0:expr, $v:expr) => {{
+            let v: f32x8 = $v;
+            if rev7 {
+                let off = $x0 & 15;
+                let lanes: &mut [f32; 8] = (&mut $pool32[off..off + 8]).try_into().unwrap();
+                (f32x8::load_t(token, lanes) + v).store(lanes);
+            } else {
+                let a = v.to_array();
+                let lanes = $pool.chunk8($x0 & (P::LANES - 1));
+                for l in 0..8 {
+                    lanes[l] += a[l] as f64;
+                }
+            }
+        }};
+    }
+    // The gradient sums feed a ratio (edge-width change) and keep f64 lanes.
+    macro_rules! gpool_add64 {
+        ($pool:ident, $x0:expr, $v:expr) => {{
+            let a = ($v).to_array();
+            let lanes = $pool.chunk8($x0 & (P::LANES - 1));
+            for l in 0..8 {
+                lanes[l] += a[l] as f64;
+            }
+        }};
+    }
+    macro_rules! gpool_fold {
+        ($($pool:ident, $pool32:ident);*) => {{
+            $(
+                for off in [0usize, 8] {
+                    let lanes = $pool.chunk8(off);
+                    let a: [f64; 8] = std::array::from_fn(|l| $pool32[off + l] as f64);
+                    for l in 0..8 {
+                        lanes[l] += a[l];
+                    }
+                }
+            )*
+        }};
+    }
     for y in 0..height {
         let row = (y + 1) * width;
         let row_u = y * width;
@@ -5123,6 +5167,9 @@ fn gradient_block_kernel_canon64_vec<
             let mut r_gdst = P::zero();
             let mut r_bv_gain = P::zero();
             let mut r_bv_loss = P::zero();
+            let (mut r_gms32, mut r_gms232, mut r_ring32, mut r_band32) =
+                ([0.0f32; 16], [0.0f32; 16], [0.0f32; 16], [0.0f32; 16]);
+            let (mut r_bv_gain32, mut r_bv_loss32) = ([0.0f32; 16], [0.0f32; 16]);
             // Lane-aligned head: x = 1..8 scalar (interior starts one
             // pixel in — the canonical lanes land on chunk lanes only for
             // x ≡ 0 (mod 8) chunk starts).
@@ -5226,41 +5273,11 @@ fn gradient_block_kernel_canon64_vec<
                     }
                 }
 
-                {
-                    let a = gsrc.to_array();
-                    let lanes = r_gsrc.chunk8(x0 & (P::LANES - 1));
-                    for l in 0..8 {
-                        lanes[l] += a[l] as f64;
-                    }
-                }
-                {
-                    let a = gdst.to_array();
-                    let lanes = r_gdst.chunk8(x0 & (P::LANES - 1));
-                    for l in 0..8 {
-                        lanes[l] += a[l] as f64;
-                    }
-                }
-                {
-                    let a = g.to_array();
-                    let lanes = r_gms.chunk8(x0 & (P::LANES - 1));
-                    for l in 0..8 {
-                        lanes[l] += a[l] as f64;
-                    }
-                }
-                {
-                    let a = g2.to_array();
-                    let lanes = r_gms2.chunk8(x0 & (P::LANES - 1));
-                    for l in 0..8 {
-                        lanes[l] += a[l] as f64;
-                    }
-                }
-                {
-                    let a = ring_i.to_array();
-                    let lanes = r_ring.chunk8(x0 & (P::LANES - 1));
-                    for l in 0..8 {
-                        lanes[l] += a[l] as f64;
-                    }
-                }
+                gpool_add64!(r_gsrc, x0, gsrc);
+                gpool_add64!(r_gdst, x0, gdst);
+                gpool_add!(r_gms, r_gms32, x0, g);
+                gpool_add!(r_gms2, r_gms232, x0, g2);
+                gpool_add!(r_ring, r_ring32, x0, ring_i);
                 if let Some(r4) = r4.as_mut() {
                     let ra = ring_i.to_array();
                     let gs = gsrc.to_array();
@@ -5277,30 +5294,19 @@ fn gradient_block_kernel_canon64_vec<
                         );
                     }
                 }
-                {
-                    let a = band.to_array();
-                    let lanes = r_band.chunk8(x0 & (P::LANES - 1));
-                    for l in 0..8 {
-                        lanes[l] += a[l] as f64;
-                    }
-                }
+                gpool_add!(r_band, r_band32, x0, band);
                 if BANDVIS {
-                    {
-                        let a = bv_gain.to_array();
-                        let lanes = r_bv_gain.chunk8(x0 & (P::LANES - 1));
-                        for l in 0..8 {
-                            lanes[l] += a[l] as f64;
-                        }
-                    }
-                    {
-                        let a = bv_loss.to_array();
-                        let lanes = r_bv_loss.chunk8(x0 & (P::LANES - 1));
-                        for l in 0..8 {
-                            lanes[l] += a[l] as f64;
-                        }
-                    }
+                    gpool_add!(r_bv_gain, r_bv_gain32, x0, bv_gain);
+                    gpool_add!(r_bv_loss, r_bv_loss32, x0, bv_loss);
                 }
                 x0 += 8;
+            }
+            if rev7 {
+                gpool_fold!(
+                    r_gms, r_gms32; r_gms2, r_gms232;
+                    r_ring, r_ring32; r_band, r_band32; r_bv_gain, r_bv_gain32;
+                    r_bv_loss, r_bv_loss32
+                );
             }
             // Scalar tail — the canonical element step verbatim.
             for x in x0..interior_end {

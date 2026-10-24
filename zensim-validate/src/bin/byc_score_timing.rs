@@ -7,7 +7,7 @@
 //! the same pair). The caller alternates two arms in paired rounds (two builds, or one build under
 //! two `ZENSIM_RING_FORM` values).
 //!
-//! `--dump PATH` also writes the score's and every emitted feature's bits (hex, one per line) for
+//! `--dump PATH` also writes the score's and every emitted feature's bits (hex, one per line, line `k` is feature id `k − 1`) for
 //! before/after bit-identity checks (`scripts/byconstruction/perf_bits.sh`); `--tier` forces a
 //! dispatch tier by disabling archmage tokens process-wide, as `tier_audit_features` does.
 //!

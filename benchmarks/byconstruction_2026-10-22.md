@@ -1741,6 +1741,64 @@ pool conversions and adds (`vcvtps2pd`, `vaddpd`), which only revision 7's f32 l
 register copies around the destructive permutes; the four blur kernels and the fused SSIM pools 34% together; the
 gradient kernel 8%.
 
+4. **Horizontal blurs without per-tap range checks** (`box_blur_h_local11_wide`, `fused_blur_h_local11_wide`, v4x
+   only): each 16-output block reads one checked 26-leaf window and loads its eleven taps at constant offsets. Their
+   integer and branch share fell from 87% / 62% of their samples to 26% / 9%. Paired, 8 rounds, against change 3:
+   B −3.24% (512²) and −3.39% (2048²) at v4x, Tga −2.81% / −2.98%; v3, which uses other blur kernels, ±0.1%
+   (`step3/grid.tsv`). 110 of 110 dumps identical; full suite 929 passed.
+
+Hoisting the fused SSIM kernel's eleven mirrored window rows out of its chunk loop changed nothing measurable (68.13
+against 68.14 ms); LLVM already hoists them, so it was not kept.
+
+**Revision-7 candidates, measured** (`--cfg zensim_rev7_pools`, measurement only; the default build is bit-identical
+to the base, 110 of 110):
+
+- **f32 row lanes.** Each pool's chunk adds go to sixteen f32 lanes for the row, folded into the f64 lanes once per
+  row, in the dense kernel (29 pools), the fused SSIM kernel and the gradient kernel.
+- **Central moments two-pass per row.** A sixteen-lane f64 row mean, then the centred sums (d−μ)², (d−μ)³, (d−μ)⁴ in
+  sixteen f64 lanes, one Chan merge per row instead of one per 16 columns.
+- **Not every pool tolerates f32.** Pools whose features take a difference or ratio of two large sums lose up to
+  2.4e-4 (relative) of those features to the cancellation: revision 1's variance and texture loss and contrast
+  increase (Σ(s − μ₁)² against Σ(d − μ₂)²; 2.4e-4 on `basic_contrast_inc_s3_b`) and the edge-width change (Σ gradient
+  of the source against the distorted; 1.6e-5). Those pools, and every band-lifetime pool (the raw moments, some
+  signed, and the bounded-error bins), keep f64 lanes. With them in f64 the largest change of any feature over the 110 dumps is **6.3e-8** (relative); the score
+  moves in 4 of the 110 dumps.
+
+Paired, 8 rounds, against the current default build (`rev7c/grid.tsv`):
+
+| Bake | Tier | 512² | 2048² |
+|---|---|---|---|
+| B (rev 5) | v4x | 4.819 → 4.171 ms, −13.41% (−13.76..−13.16) | 68.17 → 56.02 ms, −17.80% (−17.89..−17.71) |
+| B (rev 5) | v3 | 6.859 → 5.403 ms, −21.24% (−21.37..−21.16) | 102.17 → 76.91 ms, −24.74% (−24.86..−24.63) |
+| Tga (rev 6) | v4x | 5.098 → 4.444 ms, −12.84% (−13.18..−12.78) | 72.26 → 60.25 ms, −16.71% (−16.77..−16.62) |
+| Tga (rev 6) | v3 | 7.298 → 5.850 ms, −19.78% (−19.95..−19.60) | 109.21 → 84.20 ms, −22.88% (−23.01..−22.83) |
+
+The dense kernel alone (`rev7a/grid.tsv`, an earlier build): −11.4% / −13.1% (B, v4x), −14.3% / −16.3% (B, v3).
+Since the session's base, B at 2048² on v4x has gone 78.77 → 68.17 ms (bit-identical) → 56.02 ms with these
+candidates.
+
+What a real revision 7 needs beyond the prototype: one canonical definition independent of SIMD width (every column,
+the `width % 8` tail included, adds to f32 lane `x & 15`; the fold to f64 at the row's end, or every 4,096 columns so
+an f32 lane never takes more than 256 adds), the same arithmetic in the scalar, NEON and wasm bodies (the prototype
+changed only the v4x/v4/v3 kernels, so its scalar-tier dumps still equal revision 6), and the tier-parity suite. A
+cleaner fix than keeping the cancellation-prone pools in f64 is to accumulate the per-pixel difference those
+features need, which f32 lanes carry without loss; that changes those features' definitions slightly and belongs to
+the same revision.
+
+**Remaining time** (prototype, B, 2048², v4x, one thread, fold-timing phases of a 58.8 ms walk): sRGB → XYB 10.5 ms
+(18%), dense 14.0, vertical planes 11.2, fold 6.4, gradient 6.7, horizontal blur 5.8, blockiness 2.3, downscale 1.3.
+Not yet pursued:
+
+- The dense, gradient and fused SSIM kernels evaluate their per-pixel terms eight columns at a time on every tier
+  (`f32x8`), on AVX-512 too. Sixteen columns per step is bit-identical (element-wise terms, the same per-lane pool
+  order) and would halve the term arithmetic on v4/v4x.
+- The XYB conversion is now bound by the register table lookup (permutes, blends and the copies around the
+  destructive permute, about half its samples); its divisions (the cube root's Halley steps) are 4%.
+- The vertical blur keeps its frozen-tree pair and quad sums in a stack ring indexed per row; 66% of its samples are
+  integer work.
+- **Threads.** At eight threads the walk takes 20.2 ms (3.5×); 6.7 ms per walk is outside every timed phase, the
+  consume phase runs at 0.60 occupancy, and scratch zeroing grows 2.4×. All bit-identical work.
+
 ### DVIFM 0.3 on the E21 sets and the mixture test (2026-10-23)
 
 Owner request: "eval dvifm 0.3 on kadid and other distortion//corrputions". Scorer: the frozen runtime of the

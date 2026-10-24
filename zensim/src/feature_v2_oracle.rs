@@ -1614,6 +1614,63 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64>(
             });
         }
     };
+    // Revision-7 candidates (measurement only, `--cfg zensim_rev7_pools`,
+    // record "Speed pass before revision 7"): f32 row lanes for the 29 pools,
+    // folded into the f64 lanes once per row, and the central moments of `d`
+    // two-pass per row (a sixteen-lane f64 mean, then centred sums), merged
+    // once per row. Both change feature bits; the default build keeps
+    // revisions 5 and 6 exactly.
+    let rev7 = cfg!(zensim_rev7_pools) && stable;
+    let mut dvals = if rev7 { vec![0.0f64; width] } else { Vec::new() };
+    let row_moments = |v: &[f64]| -> OnlineMoments {
+        let n = v.len();
+        let full16 = n / 16;
+        let zero = f64x8::zero_t(token);
+        let lanes = |lo: f64x8, hi: f64x8| -> [f64; 16] {
+            let mut l = [0.0f64; 16];
+            l[..8].copy_from_slice(&lo.to_array());
+            l[8..].copy_from_slice(&hi.to_array());
+            l
+        };
+        let (mut lo, mut hi) = (zero, zero);
+        for b in 0..full16 {
+            lo += f64x8::load_t(token, v[16 * b..16 * b + 8].try_into().unwrap());
+            hi += f64x8::load_t(token, v[16 * b + 8..16 * b + 16].try_into().unwrap());
+        }
+        let mut s1 = lanes(lo, hi);
+        for x in full16 * 16..n {
+            s1[x & 15] += v[x];
+        }
+        let mean = crate::featcanon::Pool::fin(crate::featcanon::Lanes16F64(s1)) / n as f64;
+        let m = f64x8::splat_t(token, mean);
+        let (mut a2, mut b2, mut a3, mut b3, mut a4, mut b4) = (zero, zero, zero, zero, zero, zero);
+        for b in 0..full16 {
+            let dl = f64x8::load_t(token, v[16 * b..16 * b + 8].try_into().unwrap()) - m;
+            let dh = f64x8::load_t(token, v[16 * b + 8..16 * b + 16].try_into().unwrap()) - m;
+            let (ql, qh) = (dl * dl, dh * dh);
+            a2 += ql;
+            b2 += qh;
+            a3 += ql * dl;
+            b3 += qh * dh;
+            a4 += ql * ql;
+            b4 += qh * qh;
+        }
+        let (mut s2, mut s3, mut s4) = (lanes(a2, b2), lanes(a3, b3), lanes(a4, b4));
+        for x in full16 * 16..n {
+            let d = v[x] - mean;
+            let q = d * d;
+            s2[x & 15] += q;
+            s3[x & 15] += q * d;
+            s4[x & 15] += q * q;
+        }
+        OnlineMoments {
+            n: n as f64,
+            mean,
+            m2: crate::featcanon::Pool::fin(crate::featcanon::Lanes16F64(s2)),
+            m3: crate::featcanon::Pool::fin(crate::featcanon::Lanes16F64(s3)),
+            m4: crate::featcanon::Pool::fin(crate::featcanon::Lanes16F64(s4)),
+        }
+    };
     let mut b0 = 0usize;
     while b0 < height {
         let b1 = (b0 + ERA2_BAND_ROWS).min(height);
@@ -1628,6 +1685,7 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64>(
             // the former v3-only dispatch worked around). The tail slices
             // give `dense_elem_canon` the same typed pool refs — zero cost.
             let mut pools = [P::zero(); 29];
+            let mut pools32 = [[0.0f32; 16]; 29];
             let mut local = [0.0f64; 16];
             let mut blocks = 0usize;
             let full = width / 8;
@@ -1690,7 +1748,17 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64>(
                     kd[1].to_array(),
                     kd[2].to_array(),
                 ];
-                if stable {
+                if rev7 {
+                    let off = i & 15;
+                    for j in 0..29 {
+                        let lanes: &mut [f32; 8] =
+                            (&mut pools32[j][off..off + 8]).try_into().unwrap();
+                        (f32x8::load_t(token, lanes) + f32x8::load_t(token, &bufs[j])).store(lanes);
+                    }
+                    for l in 0..8 {
+                        dvals[i + l] = bufs[0][l] as f64;
+                    }
+                } else if stable {
                     // Chunk `c` adds to lanes `(c & 1) * 8..`; a block starts
                     // at an even chunk (`DENSE_ILV` is even), so a buffered
                     // chunk's parity is its position's.
@@ -1726,7 +1794,7 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64>(
                             .store(lanes);
                     }
                 }
-                if stable {
+                if stable && !rev7 {
                     let off = i & 15;
                     for l in 0..8 {
                         local[off + l] = bufs[0][l] as f64;
@@ -1759,6 +1827,15 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64>(
             }
             // Full blocks before the tail's own blocks, in raster order.
             central8(&cols, blocks, &mut acc.central);
+            if rev7 {
+                for j in 0..29 {
+                    for off in [0usize, 8] {
+                        let lanes = pools[j].chunk8(off);
+                        let a: [f64; 8] = std::array::from_fn(|l| pools32[j][off + l] as f64);
+                        (f64x8::load_t(token, lanes) + f64x8::from_array_t(token, a)).store(lanes);
+                    }
+                }
+            }
             // Scalar tail — the canonical element step verbatim.
             {
                 let (r, rest) = pools.split_at_mut(13);
@@ -1789,7 +1866,9 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64>(
                         p_kn.try_into().unwrap(),
                         p_kd.try_into().unwrap(),
                     );
-                    if stable {
+                    if rev7 {
+                        dvals[x] = d as f64;
+                    } else if stable {
                         local[x & 15] = d as f64;
                         if x & 15 == 15 || x + 1 == width {
                             acc.central
@@ -1797,6 +1876,9 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64>(
                         }
                     }
                 }
+            }
+            if rev7 {
+                acc.central.merge(row_moments(&dvals[..width]));
             }
             for j in 0..13 {
                 band[j] += pools[j].fin();
