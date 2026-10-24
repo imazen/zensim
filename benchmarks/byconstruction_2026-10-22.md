@@ -1644,7 +1644,7 @@ defaults by the method above (`loop_calibration_2026-10-24c.tsv`; fit r / held-o
 
 `diffmap_px` reproduces the first build's `diffmap` fits exactly (the same map), a check on the calibration.
 
-### Formula revision 7: the batch (2026-10-24, in progress)
+### Formula revision 7: the batch (2026-10-24)
 
 Owner, 2026-10-24: "let's do a revision 7 - but also figure out what else we can batch with it." Every item changes
 feature bits, so one revision and one retrain carry them all. Inventory:
@@ -1667,9 +1667,10 @@ Candidates that need an experiment before they join (from the HaarPSI / HaarXYB 
 in linear light, a joint-channel distance, distorted-side unmasking, orientation-selective bands (new families,
 append-only).
 
-Items 1–3 are implemented as helpers (`bounded_dissim`, `bounded_dissim_v`, `bounded_dissim32`) and paired forms
-behind `--cfg zensim_stable_forms` (a custom cfg rather than a cargo feature, so `--all-features` in CI never turns a
-measurement form on); the default build is unchanged. Measurement: `tier_audit_features` dumps of the full research
+Items 1–3 were first implemented as helpers (`bounded_dissim`, `bounded_dissim_v`, `bounded_dissim32`) and paired
+forms behind `--cfg zensim_stable_forms` (a custom cfg rather than a cargo feature, so `--all-features` in CI never
+turned a measurement form on). The cfg is gone: revision 7 selects the forms (below, "Formula revision 7
+implemented"). This first measurement compared two builds of one revision. Measurement: `tier_audit_features` dumps of the full research
 vector at revision 6 on 93 near-identical pairs (KADID level 1 of all 25 types on three TRAIN references; 18 JPEG XL
 d=0.6 corpus encodes), default and stable-forms builds against the exact f64 oracle (`ZENSIM_FEATCANON=exact`);
 `scripts/byconstruction/rev7_forms.py`; scores: `scripts/byconstruction/rev7_score_compare.py`. Outputs:
@@ -1751,7 +1752,8 @@ Hoisting the fused SSIM kernel's eleven mirrored window rows out of its chunk lo
 against 68.14 ms); LLVM already hoists them, so it was not kept.
 
 **Revision-7 candidates, measured** (`--cfg zensim_rev7_pools`, measurement only; the default build is bit-identical
-to the base, 110 of 110):
+to the base, 110 of 110; the cfg is gone, and revision 7 is now the implementation, "Formula revision 7 implemented"
+below):
 
 - **f32 row lanes.** Each pool's chunk adds go to sixteen f32 lanes for the row, folded into the f64 lanes once per
   row, in the dense kernel (29 pools), the fused SSIM kernel and the gradient kernel.
@@ -1797,7 +1799,88 @@ Not yet pursued:
 - The vertical blur keeps its frozen-tree pair and quad sums in a stack ring indexed per row; 66% of its samples are
   integer work.
 - **Threads.** At eight threads the walk takes 20.2 ms (3.5×); 6.7 ms per walk is outside every timed phase, the
-  consume phase runs at 0.60 occupancy, and scratch zeroing grows 2.4×. All bit-identical work.
+  consume phase runs at 0.60 occupancy, and scratch zeroing grows 2.4×. The fold-MT lane
+  (`fold_mt_scaling_2026-08-31.md`) measured the same ceiling as a property of memory behaviour, not scheduling:
+  independent single-threaded processes saturate at 3.5× too. The working set explains it: a strip is
+  `STRIP_ROWS` = 128 rows plus a 10-row halo each side, so at 2048 wide one f32 plane of a strip is 1.21 MB, more
+  than a core's 1 MB L2, and a channel's strip keeps about fourteen planes; every pass streams from the shared L3.
+  The structural lever is a line-buffer pipeline (horizontal blur, the vertical window over an 11-row ring, then
+  the pixel kernels, row by row), whose working set fits in L2. Revision 5's definitions (per-row pools, 32-row
+  bands merged in order, mirroring at image edges only) already allow it, so it needs no revision change.
+- **NEON runs scalar.** The dense, gradient, fused SSIM and XYB kernels' NEON variants call the scalar canonical
+  bodies, because magetypes' NEON `max`/`min` are `FMAX`/`FMIN` (NaN-propagating) while the canon's `f32::max`
+  returns the non-NaN operand. AArch64 `FMAXNM`/`FMINNM` have exactly `f32::max`'s semantics (Rust's scalar
+  `f32::max` compiles to them there), so NEON kernels using them would be bit-identical to the canon.
+
+Tried and not kept: the vertical blur with its window in registers, one or two column vectors at a time down the
+whole plane instead of a stack ring over eight-vector tiles. Bit-identical, but **slower**: +11% (v4x) and +5% (v3)
+at 2048², because the tiles' row-major locality matters more than the ring's loads and stores.
+
+### Formula revision 7 implemented (2026-10-24)
+
+`FormulaRevision::Rev7` (era `rowlanes`, registered as proposed; `ZENSIM_FORMULA_REV=7`, or a bake declaring revision
+7) is revision 6 with the three changes below, in one canonical definition that every body computes: the scalar
+canonical bodies (which NEON and wasm128 also run) and the v3, v4 and v4x vector kernels.
+
+- **f32 row lanes** in the dense, fused-SSIM and gradient pools. The columns of each row's complete 8-column chunks
+  (x < 8·⌊w/8⌋; the gradient kernel's interior chunks start at x = 8) add to sixteen f32 lanes, lane `x & 15`, which
+  fold into the f64 lanes at the end of the chunks and after every column x with (x + 1) mod 4,096 = 0, so no f32 lane
+  takes more than 256 adds. The remaining columns add in f64, as before. The cancellation-prone pools stay f64: the HF
+  energy and magnitude sums of source and distorted (whose difference forms v1's variance and texture loss and
+  contrast increase), the gradient sums of source and distorted (whose ratio forms the edge-width change), and every
+  band-lifetime pool.
+- **Per-row central moments.** The SSIM deviation moments are two-pass per row (a sixteen-lane f64 mean, then the
+  centred sums of (d − μ)², (d − μ)³ and (d − μ)⁴), with one Chan/Pébay merge per row.
+- **Cancellation-free forms**, items 1–3 of the batch.
+
+Revisions 5 and 6 keep their bits: the default build's 110 dumps (B at revision 5, Tga at revision 6) are identical to
+the session's base.
+
+The stamps copy a bake with a new declared revision and byte-identical weights:
+`bake_stamp_revision zensim/weights/b_sdr_diff_frag_820_rev5_2026-10-19.bin 7 b_rev7.bin` (SHA-256 `5fe0a962…`;
+revision 6, `a2a31635…`). Tga's stamps are private and stay on dev.
+
+**Tier identity.** `perf_bits.sh` with revision-7 stamps of B and Tga (`bake_stamp_revision`): 22 bake/pair groups,
+110 dumps, 0 tier mismatches (v4x, v4, v3 and scalar with one thread, v4x with eight). The new
+`zensim/tests/featcanon_rev7_parity.rs` extracts the whole revision-7 scope (basic + peaks + v2 + globaff) under every
+token permutation on 64², 97×63, 131×65, 255×129 and 4133×33 (scale 0 crosses the 4,096-column fold): bit-identical.
+
+**What moves** (revision-6 against revision-7 stamps, same binary, the 110 dumps): 19,905 of B's 39,600 emitted
+feature values. The relative change has median 1.6e-8, 90th percentile 2.4e-6, 99th percentile 6.2e-5 and maximum
+4.1e-3, the last on `v2_ssim_dev4_s3_y` of the 97×63 pair (5.733e-6 → 5.709e-6, an absolute 2.4e-8). B's score moves
+by at most **7.1e-6** points (median 0); Tga's score does not move in any of its 55 dumps. On the parity test's 131×65
+pair 446 of 1,891 slots move, by at most 9.0e-6 relative with the magnitude floored at 1e-3 (the test's 1e-2 guard
+against a lost fold is my bound, not a measured one).
+
+**Against the exact f64 oracle** (`ZENSIM_FEATCANON=exact`, the 93 near-identical pairs of the batch measurement, v4x,
+each revision against its own exact reference; `rev7_forms.py --exact-stable`). The oracle's gradient body now
+follows the revision's ringing form and forms, so revisions 6 and 7 have an f64 reference; the two references differ
+by at most 6.4e-7. Per-feature median error:
+
+| | p90 | p99 | worst |
+|---|---|---|---|
+| Revision 6 | 2.80e-6 | 3.80e-5 | 5.10e-5 (`v2_masked_ssim_s1_b`) |
+| Revision 7 | 2.68e-6 | 3.71e-5 | 4.93e-5 (`peaks_ssim_max_s2_b`) |
+
+Revision 7 is closer to the exact value on 307 features (by a median 3.6e-8; `v2_ssim_dev4_s3_y` 1.02e-5 → 6.3e-6,
+`peaks_edge_det_max_s3_b` 7.2e-6 → 2.5e-6) and further on 196 (by a median 1.8e-9, at most 1.0e-6 on
+`v2_ssim_soft_peak_s0_b`); 1,388 tie, most of them slots outside revision 7's scope. Outputs:
+`/mnt/v/output/zensim/byconstruction-2026-10-22/rev7/rev7impl_accuracy/` (dumps, the oracle binary, the JSON).
+
+**Speed** (paired, 8 rounds, one thread pinned to core 2, the same binary with revision-6 against revision-7 stamps;
+`benchmarks/byconstruction_perf_2026-10-24/rev7impl/grid.tsv`; raw rounds on dev under
+`/mnt/v/output/zensim/byconstruction-2026-10-22/perf/2026-10-24/rev7impl/`; load average 0.7–1.2):
+
+| Bake | Tier | 512² | 2048² |
+|---|---|---|---|
+| B | v4x | 5.109 → 4.246 ms, −16.88% (−17.24..−16.79) | 72.30 → 56.71 ms, −21.58% (−21.65..−20.96) |
+| B | v3 | 7.066 → 5.612 ms, −20.60% (−20.65..−20.58) | 104.77 → 79.76 ms, −23.90% (−23.96..−23.72) |
+| Tga | v4x | 5.352 → 4.502 ms, −16.01% (−16.22..−15.75) | 76.19 → 60.16 ms, −20.99% (−21.13..−20.86) |
+| Tga | v3 | 7.470 → 6.022 ms, −19.42% (−19.51..−19.29) | 111.66 → 86.61 ms, −22.43% (−22.53..−22.26) |
+
+Not measured: multithreaded paired rounds, aarch64, wasm and an Intel host at revision 7. Revision 7 is not
+finalized: the speed pass continues, and the models need re-extraction and a retrain at revision 7 before any of it
+serves.
 
 ### DVIFM 0.3 on the E21 sets and the mixture test (2026-10-23)
 
