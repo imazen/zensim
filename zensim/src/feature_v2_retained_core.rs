@@ -270,7 +270,16 @@ pub(super) fn rev5_retained_single_channel<S: ImageSource, D: ImageSource>(
     }
     if local.blockiness {
         let (sum_v, sum_h) = &mut acc.block[scale];
-        blockiness_sparse_strip_wide(src, dst, info.plane_w, info.y0, info.strip_h, sum_v, sum_h);
+        blockiness_sparse_strip_wide(
+            src,
+            dst,
+            info.plane_w,
+            info.y0,
+            info.strip_h,
+            local.formula_revision,
+            sum_v,
+            sum_h,
+        );
     }
 }
 

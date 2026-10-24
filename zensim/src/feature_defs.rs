@@ -514,6 +514,9 @@ pub enum FormulaRevision {
     ///   two large sums (v1
     ///   variance, texture and contrast terms, the edge-width change, the
     ///   band-lifetime raw moments) keep f64 lanes.
+    /// * **Blockiness lattice lanes.** The vertical lattice step at column
+    ///   `8j` adds to f64 lane `(j − 1) & 7` instead of lane 0, so the eight
+    ///   lanes take eight steps at once.
     /// * **Central moments per row.** The SSIM deviation moments are
     ///   two-pass per row (a sixteen-lane f64 mean, then the centred sums)
     ///   with one Chan/Pébay merge per row instead of one per 16 columns.
@@ -1441,7 +1444,8 @@ const REV_ROWLANES: Revision = Revision {
            or ratio two large sums (f64, as before); the f64 lanes live for a \
            32-row band (dense) or the call (fused SSIM, gradient) and finish \
            once there; the v1 HF and edge-width sums add source sums plus \
-           differences; the SSIM deviation moments are two-pass per row with \
+           differences; the blockiness lattice's vertical steps use all \
+           eight f64 lanes; the SSIM deviation moments are two-pass per row with \
            one Chan/Pébay merge per row; the three subtractive forms become \
            their exact cancellation-free equivalents; the opsin cube root \
            takes one division (`cbrt_newton_f32`). MEASURED (byconstruction \

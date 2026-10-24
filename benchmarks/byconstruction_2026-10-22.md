@@ -1960,6 +1960,21 @@ The changes, in order:
     further; `rev7/rev7band_accuracy/`). Paired (`rev7_vpanel_vs_band`): v4x −11.56% / −4.66% / −4.04%, v3 −6.98% /
     −2.32% / −1.46%.
 
+14. **Blockiness eight steps at a time** (revision 7's lanes; the vector steps at every revision): one shared row
+    kernel (`blockiness_row`) serves the strip and whole-range walks. With the eight-lane f64 accumulators it computes
+    eight steps per vector, each lane the scalar step's IEEE operations, the vertical lattice columns read through one
+    checked 58-value window per eight. Horizontal steps add to lane `x & 7` and keep their bits at every revision; at
+    revisions 5 and 6 the vertical steps still add to lane 0 in column order (bit-identical, 110 of 110 dumps), and at
+    revision 7 the step at column `8j` adds to lane `(j − 1) & 7`, which removes the serial chain (values move by at
+    most 1.3e-14 relative; tiers identical). Blockiness falls from 5.4% to 2.0% of v4x samples. Paired
+    (`rev7_band_vs_blockiness`): v4x −2.08% / −3.01% / −3.26%, v3 −0.67% / −1.96% / −2.00%.
+
+**Tried and not kept** (after 13): the three opsin cube roots interleaved step by step (bit-identical): −0.06% /
+−0.90% on v4x (`rev7_band_vs_cbrt3`, the 1507×2048 and 1024² cases), noise on v3; the conversion's inner loop runs at
+about two instructions per cycle, but interleaving did not raise it. The activity chain's `|src − mu1|` computed per
+row into L1 and blurred from there instead of a strip plane (bit-identical): v4x −0.02% to −0.22%, v3 +0.30% to
++1.15% (`rev7_band_vs_actfuse`): the per-row blur calls cost what the saved L3 round trip gave.
+
 **Cumulative after 13** (paired, 8 rounds, one thread; `rev7_bad544a3_vs_f96d7218/grid.tsv` and, one `f96d7218`
 binary with B's revision-6 against its revision-7 stamp, `rev6_vs_rev7_f96d7218/grid.tsv`):
 

@@ -6498,29 +6498,163 @@ fn blockiness_sparse_rows(
     // mode is set — the f64-element rule means `c32` is `Seq` too.
     let mut sum_v = crate::featcanon::SumVar::f64_elems_meas();
     let mut sum_h = crate::featcanon::SumVar::f64_elems_meas();
+    let spread = crate::ssim_form::active_revision().row_lanes();
     for y in y0..y1 {
-        let row = y * width;
-        // Vertical steps at lattice columns, this row.
-        let mut x = BLOCK_LATTICE;
-        while x < width {
-            let i = row + x;
-            let step_dst = (dst[i] as f64 - dst[i - 1] as f64).abs();
-            let step_src = (src[i] as f64 - src[i - 1] as f64).abs();
-            sum_v.add64(x & 7, bounded_excess(step_dst, step_src, C_BLOCK));
-            x += BLOCK_LATTICE;
-        }
-        // Horizontal steps across the whole row, lattice rows only.
-        if y % BLOCK_LATTICE == 0 && y > 0 {
-            for x in 0..width {
-                let i = row + x;
-                let i_up = i - width;
-                let step_dst = (dst[i] as f64 - dst[i_up] as f64).abs();
-                let step_src = (src[i] as f64 - src[i_up] as f64).abs();
-                sum_h.add64(x & 7, bounded_excess(step_dst, step_src, C_BLOCK));
-            }
-        }
+        blockiness_row(
+            src,
+            dst,
+            y * width,
+            width,
+            y % BLOCK_LATTICE == 0 && y > 0,
+            spread,
+            &mut sum_v,
+            &mut sum_h,
+        );
     }
     (sum_v, sum_h)
+}
+
+/// One row of the blockiness lattice, the shared step of every walk: the
+/// vertical steps at the lattice columns `x = 8j` (`j ≥ 1`, `x < width`) of
+/// the row starting at index `row`, and on a lattice row (`horizontal`) the
+/// steps from the row above (`row − width`) at every column, each
+/// `bounded_excess(|Δdst|, |Δsrc|, C_BLOCK)` in f64. Horizontal terms add to
+/// lane `x & 7`; vertical terms to lane 0, or at revision 7 (`spread`) to
+/// lane `(j − 1) & 7`. Each lane takes its terms in ascending `x`, so the
+/// eight-lane accumulators get the same bits from the scalar steps and from
+/// [`blockiness_row_l64`]'s eight-wide ones.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn blockiness_row(
+    src: &[f32],
+    dst: &[f32],
+    row: usize,
+    width: usize,
+    horizontal: bool,
+    spread: bool,
+    sum_v: &mut crate::featcanon::SumVar,
+    sum_h: &mut crate::featcanon::SumVar,
+) {
+    use crate::featcanon::SumVar;
+    if let (SumVar::L64(v), SumVar::L64(h)) = (&mut *sum_v, &mut *sum_h) {
+        incant!(
+            blockiness_row_l64(src, dst, row, width, horizontal, spread, v, h),
+            [v4x, v4, v3, scalar]
+        );
+        return;
+    }
+    let mut x = BLOCK_LATTICE;
+    while x < width {
+        let i = row + x;
+        let step_dst = (dst[i] as f64 - dst[i - 1] as f64).abs();
+        let step_src = (src[i] as f64 - src[i - 1] as f64).abs();
+        let lane = if spread {
+            (x / BLOCK_LATTICE - 1) & 7
+        } else {
+            x & 7
+        };
+        sum_v.add64(lane, bounded_excess(step_dst, step_src, C_BLOCK));
+        x += BLOCK_LATTICE;
+    }
+    if horizontal {
+        for x in 0..width {
+            let i = row + x;
+            let i_up = i - width;
+            let step_dst = (dst[i] as f64 - dst[i_up] as f64).abs();
+            let step_src = (src[i] as f64 - src[i_up] as f64).abs();
+            sum_h.add64(x & 7, bounded_excess(step_dst, step_src, C_BLOCK));
+        }
+    }
+}
+
+/// [`blockiness_row`] for the eight-lane f64 accumulators: eight steps per
+/// vector, each lane the scalar step's IEEE operations (exact widening,
+/// subtraction, `abs`, `max`, the sum and the division), added to the lanes
+/// in the scalar order. The vertical lattice columns are gathered eight at a
+/// time; with `spread` their eight terms go to the eight lanes at once
+/// (columns `8j … 8(j + 7)` with `j ≡ 1 (mod 8)` map to lanes 0–7), without
+/// it to lane 0 in column order.
+#[magetypes(define(f64x8), v4x, v4, v3, scalar)]
+#[allow(clippy::too_many_arguments)]
+fn blockiness_row_l64(
+    token: Token,
+    src: &[f32],
+    dst: &[f32],
+    row: usize,
+    width: usize,
+    horizontal: bool,
+    spread: bool,
+    v: &mut crate::featcanon::LanesF64,
+    h: &mut crate::featcanon::LanesF64,
+) {
+    let c = f64x8::splat_t(token, C_BLOCK);
+    let zero = f64x8::zero_t(token);
+    macro_rules! terms {
+        ($d1:expr, $d0:expr, $s1:expr, $s0:expr) => {{
+            let sd = (f64x8::from_array_t(token, $d1) - f64x8::from_array_t(token, $d0)).abs();
+            let ss = (f64x8::from_array_t(token, $s1) - f64x8::from_array_t(token, $s0)).abs();
+            ((sd - ss).max(zero) / (sd + ss + c)).to_array()
+        }};
+    }
+    let scalar = |i: usize, j: usize| {
+        let step_dst = (dst[i] as f64 - dst[j] as f64).abs();
+        let step_src = (src[i] as f64 - src[j] as f64).abs();
+        bounded_excess(step_dst, step_src, C_BLOCK)
+    };
+    // Vertical steps: lattice columns `x = 8j`, `j = 1..=last`.
+    let last = width.saturating_sub(1) / BLOCK_LATTICE;
+    let mut j = 1;
+    while j + 8 <= last + 1 {
+        // One checked window per plane covers the eight columns and their
+        // left neighbors: element `8l + 1` is column `8(j + l)`.
+        let a = row + j * BLOCK_LATTICE - 1;
+        let dw: &[f32; 58] = dst[a..a + 58].try_into().unwrap();
+        let sw: &[f32; 58] = src[a..a + 58].try_into().unwrap();
+        let d1: [f64; 8] = core::array::from_fn(|l| dw[8 * l + 1] as f64);
+        let d0: [f64; 8] = core::array::from_fn(|l| dw[8 * l] as f64);
+        let s1: [f64; 8] = core::array::from_fn(|l| sw[8 * l + 1] as f64);
+        let s0: [f64; 8] = core::array::from_fn(|l| sw[8 * l] as f64);
+        let t = terms!(d1, d0, s1, s0);
+        if spread {
+            for (lane, tl) in v.0.iter_mut().zip(t) {
+                *lane += tl;
+            }
+        } else {
+            for tl in t {
+                v.0[0] += tl;
+            }
+        }
+        j += 8;
+    }
+    while j <= last {
+        let i = row + j * BLOCK_LATTICE;
+        let lane = if spread { (j - 1) & 7 } else { 0 };
+        v.0[lane] += scalar(i, i - 1);
+        j += 1;
+    }
+    if horizontal {
+        let up = row - width;
+        let mut x = 0;
+        while x + 8 <= width {
+            let w = |p: &[f32], at: usize| -> [f64; 8] {
+                let a: &[f32; 8] = p[at..at + 8].try_into().unwrap();
+                core::array::from_fn(|l| a[l] as f64)
+            };
+            let t = terms!(
+                w(dst, row + x),
+                w(dst, up + x),
+                w(src, row + x),
+                w(src, up + x)
+            );
+            for (lane, tl) in h.0.iter_mut().zip(t) {
+                *lane += tl;
+            }
+            x += 8;
+        }
+        while x < width {
+            h.0[x & 7] += scalar(row + x, up + x);
+            x += 1;
+        }
+    }
 }
 
 /// Compute all [`FEATURES_PER_CHANNEL_V2_TOTAL`] v2 signals for one

@@ -5232,6 +5232,7 @@ fn rev5_run_jobs(
                 info.plane_w,
                 info.y0,
                 info.strip_h,
+                local.formula_revision,
                 sum_v,
                 sum_h,
             );
@@ -6045,6 +6046,7 @@ fn stream_phase_b(
             width,
             y0,
             strip_h,
+            toggles.formula_revision,
             sum_v,
             sum_h,
         );
@@ -6136,35 +6138,29 @@ fn stream_fold_v1(
 /// (a per-strip partial would reassociate: `(Σ strip0) + (Σ strip1)` ≠
 /// one running sum — measured as a 1-ULP BLOCKINESS divergence when this
 /// function briefly returned partials).
+#[allow(clippy::too_many_arguments)]
 fn blockiness_sparse_strip_wide(
     src_wide: &[f32],
     dst_wide: &[f32],
     width: usize,
     y0: usize,
     strip_h: usize,
+    revision: FormulaRevision,
     sum_v: &mut crate::featcanon::SumVar,
     sum_h: &mut crate::featcanon::SumVar,
 ) {
     for k in 0..strip_h {
         let y = y0 + k;
-        let row = (HALO_P + k) * width;
-        let mut x = BLOCK_LATTICE;
-        while x < width {
-            let i = row + x;
-            let step_dst = (dst_wide[i] as f64 - dst_wide[i - 1] as f64).abs();
-            let step_src = (src_wide[i] as f64 - src_wide[i - 1] as f64).abs();
-            sum_v.add64(x & 7, bounded_excess(step_dst, step_src, C_BLOCK));
-            x += BLOCK_LATTICE;
-        }
-        if y.is_multiple_of(BLOCK_LATTICE) && y > 0 {
-            for x in 0..width {
-                let i = row + x;
-                let i_up = i - width;
-                let step_dst = (dst_wide[i] as f64 - dst_wide[i_up] as f64).abs();
-                let step_src = (src_wide[i] as f64 - src_wide[i_up] as f64).abs();
-                sum_h.add64(x & 7, bounded_excess(step_dst, step_src, C_BLOCK));
-            }
-        }
+        blockiness_row(
+            src_wide,
+            dst_wide,
+            (HALO_P + k) * width,
+            width,
+            y.is_multiple_of(BLOCK_LATTICE) && y > 0,
+            revision.row_lanes(),
+            sum_v,
+            sum_h,
+        );
     }
 }
 
