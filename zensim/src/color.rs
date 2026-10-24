@@ -743,9 +743,34 @@ fn srgb_xyb_canon_vec_v4x(
 ) {
     let k = CanonChunk::new(token);
     let lut = srgb_lut_regs_v4x();
+    let lut_bytes = srgb_lut_byte_planes_v4x();
     let n = pixels.len();
+    // Sixty-four pixels at a time through the byte-plane table
+    // ([`srgb64_channel_v4x`]), then sixteen through the register table.
+    let groups = n / 64;
+    for g in 0..groups {
+        let base = g * 64;
+        let px: &[[u8; 3]; 64] = pixels[base..base + 64]
+            .try_into()
+            .expect("64 pixels per group");
+        let v = load_rgb64_v4x(px);
+        let r = srgb64_channel_v4x::<0>(&lut_bytes, &v);
+        let gr = srgb64_channel_v4x::<1>(&lut_bytes, &v);
+        let b = srgb64_channel_v4x::<2>(&lut_bytes, &v);
+        for m in 0..4 {
+            let (x, y, bb) = k.opsin_positive(
+                GenericF32x16::<archmage::X64V4xToken>::from_raw_t(token, r[m]),
+                GenericF32x16::<archmage::X64V4xToken>::from_raw_t(token, gr[m]),
+                GenericF32x16::<archmage::X64V4xToken>::from_raw_t(token, b[m]),
+            );
+            let o = base + 16 * m;
+            x_out[o..o + 16].copy_from_slice(&x.to_array());
+            y_out[o..o + 16].copy_from_slice(&y.to_array());
+            b_out[o..o + 16].copy_from_slice(&bb.to_array());
+        }
+    }
     let chunks = n / 16;
-    for c in 0..chunks {
+    for c in groups * 4..chunks {
         let base = c * 16;
         let px: &[[u8; 3]; 16] = pixels[base..base + 16]
             .try_into()
@@ -789,6 +814,97 @@ const DEINTERLEAVE_RGB16: [u8; 64] = {
     }
     p
 };
+
+/// Byte-permute tables that deinterleave 64 packed RGB8 pixels (192 bytes in
+/// three registers) for channel `c`: byte `p = 16L + 4m + j` of the result is
+/// the channel byte of pixel `16m + 4L + j`, the order in which the byte-plane
+/// reassembly of [`srgb64_channel_v4x`] yields pixels `16m..16m + 16` in its
+/// register `m`. `.0` permutes registers 0–1, `.1` registers 1–2, and `.2`
+/// marks the bytes taken from `.1`.
+#[cfg(all(target_arch = "x86_64", feature = "avx512"))]
+const fn deinterleave_rgb64(c: usize) -> ([u8; 64], [u8; 64], u64) {
+    let mut lo = [0u8; 64];
+    let mut hi = [0u8; 64];
+    let mut mask = 0u64;
+    let mut p = 0;
+    while p < 64 {
+        let q = 16 * ((p % 16) / 4) + 4 * (p / 16) + p % 4;
+        let s = 3 * q + c;
+        if s < 128 {
+            lo[p] = s as u8;
+        } else {
+            hi[p] = (s - 64) as u8;
+            mask |= 1u64 << p;
+        }
+        p += 1;
+    }
+    (lo, hi, mask)
+}
+
+#[cfg(all(target_arch = "x86_64", feature = "avx512"))]
+const DEINTERLEAVE_RGB64: [([u8; 64], [u8; 64], u64); 3] = [
+    deinterleave_rgb64(0),
+    deinterleave_rgb64(1),
+    deinterleave_rgb64(2),
+];
+
+/// The sRGB8 → linear table ([`srgb_u8_to_linear`]) as four byte planes
+/// (byte `k` of each entry's little-endian bits), each four registers of 64
+/// entries.
+#[cfg(all(target_arch = "x86_64", feature = "avx512"))]
+#[archmage::rite(v4x, import_intrinsics)]
+fn srgb_lut_byte_planes_v4x() -> [[__m512i; 4]; 4] {
+    let lut: [f32; 256] = std::array::from_fn(|i| srgb_u8_to_linear(i as u8));
+    std::array::from_fn(|k| {
+        let plane: [u8; 256] = std::array::from_fn(|i| lut[i].to_bits().to_le_bytes()[k]);
+        std::array::from_fn(|q| {
+            let b: &[u8; 64] = plane[64 * q..64 * q + 64].try_into().unwrap();
+            _mm512_loadu_si512(b)
+        })
+    })
+}
+
+/// 64 packed RGB8 pixels as three registers of 64 bytes.
+#[cfg(all(target_arch = "x86_64", feature = "avx512"))]
+#[archmage::rite(v4x, import_intrinsics)]
+fn load_rgb64_v4x(px: &[[u8; 3]; 64]) -> [__m512i; 3] {
+    let bytes = px.as_flattened();
+    std::array::from_fn(|q| {
+        let b: &[u8; 64] = bytes[64 * q..64 * q + 64].try_into().unwrap();
+        _mm512_loadu_si512(b)
+    })
+}
+
+/// Channel `C` of 64 packed RGB8 pixels (`v`, three registers) to linear,
+/// as four registers of sixteen pixels in order: two byte permutes and a
+/// blend deinterleave the channel ([`DEINTERLEAVE_RGB64`]); each of the four
+/// table byte planes is two 128-entry byte permutes blended on index bit 7;
+/// two unpack levels reassemble each entry's four bytes. The entries are
+/// copied byte for byte, so every value equals the scalar lookup.
+#[cfg(all(target_arch = "x86_64", feature = "avx512"))]
+#[archmage::rite(v4x, import_intrinsics)]
+fn srgb64_channel_v4x<const C: usize>(lut: &[[__m512i; 4]; 4], v: &[__m512i; 3]) -> [__m512; 4] {
+    let (lo, hi, mask) = &DEINTERLEAVE_RGB64[C];
+    let a = _mm512_permutex2var_epi8(v[0], _mm512_loadu_si512(lo), v[1]);
+    let b = _mm512_permutex2var_epi8(v[1], _mm512_loadu_si512(hi), v[2]);
+    let idx = _mm512_mask_blend_epi8(*mask, a, b);
+    let upper = _mm512_movepi8_mask(idx);
+    let planes: [__m512i; 4] = std::array::from_fn(|k| {
+        let low = _mm512_permutex2var_epi8(lut[k][0], idx, lut[k][1]);
+        let high = _mm512_permutex2var_epi8(lut[k][2], idx, lut[k][3]);
+        _mm512_mask_blend_epi8(upper, low, high)
+    });
+    let lo01 = _mm512_unpacklo_epi8(planes[0], planes[1]);
+    let hi01 = _mm512_unpackhi_epi8(planes[0], planes[1]);
+    let lo23 = _mm512_unpacklo_epi8(planes[2], planes[3]);
+    let hi23 = _mm512_unpackhi_epi8(planes[2], planes[3]);
+    [
+        _mm512_castsi512_ps(_mm512_unpacklo_epi16(lo01, lo23)),
+        _mm512_castsi512_ps(_mm512_unpackhi_epi16(lo01, lo23)),
+        _mm512_castsi512_ps(_mm512_unpacklo_epi16(hi01, hi23)),
+        _mm512_castsi512_ps(_mm512_unpackhi_epi16(hi01, hi23)),
+    ]
+}
 
 /// The sRGB8 → linear table ([`srgb_u8_to_linear`]) as sixteen registers of
 /// sixteen entries.
@@ -3819,11 +3935,12 @@ mod rev4vec_tests {
     }
 
     /// sRGB8 → XYB: deterministic pixel sweep (all channel values mixed,
-    /// n=4111 = 256 chunks + 15 remainder).
+    /// n = 4159 = 64 groups of 64 (v4x's byte-plane table) + 3 chunks of 16
+    /// + 15 remainder).
     #[test]
     fn srgb_xyb_canon_vec_matches_scalar_body_on_every_compiled_tier() {
         let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
-        let n = 4111;
+        let n = 4159;
         let px: Vec<[u8; 3]> = (0..n)
             .map(|i| {
                 if i < 256 * 16 {
