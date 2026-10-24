@@ -450,11 +450,11 @@ pub fn loop_map(
 /// `benchmarks/byconstruction_2026-10-22.md`). A bake or map without an entry
 /// gets scale 1, exponent 0.5 and no `r`.
 pub const LOOP_DEFAULTS: &[(&str, &str, f64, f64, f64)] = &[
-    // The revision-6 Tga candidate.
-    ("5ece9e45", "diffmap", 1.421980e-1, 0.4, 0.5177),
-    ("5ece9e45", "exact_box", 1.795247e-1, 0.4, 0.5239),
-    ("5ece9e45", "removal", 1.512383e-1, 0.5, 0.5113),
-    ("5ece9e45", "blocks8", 1.562659e-1, 0.6, 0.6641),
+    // The revision-6 Tga candidate (maps with the globaff term).
+    ("5ece9e45", "diffmap", 1.411546e-1, 0.4, 0.4948),
+    ("5ece9e45", "exact_box", 1.792990e-1, 0.4, 0.5354),
+    ("5ece9e45", "removal", 1.499584e-1, 0.5, 0.5125),
+    ("5ece9e45", "blocks8", 1.553179e-1, 0.6, 0.6112),
     // B (diff+frag-820, revision 5).
     ("89cb4861", "diffmap", 1.748248e-1, 0.35, 0.2805),
     ("89cb4861", "exact_box", 1.750633e-1, 0.4, 0.3711),

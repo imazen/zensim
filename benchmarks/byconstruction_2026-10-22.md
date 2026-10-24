@@ -1531,13 +1531,40 @@ The judges agree with each other at 0.579 (butteraugli–SSIMULACRA2), 0.168 (bu
   SSIMULACRA2 they are 0.67–0.74.
 - The workbench module's `diffmap` is now the centred window with guided paint and the exact split; `exact_box`,
   `removal` (today's map) and `blocks8` (8×8, centred, exact) stay alongside.
-- **Not in Tga's map**: its 24 globaff slots have no integrand (`unsupported: 24` in every record), and one of them has
-  Tga's largest sensitivity (about 6000). Global edits are therefore under-drawn in Tga's map. `explained` has an exact
-  per-pixel share (`mean(e)·e_i/N + (cov(s,e)/var(s))·(s_i − mean(s))·e_i/N`); `share` is homogeneous of degree 0, so
-  its exact shares sum to zero.
+- **Tga's globaff slots now have a map term** (`globaff::map_planes`; they were `unsupported: 24` in every record, one
+  of them Tga's largest sensitivity, about 6000). `explained` (degree 2 in `e = s − d`) takes the exact pixel share
+  `(mean(e)·e_i + (cov(s,e)/var(s))·(s_i − mean(s))·e_i)/N`; `share` (degree 0) takes `(E_i − share·e_i²/N)/mse`,
+  which moves mass between pixels and sums to zero; the removal split is twice each. Test:
+  `exact_split_globaff_maps_sum_to_their_features` (a global edit and a blur; negative control: the removal factor in
+  the exact split fails it). Rerun with the term (Tga, exact split): centred + guided paint 0.696 / 0.714 / 0.257
+  (butteraugli / SSIMULACRA2 / DVIFM), box 0.697 / 0.716 / 0.260; illustrations gain against butteraugli (0.577 from
+  0.544), KADID and screens lose about 0.012 against SSIMULACRA2. The weakest KADID types against SSIMULACRA2 are the
+  global edits (brighten 0.20, darken 0.12, contrast 0.20), where the descriptor spreads its mass over the image by
+  design. Kept: the map now carries every feature Tga reads.
 
 Gallery (reference, distorted, B legacy, B removal, B exact centred+guided, Tga removal, Tga exact centred+guided,
 butteraugli, SSIMULACRA2, DVIFM 0.3): `http://dev.lan:3300/zensim/byconstruction-2026-10-22/maps/study/gallery/`.
+
+**Workbench module.** `zensim-workbench` (metrics `zensim-byc-tga` and `zensim-b`; maps `diffmap` = centred window +
+guided paint + exact split, `exact_box`, `removal`, `blocks8`) is served privately on the LAN (it embeds Tga, trained
+on WG1 labels): site `/mnt/v/zenmetrics-private/zensimx-workbench/site-2026-10-24/`. Checks: `just
+byc-workbench-smoke` (native against the wasm build in node: scores within 1e-6, map sums within 1e-4) and `just
+byc-workbench-check` (the site in headless Chromium through the workbench's own worker; scores and every map equal
+native, the metric menu lists the module). The smoke check found the wasm clock panic above. Loop defaults, by
+zenmetrics' method on its 2026-10-21 calibration encodes (fit: CID22-512 training; held out: gb82 screenshots; log r
+of block distances against butteraugli's):
+
+| Map | Tga scale / exponent | Tga fit r / held-out r | B scale / exponent | B fit r / held-out r |
+|---|---|---|---|---|
+| diffmap | 0.1412 / 0.4 | 0.672 / 0.495 | 0.1748 / 0.35 | 0.593 / 0.281 |
+| exact_box | 0.1793 / 0.4 | 0.645 / 0.535 | 0.1751 / 0.4 | 0.590 / 0.371 |
+| removal | 0.1500 / 0.5 | 0.601 / 0.512 | 0.1741 / 0.45 | 0.584 / 0.331 |
+| blocks8 | 0.1553 / 0.6 | 0.771 / 0.611 | 0.2028 / 0.5 | 0.707 / 0.438 |
+
+Tga's numbers include the globaff term; without it they were 0.695 / 0.518 (diffmap) and 0.802 / 0.664 (blocks8):
+the descriptor adds image-wide mass that butteraugli's local block distances do not share. For comparison, our AIC-4
+port reports held-out r 0.51–0.69 for the Haar diffmaps and 0.83 for DVIFM-min on the same encodes; on screenshots
+butteraugli's map agrees with no other map in the study.
 
 ### DVIFM 0.3 on the E21 sets and the mixture test (2026-10-23)
 
