@@ -255,7 +255,7 @@ impl<'a> BakeScorer<'a> {
             crate::feature_v2::validate_hdr_pair(source, source, encoding, Some(120_000_000))?;
             crate::PrecomputedReference::for_candidate(
                 source,
-                self.parallel,
+                crate::metric::effective_parallel(self.parallel),
                 Some(encoding),
                 self.plan()?.compute.formula_revision,
             )
@@ -716,7 +716,7 @@ impl<'a> BakeScorer<'a> {
         // owner intact, including after an error and on session reuse.
         let mut raw = Self::with_metadata(self.model, Arc::clone(&self.metadata))?
             .without_output_calibration()
-            .with_parallel(self.parallel);
+            .with_parallel(crate::metric::effective_parallel(self.parallel));
         let output = raw.score_features(features, width, height, None)?;
         let linear = spline.ys[0] + spline.derivs[0] * (output - spline.xs[0]);
         if output < spline.xs[0] && linear < spline.ys[0] - span {
@@ -999,7 +999,7 @@ impl<'a> BakeScorer<'a> {
             distorted,
             encoding,
             Some(120_000_000),
-            self.parallel,
+            crate::metric::effective_parallel(self.parallel),
             plan.toggles(),
             &mut self.pixel_scratch,
             Some(plan.compute),
@@ -1052,7 +1052,8 @@ impl<'a> BakeScorer<'a> {
         // candidate's own plan determines which feature families run; BHdr's
         // weights only fill the intermediate result and are never returned.
         let params = ZensimProfile::BHdr.params();
-        let mut config = config_from_params(params, self.parallel);
+        let mut config =
+            config_from_params(params, crate::metric::effective_parallel(self.parallel));
         config.formula_revision = Some(self.plan()?.compute.formula_revision);
         let plan = self.plan()?;
         if plan.compute.formula_revision >= crate::feature_defs::FormulaRevision::Rev5 {
@@ -1101,7 +1102,7 @@ impl<'a> BakeScorer<'a> {
                     source,
                     distorted,
                     Some(120_000_000),
-                    self.parallel,
+                    crate::metric::effective_parallel(self.parallel),
                     &mut self.pixel_scratch,
                     Some(&plan),
                     #[cfg(feature = "custom-profiles")]
@@ -1196,7 +1197,8 @@ impl<'a> BakeScorer<'a> {
         }
         if crate::feature_v2::retained_ref_feed_admits(precomputed, distorted, &plan) {
             let params = ZensimProfile::BHdr.params();
-            let mut config = config_from_params(params, self.parallel);
+            let mut config =
+                config_from_params(params, crate::metric::effective_parallel(self.parallel));
             config.formula_revision = Some(self.plan()?.compute.formula_revision);
             if let Some(mut result) = crate::fold_engine::compute_fold_backed_with_ref_plan(
                 precomputed,
@@ -1246,7 +1248,7 @@ impl<'a> BakeScorer<'a> {
             )?;
             return Ok(sampling.reference(
                 source,
-                self.parallel,
+                crate::metric::effective_parallel(self.parallel),
                 self.plan()?.compute.formula_revision,
             ));
         }
@@ -1268,7 +1270,7 @@ impl<'a> BakeScorer<'a> {
             )?;
             return Ok(crate::PrecomputedReference::for_candidate(
                 source,
-                self.parallel,
+                crate::metric::effective_parallel(self.parallel),
                 None,
                 plan.compute.formula_revision,
             ));
@@ -1278,7 +1280,7 @@ impl<'a> BakeScorer<'a> {
         Ok(crate::PrecomputedReference::new(
             source,
             crate::NUM_SCALES,
-            self.parallel,
+            crate::metric::effective_parallel(self.parallel),
             plan.compute.formula_revision,
         ))
     }
@@ -1368,7 +1370,8 @@ impl<'a> BakeScorer<'a> {
             });
         }
         let params = ZensimProfile::BHdr.params();
-        let mut config = config_from_params(params, self.parallel);
+        let mut config =
+            config_from_params(params, crate::metric::effective_parallel(self.parallel));
         config.formula_revision = Some(self.plan()?.compute.formula_revision);
         #[cfg(feature = "corruption-head")]
         let has_corruption_gate = self.corruption.is_some();
@@ -1404,7 +1407,7 @@ impl<'a> BakeScorer<'a> {
             precomputed,
             distorted,
             &plan,
-            self.parallel,
+            crate::metric::effective_parallel(self.parallel),
             encoding,
         )?;
         #[cfg(steerfix_instrument)]
@@ -1524,7 +1527,7 @@ impl<'a> BakeScorer<'a> {
         let mut max_removals = Vec::new();
         let mut moment_removals = Vec::new();
         let (_, attribution) = Zensim::new(ZensimProfile::BHdr)
-            .with_parallel(self.parallel)
+            .with_parallel(crate::metric::effective_parallel(self.parallel))
             .attribution_from_retention_binned(
                 precomputed,
                 distorted,
