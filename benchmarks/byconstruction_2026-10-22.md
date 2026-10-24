@@ -1691,6 +1691,56 @@ errors (+336% / −87%) sit in features of 1e-8 to 1e-9 that both models map to 
 that happens for other reasons. The value changes worth a retrain are DENSEPOOL's f32 lanes (11–14% faster) and any
 feature change that proves out in an experiment, starting with linear-light coarse scales.
 
+### Speed pass before revision 7 (2026-10-24, in progress)
+
+Owner, 2026-10-24: "I'd also like a performance pass before rev7 is finalized so we can absolutely sqeeze it for
+everything possible." Changes that keep every bit land on revisions 5 and 6 as they are measured; changes that move
+feature bits are collected for the revision-7 cut.
+
+**Harness.** `byc_score_timing` (`zensim-validate`) times `BakeScorer::compute` and now also dumps the score's and
+every emitted feature's bits (`--dump`), reads real images (`--image`, a fixed quantize-and-dither distortion), takes
+any geometry (`--width/--height`) and forces a tier (`--tier`, as `tier_audit_features` does). Bit identity:
+`perf_bits.sh` dumps B (revision 5) and Tga (revision 6) on six synthetic geometries (97×63 to 2050×1030) and five
+gb82 photos at v4x, v4, v3 and scalar with one thread and v4x with eight, 110 dumps; `perf_bits_compare.py` compares
+two dump sets. Speed: `perf_grid.sh`, paired rounds alternating the arm order (`ring_timing.sh`,
+`timing_summary.py`), one thread pinned to core 2. Profiles: `perf record` / `perf annotate`.
+
+**Where the time went** (B, revision 5, 2048², v4x, one thread, 78.97 ms; share of zensim's samples): the v2 dense
+pool kernel 27%, sRGB → XYB 16%, the vertical box blur 10%, the fused SSIM pools 9%, `OnlineMoments::block` 9%, the
+horizontal fused blur 9%, the gradient kernel 8%. Thread scaling at 2048² on the large-cache CCD: 1 / 2 / 4 / 8 / 16
+threads 70.6 / 51.1 / 38.7 / 20.2 / 25.7 ms (after the changes below), 3.5× at eight threads.
+
+**Bit-identical changes** (110 of 110 dumps identical; zensim's full suite 929 passed, 0 failed, including
+`featcanon_rev5_parity` over every token permutation, `featcanon_tier_parity`, `featcanon_rev4_contract`,
+`fold_engine_parity`, `research_engine_parity` and `cross_tier` on dev, Zen 5):
+
+1. **DENSEPOOL's blocked interchange** in the dense kernel for the sixteen-lane pools (`DENSE_ILV = 16` chunks
+   buffered; 8 ties, 32 is slower): each pool loads its two lane halves once per block instead of once per chunk.
+   −4.5% at v3; within 0.6% at v4 and v4x, where the f64 conversions, not the pool round trips, bound the kernel.
+2. **The sRGB table in registers** on v4x (`srgb_xyb_canon_vec_v4x`): one `vpermb` deinterleaves sixteen pixels and
+   eight `vpermt2ps` plus a blend tree look each channel up, instead of three 16-lane gathers per chunk. −4.2%.
+3. **Eight central-moment blocks per SIMD call** in the dense kernel: one block per `f64x8` lane, each lane running
+   `OnlineMoments::block`'s scalar sequence op for op, merged in raster order. −6.8%.
+
+Paired, 10 rounds, against the session's base binary (`benchmarks/byconstruction_perf_2026-10-24/step1/grid.tsv`;
+raw rounds on dev under `/mnt/v/output/zensim/byconstruction-2026-10-22/perf/2026-10-24/step1/`; load average 2–4
+from other sessions during the run):
+
+| Bake | Tier | 512² | 2048² |
+|---|---|---|---|
+| B (rev 5) | v4x | 5.479 → 4.983 ms, −9.07% (−9.21..−8.95) | 78.77 → 70.50 ms, −10.53% (−10.65..−10.40) |
+| B (rev 5) | v3 | 7.284 → 6.861 ms, −5.77% (−5.88..−5.66) | 108.86 → 102.27 ms, −6.12% (−6.22..−5.98) |
+| Tga (rev 6) | v4x | 5.750 → 5.239 ms, −8.87% (−8.95..−8.73) | 82.35 → 74.50 ms, −9.64% (−9.86..−9.44) |
+| Tga (rev 6) | v3 | 7.731 → 7.317 ms, −5.32% (−5.41..−5.26) | 116.06 → 109.21 ms, −5.82% (−6.07..−5.76) |
+
+Not measured yet: v4 (only as a spot check), multithreaded paired rounds, aarch64 and wasm (their kernels did not
+change), an Intel host.
+
+**Where the time goes now** (B, 2048², v4x): the dense kernel 34% of zensim's samples, about a quarter of it the f64
+pool conversions and adds (`vcvtps2pd`, `vaddpd`), which only revision 7's f32 lanes remove; sRGB → XYB 12%, now
+register copies around the destructive permutes; the four blur kernels and the fused SSIM pools 34% together; the
+gradient kernel 8%.
+
 ### DVIFM 0.3 on the E21 sets and the mixture test (2026-10-23)
 
 Owner request: "eval dvifm 0.3 on kadid and other distortion//corrputions". Scorer: the frozen runtime of the
