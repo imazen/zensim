@@ -11,6 +11,92 @@
 
 type V8<T> = GenericF32x8<T>;
 
+/// The element ops the vector term helpers use, at either vector width.
+/// magetypes' 8- and 16-lane generic types implement each with the same
+/// per-lane semantics (the same `max` operand order, `GT_OQ`/`LT_OQ`
+/// compares, mask select; v3's 16-lane type is two 8-lane halves), so a
+/// helper computes the same bits per lane at either width.
+trait Vf32:
+    Copy
+    + core::ops::Add<Output = Self>
+    + core::ops::Sub<Output = Self>
+    + core::ops::Mul<Output = Self>
+    + core::ops::Div<Output = Self>
+{
+    type Tok: Copy;
+    fn splat_t(token: Self::Tok, v: f32) -> Self;
+    fn zero_t(token: Self::Tok) -> Self;
+    fn max(self, other: Self) -> Self;
+    fn abs(self) -> Self;
+    fn sqrt(self) -> Self;
+    fn simd_gt(self, other: Self) -> Self;
+    fn simd_lt(self, other: Self) -> Self;
+    fn blend(mask: Self, if_true: Self, if_false: Self) -> Self;
+}
+
+macro_rules! impl_vf32 {
+    ($ty:ident, $backend:ident) => {
+        impl<T: $backend + Copy> Vf32 for $ty<T> {
+            type Tok = T;
+            #[inline(always)]
+            fn splat_t(token: T, v: f32) -> Self {
+                $ty::<T>::splat_t(token, v)
+            }
+            #[inline(always)]
+            fn zero_t(token: T) -> Self {
+                $ty::<T>::zero_t(token)
+            }
+            #[inline(always)]
+            fn max(self, other: Self) -> Self {
+                $ty::<T>::max(self, other)
+            }
+            #[inline(always)]
+            fn abs(self) -> Self {
+                $ty::<T>::abs(self)
+            }
+            #[inline(always)]
+            fn sqrt(self) -> Self {
+                $ty::<T>::sqrt(self)
+            }
+            #[inline(always)]
+            fn simd_gt(self, other: Self) -> Self {
+                $ty::<T>::simd_gt(self, other)
+            }
+            #[inline(always)]
+            fn simd_lt(self, other: Self) -> Self {
+                $ty::<T>::simd_lt(self, other)
+            }
+            #[inline(always)]
+            fn blend(mask: Self, if_true: Self, if_false: Self) -> Self {
+                $ty::<T>::blend(mask, if_true, if_false)
+            }
+        }
+    };
+}
+impl_vf32!(GenericF32x8, F32x8Backend);
+impl_vf32!(GenericF32x16, F32x16Backend);
+
+/// Whether a tier's kernels step sixteen f32 columns at a time: true where
+/// `T`'s target features include AVX-512F (v4, v4x), so one register holds
+/// sixteen lanes. v3's sixteen-lane type is two 256-bit halves, and the wider
+/// step measured slower there (B at 2048², revision 7: 80.4 → 84.9 ms).
+const fn steps_sixteen<T: archmage::SimdToken>() -> bool {
+    let f = T::TARGET_FEATURES.as_bytes();
+    let pat = b"avx512f";
+    let mut i = 0;
+    while i + pat.len() <= f.len() {
+        let mut j = 0;
+        while j < pat.len() && f[i + j] == pat[j] {
+            j += 1;
+        }
+        if j == pat.len() {
+            return true;
+        }
+        i += 1;
+    }
+    false
+}
+
 // ============================================================================
 // Phase-6 (§A.16): division-cost reduction for the SIMD formula family.
 //
@@ -76,22 +162,22 @@ type V8<T> = GenericF32x8<T>;
 /// Vectorized [`ssim_d_local`] — fused to one division via `(a*c)/(b*d)`.
 /// Identical algebra, f32 lanes. Bounded `[0, 2]`.
 #[inline(always)]
-fn ssim_d_local_v<T: F32x8Backend + Copy>(
-    token: T,
-    mu1: V8<T>,
-    mu2: V8<T>,
-    s12: V8<T>,
-    ssq: V8<T>,
-    c1: V8<T>,
-    c2: V8<T>,
+fn ssim_d_local_v<V: Vf32>(
+    token: V::Tok,
+    mu1: V,
+    mu2: V,
+    s12: V,
+    ssq: V,
+    c1: V,
+    c2: V,
     // Revision 3: `s12` carries the direct error moment; see `ssim_d_local`.
     direct: bool,
     // Revision 7: the luminance term without cancellation; see `ssim_d_local`.
     stable: bool,
-) -> V8<T> {
-    let two = V8::<T>::splat_t(token, 2.0);
-    let one = V8::<T>::splat_t(token, 1.0);
-    let zero = V8::<T>::zero_t(token);
+) -> V {
+    let two = V::splat_t(token, 2.0);
+    let one = V::splat_t(token, 1.0);
+    let zero = V::zero_t(token);
     let a = two * mu1 * mu2 + c1;
     let b = mu1 * mu1 + mu2 * mu2 + c1;
     let d = ssq - mu1 * mu1 - mu2 * mu2 + c2;
@@ -110,26 +196,26 @@ fn ssim_d_local_v<T: F32x8Backend + Copy>(
 
 /// Vectorized [`bounded_sim`] — `(2ab+c)/(a²+b²+c)`. Bounded `(0, 1]`.
 #[inline(always)]
-fn bounded_sim_v<T: F32x8Backend + Copy>(token: T, a: V8<T>, b: V8<T>, c: V8<T>) -> V8<T> {
-    let two = V8::<T>::splat_t(token, 2.0);
+fn bounded_sim_v<V: Vf32>(token: V::Tok, a: V, b: V, c: V) -> V {
+    let two = V::splat_t(token, 2.0);
     (two * a * b + c) / (a * a + b * b + c)
 }
 
 /// Vectorized [`bounded_dissim`]: `one − bounded_sim_v`, or the exact
 /// `(a−b)²/(a²+b²+c)` when `stable` (revision 7).
 #[inline(always)]
-fn bounded_dissim_v<T: F32x8Backend + Copy>(
-    token: T,
-    a: V8<T>,
-    b: V8<T>,
-    c: V8<T>,
+fn bounded_dissim_v<V: Vf32>(
+    token: V::Tok,
+    a: V,
+    b: V,
+    c: V,
     stable: bool,
-) -> V8<T> {
+) -> V {
     if stable {
         let d = a - b;
         d * d / (a * a + b * b + c)
     } else {
-        V8::<T>::splat_t(token, 1.0) - bounded_sim_v(token, a, b, c)
+        V::splat_t(token, 1.0) - bounded_sim_v(token, a, b, c)
     }
 }
 
@@ -137,8 +223,8 @@ fn bounded_dissim_v<T: F32x8Backend + Copy>(
 /// shared-denominator partner — see [`bounded_excess_pair_v`] for the
 /// paired form). Bounded `[0, 1)`.
 #[inline(always)]
-fn bounded_excess_v<T: F32x8Backend + Copy>(token: T, a: V8<T>, b: V8<T>, c: V8<T>) -> V8<T> {
-    let zero = V8::<T>::zero_t(token);
+fn bounded_excess_v<V: Vf32>(token: V::Tok, a: V, b: V, c: V) -> V {
+    let zero = V::zero_t(token);
     (a - b).max(zero) / (a + b + c)
 }
 
@@ -148,21 +234,21 @@ fn bounded_excess_v<T: F32x8Backend + Copy>(token: T, a: V8<T>, b: V8<T>, c: V8<
 /// of addition). Returns `(bounded_excess(a,b,c), bounded_excess(b,a,c))`.
 /// Bounded `[0, 1)` each.
 #[inline(always)]
-fn bounded_excess_pair_v<T: F32x8Backend + Copy>(
-    token: T,
-    a: V8<T>,
-    b: V8<T>,
-    c: V8<T>,
-) -> (V8<T>, V8<T>) {
-    let zero = V8::<T>::zero_t(token);
+fn bounded_excess_pair_v<V: Vf32>(
+    token: V::Tok,
+    a: V,
+    b: V,
+    c: V,
+) -> (V, V) {
+    let zero = V::zero_t(token);
     let denom = a + b + c;
     ((a - b).max(zero) / denom, (b - a).max(zero) / denom)
 }
 
 /// Vectorized [`saturate`] — `max(x,0)/(max(x,0)+c)`. Bounded `[0, 1)`.
 #[inline(always)]
-fn saturate_v<T: F32x8Backend + Copy>(token: T, x: V8<T>, c: V8<T>) -> V8<T> {
-    let zero = V8::<T>::zero_t(token);
+fn saturate_v<V: Vf32>(token: V::Tok, x: V, c: V) -> V {
+    let zero = V::zero_t(token);
     let x = x.max(zero);
     x / (x + c)
 }
@@ -184,7 +270,7 @@ fn saturate_v<T: F32x8Backend + Copy>(token: T, x: V8<T>, c: V8<T>) -> V8<T> {
 /// the scalar IEEE result on every tier by
 /// `mscn_norm_v_is_correctly_rounded_on_every_tier`.
 #[inline(always)]
-fn mscn_norm_v<T: F32x8Backend + Copy>(_token: T, resid: V8<T>, var: V8<T>, c: V8<T>) -> V8<T> {
+fn mscn_norm_v<V: Vf32>(_token: V::Tok, resid: V, var: V, c: V) -> V {
     resid / (var + c).sqrt()
 }
 
@@ -192,14 +278,14 @@ fn mscn_norm_v<T: F32x8Backend + Copy>(_token: T, resid: V8<T>, var: V8<T>, c: V
 /// c)` collapsed to one division (phase-6 §A.16, exact — see the scalar
 /// sibling's doc for the derivation). Bounded `[0, 1)`.
 #[inline(always)]
-fn pjnd_transducer_v<T: F32x8Backend + Copy>(
-    token: T,
-    raw_abs_err: V8<T>,
-    act: V8<T>,
-    k: V8<T>,
-    c: V8<T>,
-) -> V8<T> {
-    let one = V8::<T>::splat_t(token, 1.0);
+fn pjnd_transducer_v<V: Vf32>(
+    token: V::Tok,
+    raw_abs_err: V,
+    act: V,
+    k: V,
+    c: V,
+) -> V {
+    let one = V::splat_t(token, 1.0);
     let denom = raw_abs_err + c * (one + k * act);
     raw_abs_err / denom
 }
@@ -5057,41 +5143,41 @@ fn gradient_block_kernel_canon<
 #[inline(always)]
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn gradient_terms32_v<
-    T: F32x8Backend + Copy,
+    V: Vf32,
     const BANDVIS: bool,
     const BV_DSTACT: bool,
     const HPR: bool,
 >(
-    token: T,
-    sxl: V8<T>,
-    sxr: V8<T>,
-    syu: V8<T>,
-    syd: V8<T>,
-    dxl: V8<T>,
-    dxr: V8<T>,
-    dyu: V8<T>,
-    dyd: V8<T>,
-    s: V8<T>,
-    dd: V8<T>,
-    act: V8<T>,
-    actd: V8<T>,
-    m1: V8<T>,
-    m2: V8<T>,
+    token: V::Tok,
+    sxl: V,
+    sxr: V,
+    syu: V,
+    syd: V,
+    dxl: V,
+    dxr: V,
+    dyu: V,
+    dyd: V,
+    s: V,
+    dd: V,
+    act: V,
+    actd: V,
+    m1: V,
+    m2: V,
     bv_lo: f32,
     bv_hi: f32,
     stable: bool,
-) -> (V8<T>, V8<T>, V8<T>, V8<T>, V8<T>, V8<T>, V8<T>, V8<T>) {
-    let c_gms = V8::<T>::splat_t(token, C_GMS as f32);
-    let c_ring_err = V8::<T>::splat_t(token, C_RING_ERR as f32);
-    let c_act = V8::<T>::splat_t(token, C_ACTIVITY as f32);
-    let c_ring_edge = V8::<T>::splat_t(token, C_RING_EDGE as f32);
-    let c_band_dst = V8::<T>::splat_t(token, C_BAND_DST as f32);
-    let c_band_src = V8::<T>::splat_t(token, C_BAND_SRC as f32);
-    let c_bv = V8::<T>::splat_t(token, C_BV as f32);
-    let bv_lo_v = V8::<T>::splat_t(token, bv_lo);
-    let bv_hi_v = V8::<T>::splat_t(token, bv_hi);
-    let one = V8::<T>::splat_t(token, 1.0);
-    let zero = V8::<T>::zero_t(token);
+) -> (V, V, V, V, V, V, V, V) {
+    let c_gms = V::splat_t(token, C_GMS as f32);
+    let c_ring_err = V::splat_t(token, C_RING_ERR as f32);
+    let c_act = V::splat_t(token, C_ACTIVITY as f32);
+    let c_ring_edge = V::splat_t(token, C_RING_EDGE as f32);
+    let c_band_dst = V::splat_t(token, C_BAND_DST as f32);
+    let c_band_src = V::splat_t(token, C_BAND_SRC as f32);
+    let c_bv = V::splat_t(token, C_BV as f32);
+    let bv_lo_v = V::splat_t(token, bv_lo);
+    let bv_hi_v = V::splat_t(token, bv_hi);
+    let one = V::splat_t(token, 1.0);
+    let zero = V::zero_t(token);
 
     let gx_src = sxr - sxl;
     let gy_src = syd - syu;
@@ -5118,7 +5204,7 @@ fn gradient_terms32_v<
     let band = edge_excess * src_smooth_b;
 
     let (bv_gain, bv_loss) = if BANDVIS {
-        let two = V8::<T>::splat_t(token, 2.0);
+        let two = V::splat_t(token, 2.0);
         let d2x_s = sxl + sxr - two * s;
         let d2y_s = syu + syd - two * s;
         let curv_s = (d2x_s * d2x_s + d2y_s * d2y_s).sqrt();
@@ -5201,8 +5287,8 @@ fn gradient_block_kernel_canon64_vec<
         ($pool:ident, $pool32:ident, $x0:expr, $v:expr) => {{
             let v: f32x8 = $v;
             if rev7 {
-                let off = $x0 & 15;
-                let lanes: &mut [f32; 8] = (&mut $pool32[off..off + 8]).try_into().unwrap();
+                // `$x0` is a multiple of 8: its bit 3 picks the lane half.
+                let lanes = &mut $pool32.as_chunks_mut::<8>().0[($x0 >> 3) & 1];
                 (f32x8::load_t(token, lanes) + v).store(lanes);
             } else {
                 let a = v.to_array();
@@ -5321,31 +5407,57 @@ fn gradient_block_kernel_canon64_vec<
                     &mut r_bv_loss,
                 );
             }
-            let mut x0 = head_end;
-            while x0 + 8 <= interior_end {
-                macro_rules! ld {
-                    ($pl:expr, $off:expr) => {
-                        f32x8::load_t(token, $pl[$off..$off + 8].try_into().unwrap())
-                    };
-                }
-                let sxl = ld!(src_h, row + x0 - 1);
-                let sxr = ld!(src_h, row + x0 + 1);
-                let syu = ld!(src_h, row_u + x0);
-                let syd = ld!(src_h, row_d + x0);
-                let dxl = ld!(dst_h, row + x0 - 1);
-                let dxr = ld!(dst_h, row + x0 + 1);
-                let dyu = ld!(dst_h, row_u + x0);
-                let dyd = ld!(dst_h, row_d + x0);
-                let s = ld!(src_h, row + x0);
-                let dd = ld!(dst_h, row + x0);
-                let act = ld!(activity, act_row + x0);
+            // The chunks, x0 = head_end + 8k for k < n. Every plane's window
+            // is cut to its exact span first, so the loads need no per-chunk
+            // range checks (they were most of this loop's instructions).
+            let n = (interior_end - head_end) / 8;
+            let span = n * 8;
+            let c0 = row + head_end;
+            let a0 = act_row + head_end;
+            macro_rules! win {
+                ($pl:expr, $start:expr) => {{
+                    let w: &[[f32; 8]] = $pl[$start..$start + span].as_chunks::<8>().0;
+                    &w[..n]
+                }};
+            }
+            let (w_sxl, w_sxr, w_syu, w_syd, w_s) = (
+                win!(src_h, c0 - 1),
+                win!(src_h, c0 + 1),
+                win!(src_h, row_u + head_end),
+                win!(src_h, row_d + head_end),
+                win!(src_h, c0),
+            );
+            let (w_dxl, w_dxr, w_dyu, w_dyd, w_d) = (
+                win!(dst_h, c0 - 1),
+                win!(dst_h, c0 + 1),
+                win!(dst_h, row_u + head_end),
+                win!(dst_h, row_d + head_end),
+                win!(dst_h, c0),
+            );
+            let w_act = win!(activity, a0);
+            let w_actd: &[[f32; 8]] = if BV_DSTACT { win!(act_dst, a0) } else { &[] };
+            let (w_m1, w_m2): (&[[f32; 8]], &[[f32; 8]]) =
+                if HPR { (win!(mu1, a0), win!(mu2, a0)) } else { (&[], &[]) };
+            for k in 0..n {
+                let x0 = head_end + 8 * k;
+                let sxl = f32x8::load_t(token, &w_sxl[k]);
+                let sxr = f32x8::load_t(token, &w_sxr[k]);
+                let syu = f32x8::load_t(token, &w_syu[k]);
+                let syd = f32x8::load_t(token, &w_syd[k]);
+                let dxl = f32x8::load_t(token, &w_dxl[k]);
+                let dxr = f32x8::load_t(token, &w_dxr[k]);
+                let dyu = f32x8::load_t(token, &w_dyu[k]);
+                let dyd = f32x8::load_t(token, &w_dyd[k]);
+                let s = f32x8::load_t(token, &w_s[k]);
+                let dd = f32x8::load_t(token, &w_d[k]);
+                let act = f32x8::load_t(token, &w_act[k]);
                 let actd = if BV_DSTACT {
-                    ld!(act_dst, act_row + x0)
+                    f32x8::load_t(token, &w_actd[k])
                 } else {
                     f32x8::zero_t(token)
                 };
                 let (m1, m2) = if HPR {
-                    (ld!(mu1, act_row + x0), ld!(mu2, act_row + x0))
+                    (f32x8::load_t(token, &w_m1[k]), f32x8::load_t(token, &w_m2[k]))
                 } else {
                     (f32x8::zero_t(token), f32x8::zero_t(token))
                 };
@@ -5416,8 +5528,7 @@ fn gradient_block_kernel_canon64_vec<
                     gpool_add!(r_bv_gain, r_bv_gain32, x0, bv_gain);
                     gpool_add!(r_bv_loss, r_bv_loss32, x0, bv_loss);
                 }
-                x0 += 8;
-                if rev7 && x0.is_multiple_of(crate::featcanon::ROW_LANES_FOLD) {
+                if rev7 && (x0 + 8).is_multiple_of(crate::featcanon::ROW_LANES_FOLD) {
                     gpool_fold!(
                         clear;
                         r_gms, r_gms32; r_gms2, r_gms232;
@@ -5426,8 +5537,9 @@ fn gradient_block_kernel_canon64_vec<
                     );
                 }
             }
+            let x0 = head_end + span;
             // The end of the chunks, unless the last chunk already folded.
-            if rev7 && x0 > head_end && !x0.is_multiple_of(crate::featcanon::ROW_LANES_FOLD) {
+            if rev7 && n > 0 && !x0.is_multiple_of(crate::featcanon::ROW_LANES_FOLD) {
                 gpool_fold!(
                     last;
                     r_gms, r_gms32; r_gms2, r_gms232;

@@ -55,8 +55,8 @@ mod restore_cuts;
 
 use archmage::incant;
 use archmage::magetypes;
-use magetypes::simd::backends::F32x8Backend;
-use magetypes::simd::generic::f32x8 as GenericF32x8;
+use magetypes::simd::backends::{F32x8Backend, F32x16Backend};
+use magetypes::simd::generic::{f32x8 as GenericF32x8, f32x16 as GenericF32x16};
 
 // ============================================================================
 // Layout constants

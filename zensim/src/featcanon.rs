@@ -536,10 +536,12 @@ pub(crate) struct Lanes16F32(pub [f32; 16]);
 pub(crate) const ROW_LANES_FOLD: usize = 4096;
 
 impl Lanes16F32 {
-    /// Lanes `offset..offset + 8` (`offset` is 0 or 8).
+    /// Lanes `offset..offset + 8` (`offset` is 0 or 8; indexed by its bit 3,
+    /// so the access needs no range check).
     #[inline(always)]
     pub(crate) fn chunk8(&mut self, offset: usize) -> &mut [f32; 8] {
-        (&mut self.0[offset..offset + 8]).try_into().unwrap()
+        debug_assert!(offset == 0 || offset == 8);
+        &mut self.0.as_chunks_mut::<8>().0[(offset >> 3) & 1]
     }
 
     /// Add every lane to `pool`'s matching lane (for [`Lanes16F64`],
@@ -582,9 +584,12 @@ impl Pool64 for LanesF64 {
     }
 }
 impl Pool64 for Lanes16F64 {
+    /// Lanes `offset..offset + 8` (`offset` is 0 or 8; indexed by its bit 3,
+    /// so the access needs no range check).
     #[inline(always)]
     fn chunk8(&mut self, offset: usize) -> &mut [f64; 8] {
-        (&mut self.0[offset..offset + 8]).try_into().unwrap()
+        debug_assert!(offset == 0 || offset == 8);
+        &mut self.0.as_chunks_mut::<8>().0[(offset >> 3) & 1]
     }
 }
 

@@ -1421,45 +1421,45 @@ fn dense_block_kernel_canon<P: crate::featcanon::Pool>(
 #[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))] // only the x86_64 lane-parallel canon bodies call it
 #[inline(always)]
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
-fn dense_terms32_v<T: F32x8Backend + Copy>(
-    token: T,
-    s: V8<T>,
-    dd: V8<T>,
-    m1: V8<T>,
-    m2: V8<T>,
-    q: V8<T>,
-    p: V8<T>,
-    act: V8<T>,
+fn dense_terms32_v<V: Vf32>(
+    token: V::Tok,
+    s: V,
+    dd: V,
+    m1: V,
+    m2: V,
+    q: V,
+    p: V,
+    act: V,
     transducer_bank: bool,
     direct: bool,
     stable: bool,
 ) -> (
-    [V8<T>; 13],
-    V8<T>,
-    V8<T>,
-    V8<T>,
-    V8<T>,
-    V8<T>,
-    [V8<T>; 4],
-    [V8<T>; 4],
-    [V8<T>; 3],
-    [V8<T>; 3],
-    V8<T>,
+    [V; 13],
+    V,
+    V,
+    V,
+    V,
+    V,
+    [V; 4],
+    [V; 4],
+    [V; 3],
+    [V; 3],
+    V,
 ) {
-    let c1 = V8::<T>::splat_t(token, C1_V2 as f32);
-    let c2 = V8::<T>::splat_t(token, C2_V2 as f32);
-    let c_edge = V8::<T>::splat_t(token, C_EDGE as f32);
-    let c_mse = V8::<T>::splat_t(token, C_MSE as f32);
-    let c_hf = V8::<T>::splat_t(token, C_HF as f32);
-    let c_pj = V8::<T>::splat_t(token, C_PJND_CLAMP as f32);
-    let k_mid = V8::<T>::splat_t(token, K_PJND_MASK as f32);
-    let k_lo = V8::<T>::splat_t(token, K_PJND_MASK_LOW as f32);
-    let k_hi = V8::<T>::splat_t(token, K_PJND_MASK_HIGH as f32);
-    let c_act = V8::<T>::splat_t(token, C_ACTIVITY as f32);
-    let c_peak = V8::<T>::splat_t(token, C_PEAK as f32);
-    let iw_floor = V8::<T>::splat_t(token, IW_WEIGHT_FLOOR as f32);
-    let one = V8::<T>::splat_t(token, 1.0);
-    let zero = V8::<T>::zero_t(token);
+    let c1 = V::splat_t(token, C1_V2 as f32);
+    let c2 = V::splat_t(token, C2_V2 as f32);
+    let c_edge = V::splat_t(token, C_EDGE as f32);
+    let c_mse = V::splat_t(token, C_MSE as f32);
+    let c_hf = V::splat_t(token, C_HF as f32);
+    let c_pj = V::splat_t(token, C_PJND_CLAMP as f32);
+    let k_mid = V::splat_t(token, K_PJND_MASK as f32);
+    let k_lo = V::splat_t(token, K_PJND_MASK_LOW as f32);
+    let k_hi = V::splat_t(token, K_PJND_MASK_HIGH as f32);
+    let c_act = V::splat_t(token, C_ACTIVITY as f32);
+    let c_peak = V::splat_t(token, C_PEAK as f32);
+    let iw_floor = V::splat_t(token, IW_WEIGHT_FLOOR as f32);
+    let one = V::splat_t(token, 1.0);
+    let zero = V::zero_t(token);
     let d = ssim_d_local_v(token, m1, m2, p, q, c1, c2, direct, stable);
     let d2 = d * d;
     let diff_src = (s - m1).abs();
@@ -1467,8 +1467,8 @@ fn dense_terms32_v<T: F32x8Backend + Copy>(
     let edge_dissim = bounded_dissim_v(token, diff_src, diff_dst, c_edge, stable);
     let gt = diff_dst.simd_gt(diff_src);
     let lt = diff_dst.simd_lt(diff_src);
-    let art_i = V8::<T>::blend(gt, edge_dissim, zero);
-    let det_i = V8::<T>::blend(lt, edge_dissim, zero);
+    let art_i = V::blend(gt, edge_dissim, zero);
+    let det_i = V::blend(lt, edge_dissim, zero);
     let raw_diff = s - dd;
     let mse_i = saturate_v(token, raw_diff * raw_diff, c_mse);
     let hf_src = s - m1;
@@ -1598,7 +1598,7 @@ fn dense_elem_canon<P: crate::featcanon::Pool>(
 /// updates (even, so a block starts on lanes 0..8; see the kernel below).
 const DENSE_ILV: usize = 16;
 
-#[magetypes(define(f32x8, f64x8), v4x, v4, v3, -scalar)]
+#[magetypes(define(f32x8, f32x16, f64x8), v4x, v4, v3, -scalar)]
 #[allow(clippy::too_many_arguments)]
 fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64>(
     token: Token,
@@ -1760,7 +1760,149 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64>(
             let qrow = &ssq[row..row + full * 8];
             let prow = &s12[row..row + full * 8];
             let arow = &activity[row..row + full * 8];
-            for c in 0..full {
+            // Per eight-column chunk `c`: the pool, moment and rev4 updates.
+            // `bufs` holds the chunk's 29 pooled term vectors in pool order
+            // and `act8` its activity (the rev4 bank also reads `bufs` 0 and
+            // 4–7: `d`, `art`, `det`, `mse` and the HF gain).
+            macro_rules! chunk8_post {
+                ($c:expr, $bufs:expr, $act8:expr) => {{
+                    let c: usize = $c;
+                    let i = c * 8;
+                    let bufs: [[f32; 8]; 29] = $bufs;
+                if rev7 {
+                    let off = i & 15;
+                    for j in 0..29 {
+                        let lanes = pools32[j].chunk8(off);
+                        (f32x8::load_t(token, lanes) + f32x8::load_t(token, &bufs[j])).store(lanes);
+                    }
+                    for l in 0..8 {
+                        dvals[i + l] = bufs[0][l] as f64;
+                    }
+                    if (i + 8).is_multiple_of(crate::featcanon::ROW_LANES_FOLD) {
+                        for (l32, l) in pools32.iter_mut().zip(pools.iter_mut()) {
+                            l32.fold_into(l);
+                        }
+                    }
+                } else if stable_moments {
+                    // Chunk `c` adds to lanes `(c & 1) * 8..`; a block starts
+                    // at an even chunk (`DENSE_ILV` is even), so a buffered
+                    // chunk's parity is its position's.
+                    let k = c % DENSE_ILV;
+                    for j in 0..29 {
+                        ilv[j * DENSE_ILV + k] = bufs[j];
+                    }
+                    if k + 1 == DENSE_ILV || c + 1 == full {
+                        for j in 0..29 {
+                            let blk = &ilv[j * DENSE_ILV..j * DENSE_ILV + k + 1];
+                            let mut lo = f64x8::load_t(token, pools[j].chunk8(0));
+                            let mut hi = f64x8::load_t(token, pools[j].chunk8(8));
+                            let (pairs, rest) = blk.as_chunks::<2>();
+                            for [a, b] in pairs {
+                                let a: [f64; 8] = std::array::from_fn(|l| a[l] as f64);
+                                let b: [f64; 8] = std::array::from_fn(|l| b[l] as f64);
+                                lo += f64x8::from_array_t(token, a);
+                                hi += f64x8::from_array_t(token, b);
+                            }
+                            if let [last] = rest {
+                                let a: [f64; 8] = std::array::from_fn(|l| last[l] as f64);
+                                lo += f64x8::from_array_t(token, a);
+                            }
+                            lo.store(pools[j].chunk8(0));
+                            hi.store(pools[j].chunk8(8));
+                        }
+                    }
+                } else {
+                    for j in 0..29 {
+                        let a: [f64; 8] = std::array::from_fn(|l| bufs[j][l] as f64);
+                        let lanes = pools[j].chunk8(i & (P::LANES - 1));
+                        (f64x8::load_t(token, lanes) + f64x8::from_array_t(token, a))
+                            .store(lanes);
+                    }
+                }
+                if stable_moments && !rev7 {
+                    let off = i & 15;
+                    for l in 0..8 {
+                        local[off + l] = bufs[0][l] as f64;
+                        cols[off + l][blocks] = bufs[0][l] as f64;
+                    }
+                    if off == 8 {
+                        blocks += 1;
+                        if blocks == 8 {
+                            central8(&cols, blocks, &mut acc.central);
+                            blocks = 0;
+                        }
+                    } else if c + 1 == full && width.is_multiple_of(8) {
+                        // The row ends on an eight-value block.
+                        central8(&cols, blocks, &mut acc.central);
+                        blocks = 0;
+                        acc.central.merge(OnlineMoments::block(&local[..8]));
+                    }
+                }
+                    if let Some(r4) = r4.as_mut() {
+                        rev4_dense_chunk8(r4, &bufs[0], &bufs[4], &bufs[5], &bufs[6], &bufs[7], $act8);
+                    }
+                }};
+            }
+            let mut c = 0usize;
+            // Sixteen columns per step (two chunks): every term is
+            // element-wise, so each lane computes the eight-wide step's bits;
+            // revision 7 adds the sixteen values to the sixteen f32 lanes in
+            // one vector op (lane `x & 15`, the two chunks' order), and the
+            // other paths split the step back into its two chunks.
+            while steps_sixteen::<Token>() && c + 2 <= full {
+                let i = c * 8;
+                macro_rules! ld16 {
+                    ($r:expr) => {
+                        f32x16::load_t(token, $r[i..i + 16].try_into().unwrap())
+                    };
+                }
+                let (t, _, _, _, m_w, i_w, mv, iv, kn, kd, act_v) = dense_terms32_v(
+                    token,
+                    ld16!(srow),
+                    ld16!(drow),
+                    ld16!(m1row),
+                    ld16!(m2row),
+                    ld16!(qrow),
+                    ld16!(prow),
+                    ld16!(arow),
+                    transducer_bank,
+                    direct,
+                    forms7,
+                );
+                let vecs: [f32x16; 29] = [
+                    t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[7], t[8], t[9], t[10], t[11], t[12],
+                    m_w, i_w, mv[0], mv[1], mv[2], mv[3], iv[0], iv[1], iv[2], iv[3], kn[0], kn[1],
+                    kn[2], kd[0], kd[1], kd[2],
+                ];
+                if rev7 && r4.is_none() {
+                    for j in 0..29 {
+                        let lanes = &mut pools32[j].0;
+                        (f32x16::load_t(token, lanes) + vecs[j]).store(lanes);
+                    }
+                    let d = vecs[0].to_array();
+                    for l in 0..16 {
+                        dvals[i + l] = d[l] as f64;
+                    }
+                    if (i + 16).is_multiple_of(crate::featcanon::ROW_LANES_FOLD) {
+                        for (l32, l) in pools32.iter_mut().zip(pools.iter_mut()) {
+                            l32.fold_into(l);
+                        }
+                    }
+                } else {
+                    let arrs: [[f32; 16]; 29] = vecs.map(|v| v.to_array());
+                    let act16 = act_v.to_array();
+                    for h in 0..2 {
+                        let bufs: [[f32; 8]; 29] =
+                            std::array::from_fn(|j| arrs[j][8 * h..8 * h + 8].try_into().unwrap());
+                        let act8: [f32; 8] = act16[8 * h..8 * h + 8].try_into().unwrap();
+                        chunk8_post!(c + h, bufs, &act8);
+                    }
+                }
+                c += 2;
+            }
+            // The remaining chunk (an odd count) and every chunk on v3: the
+            // eight-wide step, unchanged.
+            for c in c..full {
                 let i = c * 8;
                 let sv = f32x8::load_t(token, srow[i..i + 8].try_into().unwrap());
                 let dv = f32x8::load_t(token, drow[i..i + 8].try_into().unwrap());
