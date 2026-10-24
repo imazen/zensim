@@ -1263,6 +1263,14 @@ steps on top: 48 references, 1,728 steps per cell, `mixture_global/` on dev. RGB
 | B | 88 | 74 | +18.3 | saturation/contrast, then luma or chroma noise |
 | Bga | 41–368 (2,052) | 36–341 | +48.4 | contrast ×0.85, then chroma noise |
 
+**Owner check of the assumption (2026-10-24).** An owner-only picker page (`picker_global.py`; side-by-side and flicker
+views at exact pixel zoom, models revealed only after each pick) showed 60 rounds: 49 steps where B or a Tga cell
+scored edit + noise above the edit alone (at most four per edit × noise combination) and 11 controls where no model
+did. The owner judged the noise-free version less bad in **60 of 60**, with no "can't tell", across all six edits and
+all six noise levels. So adding noise after a global edit does make these images worse, and every inversion here is a
+model error. Agreement with the owner's picks: M64, Tgg, Tga128 (cell mean) and DVIFM 0.3 60/60, Tga (cell mean) 55/60,
+Bga 35/60, B 24/60. Picks: `/mnt/v/output/zensim/byconstruction-2026-10-22/picker/picks_2026-10-24.json` on dev (copied from the page's private store).
+
 **The sign-free descriptor reopens an inversion route.** Without it (Thpm) no step inverts; with it, adding chroma
 noise to a saturation-changed image raises the score by up to 9.8 points (Tga). The "1–4 inversions" reported for Tga
 above hold only for the original base distortions. The candidate's monotonicity claim is therefore weaker than stated
@@ -1344,26 +1352,37 @@ that build's zensim (home turf). Run: `jxl_map_rd.sh`, outputs `/mnt/v/output/ze
 +0.1% / +0.1% (SSIMULACRA2 / butteraugli / zensim) on photos, +4.4 / +2.8 / +1.9 on screens, +1.0 / −2.2 / −0.8 on
 illustrations. Comparing modes through these unpaired medians is noisy; the paired comparison below is the measurement.
 
-**Against today's nearest map** (bytes saved at equal judged score, mean over images of each image's median, 95%
-bootstrap CI over the 24 images; positive is better):
+**Against today's nearest map** (`rd_probe_analyze_2026-07-18.py RD --paired-vs nearest`: bytes saved at equal judged
+score, mean over images of each image's median, 95% bootstrap interval over images; positive is better, %):
 
 | Mode | SSIMULACRA2 | butteraugli | zensim |
 |---|---|---|---|
-| guided redistribution | −0.29 [−0.76, +0.20] | −0.51 [−1.71, +0.24] | −0.15 [−0.85, +0.50] |
-| bilinear | +0.01 [−0.68, +0.72] | +0.33 [−1.17, +1.83] | −0.15 [−0.62, +0.36] |
-| bilinear-mass | −0.12 [−0.42, +0.13] | −0.66 [−1.84, +0.11] | −0.21 [−0.57, +0.12] |
+| guided redistribution | −0.29 [−0.78, +0.23] | −0.51 [−1.71, +0.26] | −0.15 [−0.91, +0.49] |
+| bilinear | +0.01 [−0.66, +0.78] | +0.33 [−1.21, +1.97] | −0.15 [−0.64, +0.36] |
+| bilinear-mass | −0.12 [−0.42, +0.13] | −0.66 [−1.89, +0.14] | −0.21 [−0.57, +0.12] |
 | Catmull-Rom | +0.06 [−0.27, +0.40] | +0.61 [−0.39, +1.88] | −0.09 [−0.65, +0.38] |
 | Catmull-Rom-mass | −0.24 [−0.50, −0.03] | +0.34 [−0.68, +1.60] | −0.04 [−0.30, +0.20] |
-| cubic B-spline | +0.03 [−0.39, +0.46] | −0.61 [−1.78, +0.36] | −0.01 [−0.54, +0.48] |
+| cubic B-spline | +0.03 [−0.39, +0.47] | −0.61 [−1.72, +0.43] | −0.01 [−0.56, +0.48] |
 | Lanczos-3 | +0.12 [−0.28, +0.53] | +1.22 [−0.31, +3.00] | +0.12 [−0.36, +0.63] |
 
+**Larger corpus for the two best kernels** (78 TRAIN images: 38 photos, 22 graphics and illustrations, 18 screen crops,
+three per screenshot; `jxl_map_corpus.py --photos 40 --illustrations 20 --screen-crops 3`; `jxl-maprd-large/`):
+
+| Mode | SSIMULACRA2 | butteraugli | zensim |
+|---|---|---|---|
+| Catmull-Rom | **+0.29 [+0.03, +0.61]** | +0.14 [−0.92, +1.20] | +0.09 [−0.23, +0.43] |
+| Lanczos-3 | −0.07 [−0.56, +0.34] | +0.20 [−0.98, +1.33] | −0.28 [−0.70, +0.12] |
+
+Lanczos-3's butteraugli edge does not hold overall (+1.22 on 24 images, +0.20 on 78); it holds on illustrations (+2.22
+[+0.57, +4.14], 22 images) and turns negative on photos (−0.71 [−2.38, +0.20]). Catmull-Rom is the only kernel whose
+overall interval clears zero, on SSIMULACRA2 only, by 0.3% of bytes.
+
 - **Guided redistribution does not help JXL.** It is slightly worse overall, clearly worse on screens (SSIMULACRA2
-  −0.66% [−0.91, −0.41], butteraugli −2.41% [−6.63, +0.30]), and gains only on photos under the home-turf zensim judge
-  (+0.57% [+0.11, +1.00]). Leave it off.
-- **No interpolation kernel reliably beats nearest.** All CIs include zero except Catmull-Rom-mass, which is slightly
-  worse on SSIMULACRA2. Lanczos-3 has the best butteraugli point estimate (+1.2%, larger on illustrations, +2.8%
-  [−0.5, +7.5]); only a larger corpus could separate it from zero. Sub-block shape matters little to a loop that pools
-  each 8×8 block with an L2 norm.
+  −0.66% [−0.91, −0.42], butteraugli −2.41% [−6.46, +0.35]), and gains only on photos under the home-turf zensim judge
+  (+0.57% [+0.13, +1.01]). Leave it off.
+- **Interpolation is not a meaningful lever for JXL.** On 78 images Catmull-Rom saves 0.3% of bytes on SSIMULACRA2
+  (interval just above zero) and nothing measurable on the other judges; Lanczos-3 helps illustrations on butteraugli
+  only. Sub-block shape matters little to a loop that pools each 8×8 block with an L2 norm.
 - **Not covered:** the attribution-map arms (`JXL_ZENSIM_MODEL_MAP`, a map that follows the model's own gradient) do
   not use this fusion path, so these kernels do not reach them.
 

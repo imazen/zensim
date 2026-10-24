@@ -1553,7 +1553,58 @@ def shipgates_rd_main():
     print(json.dumps({k:v for k,v in result.items() if k not in ["per_source","summary"]},indent=2))
 
 
+def paired_vs_main():
+    """Arms against one baseline arm at equal judged score (`--paired-vs LABEL`): per image the median bytes saved
+    over its matched points, then the mean over images with a 95% bootstrap interval over images (2,000 resamples,
+    seed 1). Positive means fewer bytes than the baseline arm at the same judged quality."""
+    import glob
+    import random
+    base = sys.argv[sys.argv.index("--paired-vs") + 1]
+    judges = load_judges()
+    cells = []
+    for mf in glob.glob(f"{RD}/jxl/manifest_*.tsv"):
+        with open(mf) as f:
+            for r in csv.DictReader(f, delimiter="\t"):
+                cells.append({"image": r["image"], "label": r["label"], "bytes": int(r["bytes"]),
+                              "dist_path": r["dist_path"]})
+    frontiers = defaultdict(list)
+    for c in cells:
+        if c["label"] == base:
+            for j, sc in judges.get(c["dist_path"], {}).items():
+                frontiers[(j, c["image"])].append((sc, c["bytes"]))
+    per_img = defaultdict(lambda: defaultdict(list))
+    for c in cells:
+        if c["label"] in (base, "none"):
+            continue
+        for j, sc in judges.get(c["dist_path"], {}).items():
+            b = interp_bytes(frontiers.get((j, c["image"]), []), sc)
+            if b and b > 0:
+                for cls in (CLASS.get(c["image"], "photo"), "all"):
+                    per_img[(j, c["label"], cls)][c["image"]].append(1.0 - c["bytes"] / b)
+    rng = random.Random(1)
+    out = [f"# Arms against `{base}` at equal judged score: mean over images of each image's median bytes saved, "
+           "95% bootstrap interval over images\n"]
+    labels = sorted({k[1] for k in per_img})
+    for cls in ["all", *sorted({k[2] for k in per_img} - {"all"})]:
+        out.append(f"\n## {cls}\n\n| arm | ssim2 % | butter % | zensim % | images |\n|---|---|---|---|---|")
+        for lab in labels:
+            row, n = [], 0
+            for j in ("ssim2", "butter", "zensim"):
+                d = per_img.get((j, lab, cls))
+                if not d:
+                    row.append("—")
+                    continue
+                meds = [st.median(d[i]) for i in sorted(d)]
+                boots = sorted(st.mean([meds[rng.randrange(len(meds))] for _ in meds]) for _ in range(2000))
+                row.append(f"{100 * st.mean(meds):+.2f} [{100 * boots[50]:+.2f}, {100 * boots[1949]:+.2f}]")
+                n = max(n, len(meds))
+            out.append(f"| {lab} | " + " | ".join(row) + f" | {n} |")
+    print("\n".join(out))
+
+
 def main():
+    if "--paired-vs" in sys.argv:
+        return paired_vs_main()
     if "--shipgates-rd" in sys.argv:
         return shipgates_rd_main()
     if "--model-preferences" in sys.argv:

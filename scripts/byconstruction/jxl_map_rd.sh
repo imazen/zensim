@@ -6,7 +6,7 @@
 # (scripts/v_next/rd_probe_2026-07-18.sh judge, scripts/v_next/rd_probe_analyze_2026-07-18.py).
 #
 #   JXL_RD_BIN=<zensim_diffmap_rd example built against this checkout's zensim> ZM_BIN=<zenmetrics CLI> \
-#     jxl_map_rd.sh RD_DIR
+#     [ARMS="none nearest lanczos3"] jxl_map_rd.sh RD_DIR
 set -euo pipefail
 RD=$1
 : "${JXL_RD_BIN:?set JXL_RD_BIN}" "${ZM_BIN:?set ZM_BIN}"
@@ -15,9 +15,11 @@ DISTANCES=${DISTANCES:-0.6,1.0,1.6,2.5,4.0,6.4,10.0}
 ITERS=${ITERS:-4}
 mkdir -p "$RD"/jxl "$RD"/logs
 log="$RD/logs/jxl.log"
+ARMS=${ARMS:-none nearest guided bilinear catmull-rom bspline lanczos3 bilinear-mass catmull-rom-mass}
 run() { # label metric iters [env k=v ...]
   local label=$1 metric=$2 iters=$3
   shift 3
+  case " $ARMS " in *" $label "*) ;; *) return ;; esac
   if [ -f "$RD/jxl/manifest_$label.tsv" ]; then
     echo "exists: $label"
     return

@@ -8,7 +8,9 @@ SHA-256(name) order so the choice is fixed:
   patent-scan families, centre-cropped from the full-size source.
 Crops are pixel-exact (no resampling). Writes OUT/<name>.png and OUT/corpus.tsv (path, name, class).
 
-  python3 jxl_map_corpus.py --out DIR
+  python3 jxl_map_corpus.py --out DIR [--photos 12] [--illustrations 6] [--screen-crops 1]
+
+`--screen-crops 3` takes the centre, top-left and bottom-right 512 crops of each screenshot (distinct content).
 """
 
 import argparse
@@ -32,32 +34,36 @@ def by_hash(names):
     return sorted(names, key=lambda n: hashlib.sha256(n.encode()).hexdigest())
 
 
-def centre_crop(im: Image.Image, side: int = 512) -> Image.Image:
+def centre_crop(im: Image.Image, side: int = 512, where: str = "centre") -> Image.Image:
     w, h = im.size
     s = min(side, w, h)
-    x0, y0 = (w - s) // 2, (h - s) // 2
+    x0, y0 = {"centre": ((w - s) // 2, (h - s) // 2), "topleft": (0, 0), "bottomright": (w - s, h - s)}[where]
     return im.crop((x0, y0, x0 + s, y0 + s))
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--photos", type=int, default=12, help="CID22 training references (graphics included, relabelled)")
+    ap.add_argument("--illustrations", type=int, default=6)
+    ap.add_argument("--screen-crops", type=int, default=1, choices=(1, 2, 3))
     a = ap.parse_args()
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=False)
     rows = []
-    for name in by_hash([p.stem for p in CID22_TRAIN.glob("*.png")])[:12]:
+    for name in by_hash([p.stem for p in CID22_TRAIN.glob("*.png")])[:a.photos]:
         im = Image.open(CID22_TRAIN / f"{name}.png").convert("RGB")
         dest = out / f"cid22t_{name}.png"
         im.save(dest)
         rows.append((dest, dest.stem, CID22_GRAPHICS.get(name, "photo")))
     for name in GB82_USE:
-        dest = out / f"gb82_{name}.png"
-        centre_crop(Image.open(GB82 / f"{name}.png").convert("RGB")).save(dest)
-        rows.append((dest, dest.stem, "screen"))
+        for where in ("centre", "topleft", "bottomright")[:a.screen_crops]:
+            dest = out / (f"gb82_{name}.png" if where == "centre" else f"gb82_{name}_{where}.png")
+            centre_crop(Image.open(GB82 / f"{name}.png").convert("RGB"), where=where).save(dest)
+            rows.append((dest, dest.stem, "screen"))
     eligible = json.loads(INV.read_text())["eligible"]
     pool = [e for e in eligible if not e.get("excluded_family") and Path(e["source"]).parent.name in ILLUSTRATION_FAMILIES]
-    for e in sorted(pool, key=lambda e: hashlib.sha256(str(e["origin"]).encode()).hexdigest())[:6]:
+    for e in sorted(pool, key=lambda e: hashlib.sha256(str(e["origin"]).encode()).hexdigest())[:a.illustrations]:
         dest = out / f"i26_{e['origin']}.png"
         centre_crop(Image.open(e["source"]).convert("RGB")).save(dest)
         rows.append((dest, dest.stem, "illustration"))
