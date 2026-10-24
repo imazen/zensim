@@ -12,10 +12,17 @@
 //!   `E[(src − dst)²] − min_{a,b} E[(dst − a·src − b)²]`.
 //!
 //! The walk adds each emitted strip's rows, in strip order, into five sums per
-//! (scale, channel). Every sum uses 16 fixed virtual f64 lanes (lane = column
-//! mod 16) closed by one fixed pairwise reduce; products of two f32 values are
-//! exact in f64 and nothing is fused, so the result is the same bits on every
-//! SIMD tier and at every thread count.
+//! (scale, channel): of the source `s`, the error `e = s − d` and of `s²`,
+//! `e²` and `s·e`. Every sum uses 16 fixed virtual f64 lanes (lane = column
+//! mod 16) closed by one fixed pairwise reduce, and nothing is fused, so the
+//! result is the same bits on every SIMD tier and at every thread count.
+//!
+//! The moments are of the error, not of `d`: `mse = mean(e)² + var(e)` and
+//! `explained = mean(e)² + min(var(e), cov(s, e)²/var(s))` are sums of
+//! non-negative terms. The sidecar's raw form, `(ms − md)² + vss + vdd − 2·vsd`,
+//! subtracts quantities of the size of the texture to get one of the size of
+//! the error, and with one-pass sums over megapixels that loses every digit
+//! of a small error (`large_mean_tiny_error_matches_compensated_two_pass`).
 //!
 //! Exploration record: `benchmarks/byconstruction_2026-10-22.md` ("Next
 //! feature: a global affine-change descriptor"). The research sidecar
@@ -32,45 +39,49 @@ pub(crate) const GLOBAFF_PER_CELL: usize = 2;
 /// sidecar's thresholds).
 const TINY: f64 = 1e-12;
 
-/// The five running sums of one (scale, channel) cell.
+/// The five running sums of one (scale, channel) cell: `s`, `e = s − d`,
+/// `s²`, `e²` and `s·e`.
 #[derive(Clone, Copy, Debug, Default)]
 #[repr(align(64))]
 pub(crate) struct GlobAffAccum {
     s: [f64; 16],
-    d: [f64; 16],
+    e: [f64; 16],
     ss: [f64; 16],
-    dd: [f64; 16],
-    sd: [f64; 16],
+    ee: [f64; 16],
+    se: [f64; 16],
     n: usize,
 }
 
 /// Add one row's lanes: `acc[x & 15] += f(src[x], dst[x])`, in column order.
+/// The difference of two f32 values is exact in f64.
 #[autoversion]
 fn add_row(acc: &mut [[f64; 16]; 5], src: &[f32], dst: &[f32]) {
     let n = src.len().min(dst.len());
     let full = n - n % 16;
-    let [as_, ad, ass, add, asd] = acc;
+    let [as_, ae, ass, aee, ase] = acc;
     let mut x = 0;
     while x < full {
         let s: &[f32; 16] = src[x..x + 16].try_into().unwrap();
         let d: &[f32; 16] = dst[x..x + 16].try_into().unwrap();
         for k in 0..16 {
-            let (a, b) = (s[k] as f64, d[k] as f64);
+            let a = s[k] as f64;
+            let e = a - d[k] as f64;
             as_[k] += a;
-            ad[k] += b;
+            ae[k] += e;
             ass[k] += a * a;
-            add[k] += b * b;
-            asd[k] += a * b;
+            aee[k] += e * e;
+            ase[k] += a * e;
         }
         x += 16;
     }
     for k in 0..n - full {
-        let (a, b) = (src[full + k] as f64, dst[full + k] as f64);
+        let a = src[full + k] as f64;
+        let e = a - dst[full + k] as f64;
         as_[k] += a;
-        ad[k] += b;
+        ae[k] += e;
         ass[k] += a * a;
-        add[k] += b * b;
-        asd[k] += a * b;
+        aee[k] += e * e;
+        ase[k] += a * e;
     }
 }
 
@@ -90,11 +101,11 @@ impl GlobAffAccum {
     pub(crate) fn add_rows(&mut self, src: &[f32], dst: &[f32], width: usize) {
         debug_assert_eq!(src.len(), dst.len());
         debug_assert!(width > 0 && src.len().is_multiple_of(width));
-        let mut acc = [self.s, self.d, self.ss, self.dd, self.sd];
+        let mut acc = [self.s, self.e, self.ss, self.ee, self.se];
         for (s, d) in src.chunks_exact(width).zip(dst.chunks_exact(width)) {
             add_row(&mut acc, s, d);
         }
-        [self.s, self.d, self.ss, self.dd, self.sd] = acc;
+        [self.s, self.e, self.ss, self.ee, self.se] = acc;
         self.n += src.len();
     }
 
@@ -104,15 +115,36 @@ impl GlobAffAccum {
             return (0.0, 0.0);
         }
         let n = self.n as f64;
-        let (ms, md) = (reduce16(&self.s) / n, reduce16(&self.d) / n);
+        let (ms, me) = (reduce16(&self.s) / n, reduce16(&self.e) / n);
         let vss = (reduce16(&self.ss) / n - ms * ms).max(0.0);
-        let vdd = (reduce16(&self.dd) / n - md * md).max(0.0);
-        let vsd = reduce16(&self.sd) / n - ms * md;
-        finish_moments(ms, md, vss, vdd, vsd)
+        let vee = (reduce16(&self.ee) / n - me * me).max(0.0);
+        let cse = reduce16(&self.se) / n - ms * me;
+        finish_error_moments(me, vss, vee, cse)
     }
 }
 
-/// `(share, explained)` from central moments; the sidecar's formula.
+/// `(share, explained)` from the error's moments: the sidecar's quantities,
+/// with `resid = var(e) − cov(s, e)²/var(s)` (`d = s − e`) and the sidecar's
+/// clamps and thresholds.
+fn finish_error_moments(me: f64, vss: f64, vee: f64, cse: f64) -> (f64, f64) {
+    let mse = me * me + vee;
+    let affine = if vss > TINY {
+        (cse * cse / vss).min(vee)
+    } else {
+        0.0
+    };
+    let explained = me * me + affine;
+    let share = if mse > TINY {
+        (explained / mse).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    (share, explained)
+}
+
+/// `(share, explained)` from central moments of `s` and `d`: the sidecar's
+/// formula, kept as the tests' independent reference.
+#[cfg(test)]
 fn finish_moments(ms: f64, md: f64, vss: f64, vdd: f64, vsd: f64) -> (f64, f64) {
     let mse = ((ms - md) * (ms - md) + vss + vdd - 2.0 * vsd).max(0.0);
     let resid = if vss > TINY {
@@ -194,6 +226,67 @@ mod tests {
             assert!(
                 (explained - re).abs() <= 1e-9 * re.abs().max(1e-12),
                 "{name}: explained {explained} vs {re}"
+            );
+        }
+    }
+
+    /// Neumaier-compensated sum.
+    fn nsum(values: impl Iterator<Item = f64>) -> f64 {
+        let (mut sum, mut comp) = (0.0f64, 0.0f64);
+        for v in values {
+            let t = sum + v;
+            comp += if sum.abs() >= v.abs() {
+                (sum - t) + v
+            } else {
+                (v - t) + sum
+            };
+            sum = t;
+        }
+        sum + comp
+    }
+
+    /// Two-pass central moments with compensated sums: a reference that does
+    /// not cancel where one-pass raw moments do.
+    fn two_pass_compensated(s: &[f32], d: &[f32]) -> (f64, f64) {
+        let n = s.len() as f64;
+        let ms = nsum(s.iter().map(|&v| v as f64)) / n;
+        let md = nsum(d.iter().map(|&v| v as f64)) / n;
+        let c = |f: &dyn Fn(f64, f64) -> f64| {
+            nsum(s.iter().zip(d).map(|(&a, &b)| f(a as f64 - ms, b as f64 - md))) / n
+        };
+        finish_moments(ms, md, c(&|a, _| a * a), c(&|_, b| b * b), c(&|a, b| a * b))
+    }
+
+    /// Many pixels, a large mean and an error far smaller than the texture:
+    /// where raw one-pass moments cancel (`E[s²] − E[s]²` and the
+    /// `vss + vdd − 2·vsd` error). Tolerances (introduced here): share within
+    /// 1e-6; explained within 1e-6 of itself or 1e-9 of the mean squared
+    /// error, its scale (the explained part of zero-mean noise is itself
+    /// about 1e-6 of the error).
+    #[test]
+    fn large_mean_tiny_error_matches_compensated_two_pass() {
+        let (w, h) = (2048, 1024);
+        let s: Vec<f32> = plane(w, h, 9).iter().map(|v| 0.5 + 0.25 * v).collect();
+        let mut state = 0x9e37_79b9u32;
+        let mut noise = || {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            (state % 2001) as f32 / 1000.0 - 1.0
+        };
+        for (name, d) in [
+            ("tiny offset", s.iter().map(|v| v + 2e-5).collect::<Vec<_>>()),
+            ("tiny noise", s.iter().map(|v| v + 1e-4 * noise()).collect()),
+            ("tiny contrast", s.iter().map(|v| 1.0001 * v - 8e-5).collect()),
+        ] {
+            let (share, explained) = accum(&s, &d, w, 64).finish();
+            let (rs, re) = two_pass_compensated(&s, &d);
+            let mse = nsum(s.iter().zip(&d).map(|(&a, &b)| (a as f64 - b as f64).powi(2)))
+                / s.len() as f64;
+            assert!((share - rs).abs() <= 1e-6, "{name}: share {share} vs {rs}");
+            assert!(
+                (explained - re).abs() <= (1e-6 * re.abs()).max(1e-9 * mse),
+                "{name}: explained {explained:e} vs {re:e} (mse {mse:e})"
             );
         }
     }
