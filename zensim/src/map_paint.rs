@@ -12,14 +12,19 @@
 //!   becomes an 11-tap plateau at its scale (88 source pixels at scale 3).
 //!   `center` keeps it at the window's own pixel, as DVIFM keeps a block's
 //!   term at its block. `guided` sends it back to the window's pixels in
-//!   proportion to their own squared difference (each channel normalized by
-//!   the reference's variance at that scale), so the mass lands where the two
-//!   images actually differ. Every mode conserves the plane's sum.
+//!   proportion to the guide, so the mass lands where the two images actually
+//!   differ. Every mode conserves the plane's sum.
 //! - **paint** — how a coarse pixel covers its `2^s × 2^s` source footprint.
 //!   `nearest` (the default) spreads it uniformly, as DVIFM paints a block.
-//!   `guided` splits it in proportion to the source-resolution squared
-//!   difference inside the footprint (per-pixel refinement); it applies only
-//!   to a per-pixel map (`bin == 1`).
+//!   `guided` splits it in proportion to the source-resolution guide inside
+//!   the footprint (per-pixel refinement); it applies only to a per-pixel map
+//!   (`bin == 1`).
+//! - **guide** — what the guided modes weigh a pixel by: its squared
+//!   difference (`sq`, the default; each channel over the reference's
+//!   variance at that scale) or its absolute difference (`abs`; each channel
+//!   over the standard deviation). A squared guide squares the contrast of
+//!   fine structure: a row-dithered gradient's error, whose row means vary
+//!   by 40%, paints coarse mass onto alternate rows at twice that.
 //! - **split** — how a pooled feature's value is divided among its pixels.
 //!   `repair` (the default, today's map) gives each pixel its first-order
 //!   removal effect, what the feature loses when that one pixel is made
@@ -33,10 +38,11 @@
 //!   Linearized cross-scale terms (edge width) and maxima keep their repair
 //!   form in both.
 //!
-//! A scorer selects them per map (`BakeScorer::with_map_paint`); research
-//! command lines can set `ZENSIM_MAP_WINDOW=box|center|guided`,
-//! `ZENSIM_MAP_PAINT=nearest|guided` and `ZENSIM_MAP_SPLIT=repair|exact`
-//! instead. Nothing in the score path reads them.
+//! A scorer selects them per map (`BakeScorer::with_map_paint`,
+//! `with_map_guide`, `with_map_smooth`); research command lines can set
+//! `ZENSIM_MAP_WINDOW=box|center|guided`, `ZENSIM_MAP_PAINT=nearest|guided`,
+//! `ZENSIM_MAP_SPLIT=repair|exact`, `ZENSIM_MAP_GUIDE=sq|abs` and
+//! `ZENSIM_MAP_SMOOTH=<σ>` instead. Nothing in the score path reads them.
 
 /// Where a window-supported signal's mass goes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -51,6 +57,27 @@ pub(crate) enum WindowMode {
 pub(crate) enum PaintMode {
     Nearest,
     Guided,
+}
+
+/// What the guided modes weigh a pixel by.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum GuideNorm {
+    /// The squared difference, each channel over the reference's variance.
+    Squared,
+    /// The absolute difference, each channel over the reference's standard
+    /// deviation.
+    Absolute,
+}
+
+impl GuideNorm {
+    /// Parse `sq|abs`.
+    pub(crate) fn parse(norm: &str) -> Option<Self> {
+        match norm {
+            "sq" => Some(Self::Squared),
+            "abs" => Some(Self::Absolute),
+            _ => None,
+        }
+    }
 }
 
 /// How a pooled feature's value is divided among its pixels.
@@ -68,6 +95,14 @@ pub(crate) struct MapPaint {
     pub(crate) window: WindowMode,
     pub(crate) paint: PaintMode,
     pub(crate) split: SplitMode,
+    /// What the guided window and paint weigh a pixel by.
+    pub(crate) guide: GuideNorm,
+    /// The final per-pixel map's perceptual integration: a sum-preserving
+    /// Gaussian of this σ in thousandths of a source pixel (0: none). The eye
+    /// integrates error over a few pixels; without it, per-pixel terms (the
+    /// squared error, the JND transducers) show a row-dithered gradient's
+    /// error as one stripe per row.
+    pub(crate) smooth_milli: u16,
 }
 
 impl Default for MapPaint {
@@ -78,6 +113,8 @@ impl Default for MapPaint {
             window: WindowMode::Box,
             paint: PaintMode::Nearest,
             split: SplitMode::Repair,
+            guide: GuideNorm::Squared,
+            smooth_milli: 0,
         }
     }
 }
@@ -105,12 +142,20 @@ impl MapPaint {
             window,
             paint,
             split,
+            ..Self::default()
         })
     }
 
+    /// `σ` in source pixels as [`Self::smooth_milli`]; `None` outside `[0, 16]`.
+    pub(crate) fn smooth_milli_of(sigma: f32) -> Option<u16> {
+        (sigma.is_finite() && (0.0..=16.0).contains(&sigma))
+            .then(|| (sigma * 1000.0).round() as u16)
+    }
+
     /// The process's research selection (`ZENSIM_MAP_WINDOW`,
-    /// `ZENSIM_MAP_PAINT`, `ZENSIM_MAP_SPLIT`), read once; unset means
-    /// [`Self::default`] and an unknown value panics.
+    /// `ZENSIM_MAP_PAINT`, `ZENSIM_MAP_SPLIT`, `ZENSIM_MAP_GUIDE`,
+    /// `ZENSIM_MAP_SMOOTH`), read once; unset means [`Self::default`] and an
+    /// unknown value panics.
     pub(crate) fn from_env() -> Self {
         use std::sync::OnceLock;
         static MODES: OnceLock<MapPaint> = OnceLock::new();
@@ -118,7 +163,14 @@ impl MapPaint {
             let window = std::env::var("ZENSIM_MAP_WINDOW").unwrap_or_else(|_| "box".into());
             let paint = std::env::var("ZENSIM_MAP_PAINT").unwrap_or_else(|_| "nearest".into());
             let split = std::env::var("ZENSIM_MAP_SPLIT").unwrap_or_else(|_| "repair".into());
-            Self::parse(&window, &paint, &split).unwrap_or_else(|| {
+            let smooth = std::env::var("ZENSIM_MAP_SMOOTH").unwrap_or_else(|_| "0".into());
+            let guide = std::env::var("ZENSIM_MAP_GUIDE").unwrap_or_else(|_| "sq".into());
+            let guide = GuideNorm::parse(&guide)
+                .unwrap_or_else(|| panic!("ZENSIM_MAP_GUIDE={guide:?}: expected sq|abs"));
+            let smooth_milli = smooth.parse::<f32>().ok().and_then(Self::smooth_milli_of).unwrap_or_else(|| {
+                panic!("ZENSIM_MAP_SMOOTH={smooth:?}: expected a sigma in 0..=16 source pixels")
+            });
+            Self::parse(&window, &paint, &split).map(|p| Self { smooth_milli, guide, ..p }).unwrap_or_else(|| {
                 panic!(
                     "ZENSIM_MAP_WINDOW={window:?} / ZENSIM_MAP_PAINT={paint:?} / ZENSIM_MAP_SPLIT={split:?}: \
                      expected box|center|guided, nearest|guided and repair|exact"
@@ -152,10 +204,51 @@ fn box_sum(src: &[f64], w: usize, h: usize, r: usize, out: &mut Vec<f64>) {
     }
 }
 
-/// The guide: per-pixel squared difference, each channel normalized by the
-/// reference's variance on this plane, plus a small uniform floor so a
-/// window without any difference still keeps (and spreads) its mass.
-pub(crate) fn difference_guide(src: [&[f32]; 3], dst: [&[f32]; 3], n: usize) -> Vec<f64> {
+/// Sum-preserving separable Gaussian of `σ = sigma` pixels over a `w × h` map:
+/// each value is scattered to its in-bounds neighbours with the kernel
+/// renormalized over them, so the map's total (and every row's, then every
+/// column's) is kept exactly; radius `⌈3σ⌉`.
+pub(crate) fn smooth_sum_preserving(map: &mut [f64], w: usize, h: usize, sigma: f64) {
+    if sigma <= 0.0 || map.is_empty() {
+        return;
+    }
+    let r = (3.0 * sigma).ceil() as usize;
+    let k: Vec<f64> = (0..=r)
+        .map(|d| (-((d * d) as f64) / (2.0 * sigma * sigma)).exp())
+        .collect();
+    let scatter = |src: &[f64], dst: &mut [f64], n: usize, stride: usize, base: usize| {
+        for i in 0..n {
+            let v = src[base + i * stride];
+            if v == 0.0 {
+                continue;
+            }
+            let (lo, hi) = (i.saturating_sub(r), (i + r).min(n - 1));
+            let z: f64 = (lo..=hi).map(|j| k[i.abs_diff(j)]).sum();
+            for j in lo..=hi {
+                dst[base + j * stride] += v * k[i.abs_diff(j)] / z;
+            }
+        }
+    };
+    let mut tmp = vec![0.0f64; map.len()];
+    for y in 0..h {
+        scatter(map, &mut tmp, w, 1, y * w);
+    }
+    map.fill(0.0);
+    for x in 0..w {
+        scatter(&tmp, map, h, w, x);
+    }
+}
+
+/// The guide: per-pixel squared (or absolute) difference, each channel
+/// normalized by the reference's variance (or standard deviation) on this
+/// plane, plus a small uniform floor so a window without any difference
+/// still keeps (and spreads) its mass.
+pub(crate) fn difference_guide(
+    src: [&[f32]; 3],
+    dst: [&[f32]; 3],
+    n: usize,
+    norm: GuideNorm,
+) -> Vec<f64> {
     let mut g = vec![0.0f64; n];
     for c in 0..3 {
         let (s, d) = (src[c], dst[c]);
@@ -168,10 +261,20 @@ pub(crate) fn difference_guide(src: [&[f32]; 3], dst: [&[f32]; 3], n: usize) -> 
             .map(|&v| (v as f64 - mean).powi(2))
             .sum::<f64>()
             / n as f64;
-        let k = 1.0 / (var + 1e-6);
-        for i in 0..n {
-            let e = (s[i] - d[i]) as f64;
-            g[i] += k * e * e;
+        match norm {
+            GuideNorm::Squared => {
+                let k = 1.0 / (var + 1e-6);
+                for i in 0..n {
+                    let e = (s[i] - d[i]) as f64;
+                    g[i] += k * e * e;
+                }
+            }
+            GuideNorm::Absolute => {
+                let k = 1.0 / (var + 1e-6).sqrt();
+                for i in 0..n {
+                    g[i] += k * ((s[i] - d[i]) as f64).abs();
+                }
+            }
         }
     }
     let mean = g.iter().sum::<f64>() / n as f64;
@@ -293,6 +396,67 @@ mod tests {
     }
 
     #[test]
+    fn guide_norms_scale_as_their_powers() {
+        // One kept channel; doubling the difference quadruples the squared
+        // guide and doubles the absolute one (the floor scales with the mean).
+        let n = 64;
+        let s: Vec<f32> = (0..n).map(|i| (i % 8) as f32 * 0.1).collect();
+        let shifted = |e: f32| -> Vec<f32> {
+            s.iter()
+                .enumerate()
+                .map(|(i, &v)| v + if i % 3 == 0 { e } else { 0.0 })
+                .collect()
+        };
+        let (d1, d2) = (shifted(0.01), shifted(0.02));
+        let none: [f32; 0] = [];
+        for (norm, want) in [(GuideNorm::Squared, 4.0), (GuideNorm::Absolute, 2.0)] {
+            let g1 = difference_guide([&s, &none, &none], [&d1, &none, &none], n, norm);
+            let g2 = difference_guide([&s, &none, &none], [&d2, &none, &none], n, norm);
+            let ratio = g2[0] / g1[0];
+            assert!(
+                (ratio - want).abs() < 1e-3 * want,
+                "{norm:?}: ratio {ratio}"
+            );
+            assert!(
+                g1[1] > 0.0 && g1[1] < 1e-2 * g1[0],
+                "{norm:?}: floor {}",
+                g1[1]
+            );
+        }
+    }
+
+    #[test]
+    fn smoothing_conserves_mass_and_zero_is_identity() {
+        let (w, h) = (37, 29);
+        let map: Vec<f64> = (0..w * h)
+            .map(|i| ((i * 31 % 17) as f64) * 0.01 - 0.05)
+            .collect();
+        let total: f64 = map.iter().sum();
+        for sigma in [0.5, 1.0, 1.5, 3.0, 8.0] {
+            let mut m = map.clone();
+            smooth_sum_preserving(&mut m, w, h, sigma);
+            let t: f64 = m.iter().sum();
+            assert!(
+                (t - total).abs() <= 1e-12 * total.abs().max(1.0),
+                "sigma {sigma}: {t} vs {total}"
+            );
+        }
+        let mut m = map.clone();
+        smooth_sum_preserving(&mut m, w, h, 0.0);
+        assert_eq!(m, map);
+        // A row-alternating pattern is flattened.
+        let mut stripes: Vec<f64> = (0..w * h).map(|i| ((i / w) % 2) as f64).collect();
+        smooth_sum_preserving(&mut stripes, w, h, 1.5);
+        let row = |y: usize| stripes[y * w + w / 2];
+        assert!(
+            (row(h / 2) - row(h / 2 + 1)).abs() < 0.05,
+            "{} vs {}",
+            row(h / 2),
+            row(h / 2 + 1)
+        );
+    }
+
+    #[test]
     fn every_window_mode_conserves_mass() {
         let (w, h) = (37, 29);
         let (s, d) = planes(w, h);
@@ -311,7 +475,7 @@ mod tests {
                 w,
                 h,
                 5,
-                || difference_guide(sr, dr, w * h),
+                || difference_guide(sr, dr, w * h, GuideNorm::Squared),
                 &mut t,
                 &mut o,
                 false,
@@ -347,7 +511,7 @@ mod tests {
             w,
             h,
             5,
-            || difference_guide(sr, dr, w * h),
+            || difference_guide(sr, dr, w * h, GuideNorm::Squared),
             &mut t,
             &mut o,
             false,

@@ -106,6 +106,48 @@ impl<'a> BakeScorer<'a> {
         Ok(self)
     }
 
+    /// Research: weigh pixels in the guided window and paint modes by their
+    /// squared (`"sq"`, the default) or absolute (`"abs"`) difference. Like
+    /// the other map modes, this scorer then serves a map for viewing (no
+    /// steering snapshot).
+    ///
+    /// # Errors
+    /// `norm` other than `sq` or `abs`.
+    #[doc(hidden)]
+    #[cfg(feature = "custom-profiles")]
+    pub fn with_map_guide(mut self, norm: &str) -> Result<Self, ZensimError> {
+        let guide =
+            crate::map_paint::GuideNorm::parse(norm).ok_or(ZensimError::ModelLoadFailed {
+                reason: "map guide norms are sq|abs",
+            })?;
+        let paint = self.map_paint.unwrap_or_default();
+        self.map_paint = Some(crate::map_paint::MapPaint { guide, ..paint });
+        Ok(self)
+    }
+
+    /// Research: integrate the per-pixel attribution map with a sum-preserving
+    /// Gaussian of `sigma` source pixels (0: none, the default) before it is
+    /// returned. Like the other map modes, this scorer then serves a map for
+    /// viewing (no steering snapshot).
+    ///
+    /// # Errors
+    /// `sigma` outside `0..=16`.
+    #[doc(hidden)]
+    #[cfg(feature = "custom-profiles")]
+    pub fn with_map_smooth(mut self, sigma: f32) -> Result<Self, ZensimError> {
+        let smooth_milli = crate::map_paint::MapPaint::smooth_milli_of(sigma).ok_or(
+            ZensimError::ModelLoadFailed {
+                reason: "map smoothing sigma must be in 0..=16 source pixels",
+            },
+        )?;
+        let paint = self.map_paint.unwrap_or_default();
+        self.map_paint = Some(crate::map_paint::MapPaint {
+            smooth_milli,
+            ..paint
+        });
+        Ok(self)
+    }
+
     /// Opt into finite L2/L4/L8 moment removal for rectangle refinement.
     ///
     /// Disabled by default. Scalar scores and additive density are unchanged.
@@ -4693,7 +4735,10 @@ mod revision_contract_tests {
                 "dtype":"f32","weights": vec![-40.0; ids.len()],"biases":[100.0]}]
         });
         let rev6 = zenpredict_bake::bake_from_json_str(&recipe.to_string()).unwrap();
-        for (name, bytes) in [("shipped-b-rev5", shipped.as_slice()), ("rev6-ring-dev", rev6.as_slice())] {
+        for (name, bytes) in [
+            ("shipped-b-rev5", shipped.as_slice()),
+            ("rev6-ring-dev", rev6.as_slice()),
+        ] {
             let model = zenpredict::Model::from_bytes(bytes).unwrap();
             let mut scorer = crate::BakeScorer::new(&model).unwrap().with_parallel(false);
             let pre = scorer.precompute_reference(&rs).unwrap();
@@ -4843,7 +4888,8 @@ mod map_split_tests {
             .unwrap();
         let feats = att.result().features().to_vec();
         let plan = scorer.plan().unwrap();
-        let (spatial, _) = crate::attribution::candidate_map_sensitivities(&plan, att.sensitivities());
+        let (spatial, _) =
+            crate::attribution::candidate_map_sensitivities(&plan, att.sensitivities());
         (0..spatial.len())
             .filter(|&id| spatial[id] != 0.0)
             .map(|id| {
@@ -4868,7 +4914,12 @@ mod map_split_tests {
                     )
                     .unwrap();
                 let sum: f64 = a.density().iter().map(|&v| f64::from(v)).sum();
-                (id, sum, feats.get(id).copied().unwrap_or(f64::NAN), spatial[id])
+                (
+                    id,
+                    sum,
+                    feats.get(id).copied().unwrap_or(f64::NAN),
+                    spatial[id],
+                )
             })
             .collect()
     }
@@ -4922,7 +4973,8 @@ mod map_split_tests {
         let first = crate::globaff::FIRST_ID;
         ((372..372 + 4 * 87).contains(&id)
             && (id - 372) % 29 == crate::feature_v2::idx::EDGE_WIDTH_CHANGE)
-            || ((first..first + crate::globaff::SLOTS).contains(&id) && (id - first).is_multiple_of(2))
+            || ((first..first + crate::globaff::SLOTS).contains(&id)
+                && (id - first).is_multiple_of(2))
     }
 
     /// Under the exact split each probed feature's map sums to minus the
@@ -4946,13 +4998,20 @@ mod map_split_tests {
                 })
                 .map(|&(id, sum, f, _)| format!("f{id}: map {sum:e}, -feature {:e}", -f))
                 .collect();
-            assert!(off.is_empty(), "{name}: {} of {} maps miss -feature:\n{}", off.len(), rows.len(), off.join("\n"));
+            assert!(
+                off.is_empty(),
+                "{name}: {} of {} maps miss -feature:\n{}",
+                off.len(),
+                rows.len(),
+                off.join("\n")
+            );
         }
     }
 
     /// A revision-6 bake over the globaff family's slots and a few v2 slots.
     fn rev6_globaff_bake() -> Vec<u8> {
-        let ids: Vec<usize> = (crate::globaff::FIRST_ID..crate::globaff::FIRST_ID + crate::globaff::SLOTS)
+        let ids: Vec<usize> = (crate::globaff::FIRST_ID
+            ..crate::globaff::FIRST_ID + crate::globaff::SLOTS)
             .chain([372 + 29, 372 + 87 + 29])
             .collect::<std::collections::BTreeSet<_>>()
             .into_iter()
@@ -4986,14 +5045,24 @@ mod map_split_tests {
         for (name, d) in [("global edit", &edited), ("blur", &blurred)] {
             let rows = probe(&bake, &src, d, w, h, SplitMode::Exact);
             let first = crate::globaff::FIRST_ID;
-            let globaff: Vec<_> = rows.iter().filter(|r| (first..first + crate::globaff::SLOTS).contains(&r.0)).collect();
-            assert!(globaff.len() >= 12, "{name}: only {} globaff probes", globaff.len());
+            let globaff: Vec<_> = rows
+                .iter()
+                .filter(|r| (first..first + crate::globaff::SLOTS).contains(&r.0))
+                .collect();
+            assert!(
+                globaff.len() >= 12,
+                "{name}: only {} globaff probes",
+                globaff.len()
+            );
             for &&(id, sum, f, _) in &globaff {
                 let explained = (id - first) % 2 == 1;
                 let want = if explained { -f } else { 0.0 };
                 let tol = 1e-4 * f.abs() + 1e-9;
-                assert!((sum - want).abs() <= tol, "{name} f{id} ({}): map {sum:e}, want {want:e} (feature {f:e})",
-                    if explained { "explained" } else { "share" });
+                assert!(
+                    (sum - want).abs() <= tol,
+                    "{name} f{id} ({}): map {sum:e}, want {want:e} (feature {f:e})",
+                    if explained { "explained" } else { "share" }
+                );
             }
         }
     }
@@ -5013,13 +5082,22 @@ mod map_split_tests {
         let sparse: Vec<[u8; 3]> = src
             .iter()
             .enumerate()
-            .map(|(i, p)| if i % 7 == 0 { p.map(|v| v.saturating_add(1)) } else { *p })
+            .map(|(i, p)| {
+                if i % 7 == 0 {
+                    p.map(|v| v.saturating_add(1))
+                } else {
+                    *p
+                }
+            })
             .collect();
         let lsb: Vec<[u8; 3]> = src.iter().map(|p| p.map(|v| v.saturating_add(1))).collect();
         let (osrc, odst) = offset_pair(w, h);
         let b = shipped_b();
         let model = zenpredict::Model::from_bytes(&b).unwrap();
-        let (c1, c2) = (crate::feature_v2::C1_V2 as f32, crate::feature_v2::C2_V2 as f32);
+        let (c1, c2) = (
+            crate::feature_v2::C1_V2 as f32,
+            crate::feature_v2::C2_V2 as f32,
+        );
         for (name, s, d) in [
             ("blur", &src, &blurred),
             ("+1 on every 7th pixel", &src, &sparse),
@@ -5055,11 +5133,16 @@ mod map_split_tests {
                         let ev = (e - md * md).max(0.0);
                         prod += f64::from(((nd * (nb - na) + na * ev) / (nb * nd)).max(0.0));
                         stable += f64::from(((nd * (md * md) + na * ev) / (nb * nd)).max(0.0));
-                        let (m1, m2, sq, e) = (f64::from(m1), f64::from(m2), f64::from(sq), f64::from(e));
-                        let (na, nb) = (2.0 * m1 * m2 + f64::from(c1), m1 * m1 + m2 * m2 + f64::from(c1));
+                        let (m1, m2, sq, e) =
+                            (f64::from(m1), f64::from(m2), f64::from(sq), f64::from(e));
+                        let (na, nb) = (
+                            2.0 * m1 * m2 + f64::from(c1),
+                            m1 * m1 + m2 * m2 + f64::from(c1),
+                        );
                         let nd = sq - m1 * m1 - m2 * m2 + f64::from(c2);
                         let md = m1 - m2;
-                        exact += ((nd * (md * md) + na * (e - md * md).max(0.0)) / (nb * nd)).max(0.0);
+                        exact +=
+                            ((nd * (md * md) + na * (e - md * md).max(0.0)) / (nb * nd)).max(0.0);
                     }
                     let walk = ret.cells[scale][ch].dense.sum_d / n as f64;
                     let nf = n as f64;
@@ -5094,7 +5177,10 @@ mod map_split_tests {
         rows.sort_by(|a, b| (b.1 * b.3).abs().total_cmp(&(a.1 * a.3).abs()));
         println!("split {split:?}: {} probes", rows.len());
         for (id, sum, f, s) in rows.iter().take(25) {
-            println!("f{id}: map sum {sum:e} feature {f:e} sens {s:e} mass {:e}", sum * s);
+            println!(
+                "f{id}: map sum {sum:e} feature {f:e} sens {s:e} mass {:e}",
+                sum * s
+            );
         }
         let mut off: Vec<_> = rows
             .iter()
@@ -5103,7 +5189,11 @@ mod map_split_tests {
         off.sort_by_key(|r| r.0);
         println!("maps not summing to -feature: {}", off.len());
         for (id, sum, f, _) in off {
-            println!("  f{id}: map {sum:e} vs -feature {:e} (ratio {:.4})", -f, sum / -f);
+            println!(
+                "  f{id}: map {sum:e} vs -feature {:e} (ratio {:.4})",
+                -f,
+                sum / -f
+            );
         }
     }
 }

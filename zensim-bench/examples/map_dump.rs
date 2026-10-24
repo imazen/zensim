@@ -12,7 +12,7 @@
 //!
 //! ```text
 //! map_dump --pairs PAIRS.tsv --out DIR --bake BAKE.bin --tag NAME [--bin 1] [--window box|center|guided]
-//!          [--paint nearest|guided] [--split repair|exact] [--legacy] [--judges]
+//!          [--paint nearest|guided] [--split repair|exact] [--guide sq|abs] [--smooth SIGMA] [--legacy] [--judges]
 //! ```
 //!
 //! `PAIRS.tsv` has a header with `key`, `ref_path`, `dist_path`. Each map is
@@ -169,10 +169,14 @@ fn ssim2_field(r: ImgRef<'_, [u8; 3]>, d: ImgRef<'_, [u8; 3]>) -> Result<(Vec<f6
         let v2 = r2.scale_planes(s).expect("scale");
         let (sw, sh) = (v1.width, v1.height);
         let n = sw * sh;
-        for c in 0..3 {
-            mul[c].truncate(n);
-            for i in 0..n {
-                mul[c][i] = v1.img1_planar[c][i] * v2.img1_planar[c][i];
+        for (c, m) in mul.iter_mut().enumerate() {
+            m.truncate(n);
+            for ((o, &a), &b) in m
+                .iter_mut()
+                .zip(&v1.img1_planar[c][..n])
+                .zip(&v2.img1_planar[c][..n])
+            {
+                *o = a * b;
             }
         }
         blur.shrink_to(sw, sh);
@@ -214,7 +218,7 @@ fn ssim2_field(r: ImgRef<'_, [u8; 3]>, d: ImgRef<'_, [u8; 3]>) -> Result<(Vec<f6
             let (ml, r4l) = (sl / nf, (sl4 / nf).sqrt().sqrt());
             t[c * 6..c * 6 + 6].copy_from_slice(&[md, r4d, ma, r4a, ml, r4l]);
             let wat = |norm: usize, m: usize| SSIM2_WEIGHT[((c * ns + s) * 2 + norm) * 3 + m];
-            for i in 0..n {
+            for (i, sv) in sev.iter_mut().enumerate() {
                 let (dd, a, l) = px(c, i);
                 // L1 terms split as w·x/N, L4 terms as w·x⁴/(N·r4³): each sums
                 // back to its pooled term.
@@ -228,7 +232,7 @@ fn ssim2_field(r: ImgRef<'_, [u8; 3]>, d: ImgRef<'_, [u8; 3]>) -> Result<(Vec<f6
                 if r4l > 0.0 {
                     v += wat(1, 2) * l.powi(4) / (nf * r4l.powi(3));
                 }
-                sev[i] += v;
+                *sv += v;
             }
         }
         terms.push(t);
@@ -279,8 +283,13 @@ fn main() {
     let mut args = std::env::args().skip(1);
     let (mut pairs, mut out, mut bake, mut tag) = (None, None, None, String::from("attr"));
     let (mut bin, mut legacy, mut judges) = (1usize, false, false);
-    let (mut window, mut paint, mut split) =
-        (String::from("box"), String::from("nearest"), String::from("repair"));
+    let (mut window, mut paint, mut split) = (
+        String::from("box"),
+        String::from("nearest"),
+        String::from("repair"),
+    );
+    let mut smooth = 0.0f32;
+    let mut guide = String::from("sq");
     while let Some(a) = args.next() {
         match a.as_str() {
             "--pairs" => pairs = args.next().map(PathBuf::from),
@@ -291,6 +300,14 @@ fn main() {
             "--window" => window = args.next().expect("--window MODE"),
             "--paint" => paint = args.next().expect("--paint MODE"),
             "--split" => split = args.next().expect("--split MODE"),
+            "--guide" => guide = args.next().expect("--guide sq|abs"),
+            "--smooth" => {
+                smooth = args
+                    .next()
+                    .expect("--smooth SIGMA")
+                    .parse()
+                    .expect("--smooth SIGMA")
+            }
             "--legacy" => legacy = true,
             "--judges" => judges = true,
             other => panic!("unknown argument {other}"),
@@ -340,7 +357,11 @@ fn main() {
                     .expect("bake scorer")
                     .with_parallel(false)
                     .with_map_paint(&window, &paint, &split)
-                    .expect("paint modes");
+                    .expect("paint modes")
+                    .with_map_guide(&guide)
+                    .expect("guide norm")
+                    .with_map_smooth(smooth)
+                    .expect("smooth sigma");
                 let pre = scorer.precompute_reference(&rs).expect("reference");
                 let mut session = Fused944Session::new();
                 let att = scorer
@@ -354,7 +375,7 @@ fn main() {
                     .iter()
                     .enumerate()
                     .fold((0usize, 0.0f64), |acc, (i, &v)| if v.abs() > acc.1 { (i, v.abs()) } else { acc });
-                row[tag.as_str()] = serde_json::json!({"score": att.result().score(), "window": window, "paint": paint, "split": split,
+                row[tag.as_str()] = serde_json::json!({"score": att.result().score(), "window": window, "paint": paint, "split": split, "guide": guide, "smooth": smooth,
                     "sens_max": smax, "sens_max_id": smax_i, "grid": [a.grid_width(), a.grid_height()],
                     "bin": a.bin(), "mass": total, "unsupported": att.unsupported_feature_ids().len()});
             }

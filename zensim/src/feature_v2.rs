@@ -7694,6 +7694,7 @@ fn retention_pass_b_all_scales(
                 [&ret.pyr_src[0][0], &ret.pyr_src[0][1], &ret.pyr_src[0][2]],
                 [&ret.pyr_dst[0][0], &ret.pyr_dst[0][1], &ret.pyr_dst[0][2]],
                 n0,
+                paint.guide,
             )
         });
     for scale in 0..n_scales {
@@ -11086,8 +11087,7 @@ fn attr_pass_b_main_px(
     let d = ssim_d_px(na, nb, nd, m1, m2, s12v, direct);
     let diff_src = (s - m1).abs();
     let diff_dst = (dd - m2).abs();
-    let edge_dissim =
-        bounded_dissim32(diff_src, diff_dst, CE);
+    let edge_dissim = bounded_dissim32(diff_src, diff_dst, CE);
     let art_i = if diff_dst > diff_src {
         edge_dissim
     } else {
@@ -12227,7 +12227,7 @@ fn attr_pass_b_for_scale_f32(
         ws,
         hs,
         BLUR_RADIUS,
-        || crate::map_paint::difference_guide(rplanes, dplanes, n),
+        || crate::map_paint::difference_guide(rplanes, dplanes, n, paint.guide),
         spread_tmp,
         spread_out,
         parallel && n >= crate::blur::SPREAD_PARALLEL_MIN_N,

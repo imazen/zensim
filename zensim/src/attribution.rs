@@ -1098,6 +1098,15 @@ impl BinAccum {
         result
     }
 
+    /// Research perceptual integration of a per-pixel map
+    /// ([`crate::map_paint::smooth_sum_preserving`]); a binned map is left as is.
+    #[cfg(feature = "custom-profiles")]
+    pub(crate) fn smooth_per_pixel(&mut self, sigma: f64) {
+        if self.bin == 1 {
+            crate::map_paint::smooth_sum_preserving(&mut self.bins, self.gw, self.height, sigma);
+        }
+    }
+
     /// The logical image size queries are made against.
     #[cfg_attr(not(feature = "feature-regime-v2"), allow(dead_code))] // BLOCKINESS lattice terms are produced by the v2 walk
     pub(crate) fn logical_dimensions(&self) -> (usize, usize) {
@@ -2744,18 +2753,17 @@ mod tests {
                 };
                 let mut sensitivities = [0.0; 156];
                 sensitivities[12] = -2.5;
-                let co =
-                    SlotCoeffs::from_scale_stats(
-                        &sensitivities,
-                        0,
-                        &stats,
-                        0,
-                        n,
-                        src,
-                        0.5,
-                        form,
-                        crate::map_paint::SplitMode::Repair,
-                    );
+                let co = SlotCoeffs::from_scale_stats(
+                    &sensitivities,
+                    0,
+                    &stats,
+                    0,
+                    n,
+                    src,
+                    0.5,
+                    form,
+                    crate::map_paint::SplitMode::Repair,
+                );
                 let eps = dst * 1e-5;
                 let fd = -2.5
                     * (hf_energy_gain(form, src / n, (dst + eps) / n)
@@ -6692,14 +6700,24 @@ impl crate::metric::Zensim {
                         sw,
                         sh,
                         config.blur_radius,
-                        || crate::map_paint::difference_guide(src_planes, dst_planes, n),
+                        || {
+                            crate::map_paint::difference_guide(
+                                src_planes,
+                                dst_planes,
+                                n,
+                                paint.guide,
+                            )
+                        },
                         spread_tmp,
                         spread_out,
                         config.allow_multithreading && n >= crate::blur::SPREAD_PARALLEL_MIN_N,
                     );
                     if scale == 0 && paint_mode == crate::map_paint::PaintMode::Guided {
                         *guide0 = Some(crate::map_paint::difference_guide(
-                            src_planes, dst_planes, n,
+                            src_planes,
+                            dst_planes,
+                            n,
+                            paint.guide,
                         ));
                     }
                     if let Some(geometry) = &precomputed.sampling_geometry {
@@ -7440,26 +7458,43 @@ impl crate::metric::Zensim {
         }
         // The globaff family (revision 6), over the pyramid planes its walk read.
         let first = crate::globaff::FIRST_ID;
-        let s_globaff = block(first, first + crate::globaff::SLOTS).filter(|g| g.iter().any(|v| *v != 0.0));
+        let s_globaff =
+            block(first, first + crate::globaff::SLOTS).filter(|g| g.iter().any(|v| *v != 0.0));
         if let Some(s_globaff) = s_globaff {
             let rev = revision.unwrap_or_else(crate::ssim_form::active_revision);
-            let dst = PrecomputedReference::new(distorted, precomputed.scales.len(), self.parallel(), rev);
+            let dst = PrecomputedReference::new(
+                distorted,
+                precomputed.scales.len(),
+                self.parallel(),
+                rev,
+            );
             let planes = crate::globaff::map_planes(precomputed, &dst, s_globaff, paint.split);
             let geometry = precomputed.sampling_geometry.as_ref();
-            let guide0 = (paint.paint == crate::map_paint::PaintMode::Guided && geometry.is_none()).then(|| {
-                let (sp, w, h) = precomputed.scale(0);
-                let (dp, _, _) = dst.scale(0);
-                crate::map_paint::difference_guide(sp, dp, w * h)
-            });
+            let guide0 = (paint.paint == crate::map_paint::PaintMode::Guided && geometry.is_none())
+                .then(|| {
+                    let (sp, w, h) = precomputed.scale(0);
+                    let (dp, _, _) = dst.scale(0);
+                    crate::map_paint::difference_guide(sp, dp, w * h, paint.guide)
+                });
             for (scale, plane, w, h) in planes {
                 if let Some(geometry) = geometry {
                     let projected = geometry.project(&plane, scale);
                     let (lw, lh) = geometry.logical_dimensions();
                     accum.add_scale_plane_f32(&projected, lw, lh, 1);
                 } else {
-                    accum.add_scale_plane_painted_f32(&plane, w, h, scale, paint.paint, guide0.as_deref());
+                    accum.add_scale_plane_painted_f32(
+                        &plane,
+                        w,
+                        h,
+                        scale,
+                        paint.paint,
+                        guide0.as_deref(),
+                    );
                 }
             }
+        }
+        if paint.smooth_milli > 0 && precomputed.sampling_geometry.is_none() {
+            accum.smooth_per_pixel(f64::from(paint.smooth_milli) / 1000.0);
         }
         Ok((result, accum.into_result_reusing(&mut session.bin_scratch)))
     }

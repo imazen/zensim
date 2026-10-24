@@ -18,6 +18,7 @@ None.
 - Research map-painting modes for the candidate attribution map (`ZENSIM_MAP_WINDOW=box|center|guided`, `ZENSIM_MAP_PAINT=nearest|guided`); the defaults keep today's map bits.
 - Exact map split (`ZENSIM_MAP_SPLIT=exact`; research, branch `explore/byconstruction`): each pixel gets its share of a pooled feature (Euler shares for Lp and deviation pools, secant shares for the global and HF-gain ratios), so every such pool's map sums to its feature; the removal split stays the default. A scorer with research map modes keeps every feature's density in the map instead of taking the steering snapshot ([record](benchmarks/byconstruction_2026-10-22.md), "Attribution-map correctness").
 - The revision-6 `globaff` family has a map term (`globaff::map_planes`): `explained` takes its exact pixel share and `share`, a ratio, splits to zero in total (branch `explore/byconstruction`).
+- Research map modes for per-pixel viewing maps (branch `explore/byconstruction`): perceptual integration (`ZENSIM_MAP_SMOOTH=<σ>`, `BakeScorer::with_map_smooth`, a sum-preserving Gaussian of the painted map) and the guide norm (`ZENSIM_MAP_GUIDE=sq|abs`, `BakeScorer::with_map_guide`). At σ 3 the map agrees better with butteraugli, SSIMULACRA2 and DVIFM 0.3 and draws a dithered gradient's banding at 0.70× the error's own row contrast instead of 2.10×; the absolute guide changes no judged statistic. Both doc-hidden; the defaults keep today's map bits ([record](benchmarks/byconstruction_2026-10-22.md), "Streaking").
 
 ### Changed
 

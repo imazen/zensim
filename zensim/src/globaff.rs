@@ -368,7 +368,11 @@ mod tests {
         let ms = nsum(s.iter().map(|&v| v as f64)) / n;
         let md = nsum(d.iter().map(|&v| v as f64)) / n;
         let c = |f: &dyn Fn(f64, f64) -> f64| {
-            nsum(s.iter().zip(d).map(|(&a, &b)| f(a as f64 - ms, b as f64 - md))) / n
+            nsum(
+                s.iter()
+                    .zip(d)
+                    .map(|(&a, &b)| f(a as f64 - ms, b as f64 - md)),
+            ) / n
         };
         finish_moments(ms, md, c(&|a, _| a * a), c(&|_, b| b * b), c(&|a, b| a * b))
     }
@@ -391,14 +395,23 @@ mod tests {
             (state % 2001) as f32 / 1000.0 - 1.0
         };
         for (name, d) in [
-            ("tiny offset", s.iter().map(|v| v + 2e-5).collect::<Vec<_>>()),
+            (
+                "tiny offset",
+                s.iter().map(|v| v + 2e-5).collect::<Vec<_>>(),
+            ),
             ("tiny noise", s.iter().map(|v| v + 1e-4 * noise()).collect()),
-            ("tiny contrast", s.iter().map(|v| 1.0001 * v - 8e-5).collect()),
+            (
+                "tiny contrast",
+                s.iter().map(|v| 1.0001 * v - 8e-5).collect(),
+            ),
         ] {
             let (share, explained) = accum(&s, &d, w, 64).finish();
             let (rs, re) = two_pass_compensated(&s, &d);
-            let mse = nsum(s.iter().zip(&d).map(|(&a, &b)| (a as f64 - b as f64).powi(2)))
-                / s.len() as f64;
+            let mse = nsum(
+                s.iter()
+                    .zip(&d)
+                    .map(|(&a, &b)| (a as f64 - b as f64).powi(2)),
+            ) / s.len() as f64;
             assert!((share - rs).abs() <= 1e-6, "{name}: share {share} vs {rs}");
             assert!(
                 (explained - re).abs() <= (1e-6 * re.abs()).max(1e-9 * mse),
