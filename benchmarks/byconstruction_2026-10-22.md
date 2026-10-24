@@ -1233,6 +1233,16 @@ AIC2026 public_train (T, Tga, Tga128 and Bga out of fold; the rest fixed models)
 | butteraugli 3-norm | 0.453 | 0.379 | 0.909 | 4.03% | 0.380 | 0.771 |
 | DVIFM 0.3 (constants fitted on AIC2026) | 0.364 | 0.327 | **0.479** | 2.73% | 0.333 | 0.771 |
 
+**Seed ensembles do not close the gap.** Averaging the z-scored out-of-sample predictions of seeds 0–2 lifts B's recipe
+from 0.8722 to 0.8763 mean SROCC (Z-RMSE 0.483 → 0.477) but the monotone arms by at most 0.0014 (Tga 0.8634 → 0.8638,
+M64 0.8591 → 0.8605, Tgg and Thpm +0.0002): their deficit is systematic cross-type calibration, not seed variance.
+
+**Which inputs the monotone models use** (`l0_usage.py`, layer-0 input norms ≥ 1% of the cell's largest, a difference
+and its products counted together): the hinge arms leave about two thirds of fx1's 410 differences unused in every
+cell (Thpm 274, Tgg 273, Tga 213); M64 uses nearly all (16 unused in every cell). Only 12 are unused by every cell of
+all four arms (instances of banding, blockiness, gms, masked_art, masked_ssim, ssim_mean). The engine computes features
+per family and scale, so this alone does not reduce extraction.
+
 The dashboard's scatter tab plots every model on one JND scale three ways (the logistic fit, the zenstats rank map, and
 raw output with mean and SD matched), with these statistics beside each plot.
 

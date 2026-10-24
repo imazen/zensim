@@ -234,7 +234,7 @@ def main() -> int:
             pair_share=v["pair_share"], discordant=v["discordant"], share_of_discordant=v["share_of_discordant"])
 
     # E21 + mixture for every arm with cells
-    have = [x for x in list(CONTROLS) + arms if (CELLS / x).is_dir()]
+    have = [x for x in list(CONTROLS) + arms if len(list((CELLS / x).glob("without_*_s*/byc_record.json"))) == 12]
     sc = run_json([sys.executable, str(REPO / "scripts/rev4_featpot/byc_cells.py"), "score", "--arms", ",".join(have)], env)
     mix = run_json([sys.executable, str(HERE / "mixture_test.py"), "report", "--out", MIX], env)
     mixg = run_json([sys.executable, str(HERE / "mixture_test.py"), "report", "--out", MIXG], env)

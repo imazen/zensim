@@ -55,6 +55,19 @@ def arm_root(arm: str, spec: str) -> str:
         return "raw"
     decl = research_decl(spec)
     return "hpm" if decl is None else "gg" if decl.name == "byc_fx1gg_declaration.json" else "g"
+def cell_root(cell: Path, arm: str, spec: str) -> Path:
+    """The root a cell actually trained on, read from its trainer command line (train.log's first line); falls back
+    to `arm_root` for B's control, whose E34 cells keep no such log here."""
+    log = cell / "train.log"
+    if arm != "base-c" and log.is_file():
+        first = log.read_text().split("\n", 1)[0]
+        hits = [r for r in ROOTS.values() if f"{r}/wide/" in first]
+        if len(hits) != 1:
+            raise ValueError(f"{cell}: cannot tell its training root")
+        return hits[0]
+    return ROOTS[arm_root(arm, spec)]
+
+
 FOLDS = ("kadid", "tid2013", "konfig", "cid22_a25")
 POP = {"kadid": "KADID TRAIN+SELECT", "tid2013": "TID2013 (train-only by ruling)", "konfig": "KonFiG TRAIN+VAL",
        "cid22_a25": "CID22-A, 25 references"}
@@ -156,7 +169,7 @@ def e21_jobs(arms: list[str], dvifm=None):
             if not bake.is_file():
                 continue
             spec = "" if arm == "base-c" else json.loads((cell / "byc_record.json").read_text())["spec"]
-            table = ROOTS[arm_root(arm, spec)] / "wide/main/real" / f"{fold}.parquet"
+            table = cell_root(cell, arm, spec) / "wide/main/real" / f"{fold}.parquet"
             x = predict(bake, table, spec)
             jobs.append((f"{fold}|{arm}|in|0", x, y))
             meta.append(dict(dataset=fold, model=arm, sample=f"in sample (cell without {other}, seed 0)", seed=0))
