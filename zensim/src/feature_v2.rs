@@ -5033,34 +5033,65 @@ fn rev5_job_blur(
     } = scratch;
     let src = source.unwrap_or(&src_wide[..n]);
     let start = crate::fold_timing::start();
-    fused_blur_h_ssim_banded(
-        src,
-        &dst_wide[..n],
-        &mut mu1_h[..n],
-        &mut mu2_h[..n],
-        &mut ssq_h[..n],
-        &mut s12_h[..n],
-        info.plane_w,
-        info.wide_h(),
-        false,
-        revision,
-    );
-    crate::fold_timing::stop(start, crate::fold_timing::Phase::BlurHWall, info.scale);
-    let start = crate::fold_timing::start();
-    for (horizontal, vertical) in [
-        (&mu1_h[..n], &mut mu1[..n]),
-        (&mu2_h[..n], &mut mu2[..n]),
-        (&ssq_h[..n], &mut ssq[..n]),
-        (&s12_h[..n], &mut s12[..n]),
-    ] {
-        crate::blur::box_blur_v_from_copy_at_revision(
-            horizontal,
-            vertical,
+    // The moments in one pass where both blurs run their per-output trees:
+    // the horizontal planes then live a column panel at a time in the first
+    // rows of `mu1_h`..`s12_h` instead of filling them. Only pools of eight or
+    // more threads take it, where the jobs' planes contend for the cache
+    // (paired, B at revision 7, 1507×2048 / 1024²: eight threads −3.6% /
+    // +0.1%, sixteen on eight cores −22.0% / −16.4%, 32 −10.8% / −3.1%); four
+    // threads ran +2.4% / −3.0% and one thread 1–2% slower on the panels'
+    // shorter row runs, so smaller pools and the serial walk keep two passes.
+    let fused = rayon::current_num_threads() >= 8
+        && crate::blur::fused_blur_hv_ssim_at_revision(
+            src,
+            &dst_wide[..n],
+            &mut mu1[..n],
+            &mut mu2[..n],
+            &mut ssq[..n],
+            &mut s12[..n],
             info.plane_w,
             info.wide_h(),
             BLUR_RADIUS,
             revision,
+            [
+                &mut mu1_h[..n],
+                &mut mu2_h[..n],
+                &mut ssq_h[..n],
+                &mut s12_h[..n],
+            ],
         );
+    if !fused {
+        fused_blur_h_ssim_banded(
+            src,
+            &dst_wide[..n],
+            &mut mu1_h[..n],
+            &mut mu2_h[..n],
+            &mut ssq_h[..n],
+            &mut s12_h[..n],
+            info.plane_w,
+            info.wide_h(),
+            false,
+            revision,
+        );
+    }
+    crate::fold_timing::stop(start, crate::fold_timing::Phase::BlurHWall, info.scale);
+    let start = crate::fold_timing::start();
+    if !fused {
+        for (horizontal, vertical) in [
+            (&mu1_h[..n], &mut mu1[..n]),
+            (&mu2_h[..n], &mut mu2[..n]),
+            (&ssq_h[..n], &mut ssq[..n]),
+            (&s12_h[..n], &mut s12[..n]),
+        ] {
+            crate::blur::box_blur_v_from_copy_at_revision(
+                horizontal,
+                vertical,
+                info.plane_w,
+                info.wide_h(),
+                BLUR_RADIUS,
+                revision,
+            );
+        }
     }
     crate::simd_ops::abs_diff_into(src, &mu1[..n], &mut mu1_h[..n]);
     crate::blur::box_blur_1pass_at_revision(

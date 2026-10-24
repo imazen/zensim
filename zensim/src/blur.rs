@@ -6940,6 +6940,279 @@ fn fused_blur_h_local11(
     }
 }
 
+/// [`fused_blur_h_local11`] and then [`box_blur_v_local11`] on each of its
+/// four planes, a 256-column panel at a time through `hbuf` (four panel-wide
+/// planes, row stride = the panel's span), as [`fused_blur_hv_local11_wide`]
+/// does at sixteen lanes. Every output keeps both kernels' trees, operands and
+/// roundings.
+#[cfg(feature = "threads")]
+#[magetypes(define(f32x8), v4x, v4, v3, -scalar)]
+#[allow(clippy::too_many_arguments)]
+fn fused_blur_hv_local11(
+    token: Token,
+    src: &[f32],
+    dst: &[f32],
+    out_mu1: &mut [f32],
+    out_mu2: &mut [f32],
+    out_sigma_sq: &mut [f32],
+    out_sigma12: &mut [f32],
+    width: usize,
+    height: usize,
+    err: bool,
+    hbuf: [&mut [f32]; 4],
+) {
+    if width == 0 || height == 0 {
+        return;
+    }
+    let inv = f32x8::splat_t(token, 1.0 / 11.0);
+    let left: [usize; 18] =
+        std::array::from_fn(|i| crate::featcanon::tap_mirror(i as isize - 5, width));
+    let last = (width / 8).saturating_sub(1) * 8;
+    let right: [usize; 18] =
+        std::array::from_fn(|i| crate::featcanon::tap_mirror((last + i) as isize - 5, width));
+    // `fused_blur_h_local11`'s 8-output block.
+    let block = |a_t: &[f32; 18], b_t: &[f32; 18]| {
+        let tap = |k: usize| {
+            let a = f32x8::load_t(token, a_t[k..k + 8].try_into().unwrap());
+            let b = f32x8::load_t(token, b_t[k..k + 8].try_into().unwrap());
+            let q = a.mul_add(a, b * b);
+            let p = if err {
+                let e = a - b;
+                e * e
+            } else {
+                a * b
+            };
+            (a, b, q, p)
+        };
+        let add = |a: (f32x8, f32x8, f32x8, f32x8), b: (f32x8, f32x8, f32x8, f32x8)| {
+            (a.0 + b.0, a.1 + b.1, a.2 + b.2, a.3 + b.3)
+        };
+        let pair = |k| add(tap(k), tap(k + 1));
+        let s01 = add(pair(0), pair(2));
+        let s45 = add(pair(4), pair(6));
+        add(add(add(s01, s45), pair(8)), tap(10))
+    };
+    let [h1, h2, hq, hp] = hbuf;
+    let mut outs = [out_mu1, out_mu2, out_sigma_sq, out_sigma12];
+    const PANEL: usize = 32;
+    let blocks = width / 8;
+    let mut pairs = [[f32x8::zero_t(token); PANEL]; 4];
+    let mut quads = [[f32x8::zero_t(token); PANEL]; 8];
+    for tile in (0..blocks).step_by(PANEL) {
+        let count = (blocks - tile).min(PANEL);
+        let (x0, span) = (tile * 8, count * 8);
+        for y in 0..height {
+            let row = y * width;
+            let (sr, dr) = (&src[row..row + width], &dst[row..row + width]);
+            let o = y * span;
+            let r1 = &mut h1[o..o + span].as_chunks_mut::<8>().0[..count];
+            let r2 = &mut h2[o..o + span].as_chunks_mut::<8>().0[..count];
+            let rq = &mut hq[o..o + span].as_chunks_mut::<8>().0[..count];
+            let rp = &mut hp[o..o + span].as_chunks_mut::<8>().0[..count];
+            for c in 0..count {
+                let x = x0 + c * 8;
+                let sum = if x >= 5 && x + 8 + 5 <= width {
+                    block(
+                        sr[x - 5..x + 13].try_into().unwrap(),
+                        dr[x - 5..x + 13].try_into().unwrap(),
+                    )
+                } else {
+                    let indices = if x == 0 { &left } else { &right };
+                    block(&indices.map(|i| sr[i]), &indices.map(|i| dr[i]))
+                };
+                (sum.0 * inv).store(&mut r1[c]);
+                (sum.1 * inv).store(&mut r2[c]);
+                (sum.2 * inv).store(&mut rq[c]);
+                (sum.3 * inv).store(&mut rp[c]);
+            }
+        }
+        for (input, output) in [&*h1, &*h2, &*hq, &*hp].into_iter().zip(outs.iter_mut()) {
+            for k in 0..9 {
+                let a = crate::featcanon::tap_mirror(k as isize - 5, height) * span;
+                let b = crate::featcanon::tap_mirror(k as isize - 4, height) * span;
+                let ra = &input[a..a + span].as_chunks::<8>().0[..count];
+                let rb = &input[b..b + span].as_chunks::<8>().0[..count];
+                for c in 0..count {
+                    pairs[k & 3][c] = f32x8::load_t(token, &ra[c]) + f32x8::load_t(token, &rb[c]);
+                }
+                if k >= 2 {
+                    for c in 0..count {
+                        quads[k - 2][c] = pairs[(k - 2) & 3][c] + pairs[k & 3][c];
+                    }
+                }
+            }
+            for y in 0..height {
+                let a = crate::featcanon::tap_mirror(y as isize + 4, height) * span;
+                let b = crate::featcanon::tap_mirror(y as isize + 5, height) * span;
+                let ra = &input[a..a + span].as_chunks::<8>().0[..count];
+                let rb = &input[b..b + span].as_chunks::<8>().0[..count];
+                let o = y * width + x0;
+                let ro = &mut output[o..o + span].as_chunks_mut::<8>().0[..count];
+                let (q0, q4, q7) = (y & 7, (y + 4) & 7, (y + 7) & 7);
+                let (p7, p8, p9) = ((y + 7) & 3, (y + 8) & 3, (y + 9) & 3);
+                for c in 0..count {
+                    let last = f32x8::load_t(token, &rb[c]);
+                    pairs[p9][c] = f32x8::load_t(token, &ra[c]) + last;
+                    quads[q7][c] = pairs[p7][c] + pairs[p9][c];
+                    let sum = ((quads[q0][c] + quads[q4][c]) + pairs[p8][c]) + last;
+                    (sum * inv).store(&mut ro[c]);
+                }
+            }
+        }
+    }
+    // The incomplete vector: both kernels' per-output scalar trees, the
+    // horizontal one per row into `hbuf` (row stride = the tail's width).
+    let xt = blocks * 8;
+    let tw = width - xt;
+    if tw == 0 {
+        return;
+    }
+    for y in 0..height {
+        let row = y * width;
+        let (sr, dr) = (&src[row..row + width], &dst[row..row + width]);
+        for x in xt..width {
+            let mut a = [0.0; 11];
+            let mut b = a;
+            let mut q = a;
+            let mut p = a;
+            for k in 0..11 {
+                let i = crate::featcanon::tap_mirror(x as isize + k as isize - 5, width);
+                a[k] = sr[i];
+                b[k] = dr[i];
+                q[k] = a[k].mul_add(a[k], b[k] * b[k]);
+                p[k] = if err {
+                    let e = a[k] - b[k];
+                    e * e
+                } else {
+                    a[k] * b[k]
+                };
+            }
+            let o = y * tw + (x - xt);
+            h1[o] = local_sum_taps(&a) * (1.0 / 11.0);
+            h2[o] = local_sum_taps(&b) * (1.0 / 11.0);
+            hq[o] = local_sum_taps(&q) * (1.0 / 11.0);
+            hp[o] = local_sum_taps(&p) * (1.0 / 11.0);
+        }
+    }
+    for (input, output) in [&*h1, &*h2, &*hq, &*hp].into_iter().zip(outs.iter_mut()) {
+        for y in 0..height {
+            let rows: [usize; 11] = std::array::from_fn(|k| {
+                crate::featcanon::tap_mirror(y as isize + k as isize - 5, height) * tw
+            });
+            for x in 0..tw {
+                let taps: [f32; 11] = std::array::from_fn(|k| input[rows[k] + x]);
+                output[y * width + xt + x] = local_sum_taps(&taps) * (1.0 / 11.0);
+            }
+        }
+    }
+}
+
+/// The scalar tier's form of [`fused_blur_hv_local11`]: the two scalar kernels
+/// in turn, `hbuf` holding the four image-wide horizontal planes.
+#[cfg(feature = "threads")]
+#[allow(clippy::too_many_arguments)]
+fn fused_blur_hv_local11_scalar(
+    token: archmage::ScalarToken,
+    src: &[f32],
+    dst: &[f32],
+    out_mu1: &mut [f32],
+    out_mu2: &mut [f32],
+    out_sigma_sq: &mut [f32],
+    out_sigma12: &mut [f32],
+    width: usize,
+    height: usize,
+    err: bool,
+    hbuf: [&mut [f32]; 4],
+) {
+    let [h1, h2, hq, hp] = hbuf;
+    fused_blur_h_local11_scalar(token, src, dst, h1, h2, hq, hp, width, height, 5, err);
+    for (input, output) in
+        [&*h1, &*h2, &*hq, &*hp]
+            .into_iter()
+            .zip([out_mu1, out_mu2, out_sigma_sq, out_sigma12])
+    {
+        box_blur_v_local11_scalar(token, input, output, width, height, 5);
+    }
+}
+
+/// The Rev5 `localwin` moment planes of one window in one pass: what
+/// [`fused_blur_h_ssim_at_revision`] and then [`box_blur_v_from_copy_at_revision`]
+/// on each of its four planes compute, bit for bit, without writing four
+/// image-wide horizontal planes. `hbuf` (each `width × height`) holds the
+/// panels' horizontal rows. Returns false, computing nothing, where either
+/// kernel would not run its per-output (`Local`) tree.
+#[cfg(feature = "threads")]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn fused_blur_hv_ssim_at_revision(
+    src: &[f32],
+    dst: &[f32],
+    out_mu1: &mut [f32],
+    out_mu2: &mut [f32],
+    out_sigma_sq: &mut [f32],
+    out_sigma12: &mut [f32],
+    width: usize,
+    height: usize,
+    radius: usize,
+    revision: crate::feature_defs::FormulaRevision,
+    hbuf: [&mut [f32]; 4],
+) -> bool {
+    use crate::featcanon::BlurMode;
+    // The horizontal kernel's selection (`fused_blur_h_ssim_at_revision`).
+    let revision_h = crate::ssim_form::effective_revision(revision);
+    let mode_h = crate::featcanon::mode(revision_h);
+    #[cfg(feature = "oracle")]
+    let canon_h = mode_h.active() || !matches!(crate::featcanon::blur_axis(), BlurMode::Rec);
+    #[cfg(not(feature = "oracle"))]
+    let canon_h = mode_h.active();
+    let local = |mode, revision| {
+        matches!(
+            crate::featcanon::canon_blur_axis_for(mode, revision),
+            BlurMode::Local
+        )
+    };
+    // The vertical kernel's (`box_blur_v_from_copy_at_revision`).
+    let local_v = local(crate::featcanon::mode(revision), revision);
+    if radius != 5 || !canon_h || !local(mode_h, revision_h) || !local_v {
+        return false;
+    }
+    let err = revision_h >= crate::feature_defs::FormulaRevision::Rev3;
+    #[cfg(feature = "feature-regime-v2")]
+    crate::fold_timing::work(crate::fold_timing::Work::VerticalPlane, 4);
+    #[cfg(all(target_arch = "x86_64", feature = "avx512"))]
+    if let Some(token) = <archmage::X64V4xToken as archmage::SimdToken>::summon() {
+        fused_blur_hv_local11_wide_v4x(
+            token,
+            src,
+            dst,
+            out_mu1,
+            out_mu2,
+            out_sigma_sq,
+            out_sigma12,
+            width,
+            height,
+            err,
+            hbuf,
+        );
+        return true;
+    }
+    incant!(
+        fused_blur_hv_local11(
+            src,
+            dst,
+            out_mu1,
+            out_mu2,
+            out_sigma_sq,
+            out_sigma12,
+            width,
+            height,
+            err,
+            hbuf
+        ),
+        [v4x, v4, v3, scalar]
+    );
+    true
+}
+
 pub(crate) fn box_blur_h_local(
     input: &[f32],
     output: &mut [f32],
@@ -8124,6 +8397,107 @@ pub fn box_spread_merge_f32(
 
 #[cfg(test)]
 mod tests {
+    /// The fused moment pass ([`fused_blur_hv_ssim_at_revision`]) against the
+    /// horizontal kernel followed by four vertical ones, bit for bit, at every
+    /// SIMD tier permutation: widths with and without remainder columns, on and
+    /// across the 256-column panel edge, and short, odd and strip heights.
+    #[cfg(feature = "threads")]
+    #[test]
+    fn fused_moment_pass_matches_the_two_passes() {
+        if std::env::var("FUSED_HV_CHILD").as_deref() != Ok("1") {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "blur::tests::fused_moment_pass_matches_the_two_passes",
+                    "--exact",
+                ])
+                .env("FUSED_HV_CHILD", "1")
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
+            return;
+        }
+        use super::*;
+        use crate::feature_defs::FormulaRevision;
+        let _guard = archmage::testing::lock_token_testing();
+        let mut runs = 0;
+        let report = archmage::testing::for_each_token_permutation(
+            archmage::testing::CompileTimePolicy::Warn,
+            |_| {
+                for (w, h) in [
+                    (1, 1),
+                    (7, 3),
+                    (8, 12),
+                    (15, 2),
+                    (16, 11),
+                    (17, 9),
+                    (255, 13),
+                    (256, 21),
+                    (257, 21),
+                    (300, 148),
+                    (513, 31),
+                    (1031, 17),
+                ] {
+                    let src: Vec<f32> = (0..w * h)
+                        .map(|i| ((i * 137 + 19) % 1009) as f32 / 1009.0 - 0.2)
+                        .collect();
+                    let dst: Vec<f32> = src
+                        .iter()
+                        .enumerate()
+                        .map(|(i, v)| if i % 23 == 0 { *v } else { 0.9 * v + 0.02 })
+                        .collect();
+                    for revision in [FormulaRevision::Rev5, FormulaRevision::Rev7] {
+                        let n = w * h;
+                        let mut horizontal: [Vec<f32>; 4] = std::array::from_fn(|_| vec![0.0; n]);
+                        let mut expected = horizontal.clone();
+                        {
+                            let [a, b, c, d] = &mut horizontal;
+                            fused_blur_h_ssim_at_revision(
+                                &src, &dst, a, b, c, d, w, h, 5, revision,
+                            );
+                        }
+                        for (hp, out) in horizontal.iter().zip(expected.iter_mut()) {
+                            box_blur_v_from_copy_at_revision(hp, out, w, h, 5, revision);
+                        }
+                        let mut actual: [Vec<f32>; 4] = std::array::from_fn(|_| vec![0.0; n]);
+                        let mut hbuf: [Vec<f32>; 4] = std::array::from_fn(|_| vec![0.0; n]);
+                        let [a, b, c, d] = &mut actual;
+                        let [h1, h2, h3, h4] = &mut hbuf;
+                        assert!(fused_blur_hv_ssim_at_revision(
+                            &src,
+                            &dst,
+                            a,
+                            b,
+                            c,
+                            d,
+                            w,
+                            h,
+                            5,
+                            revision,
+                            [h1, h2, h3, h4],
+                        ));
+                        for plane in 0..4 {
+                            for i in 0..n {
+                                assert_eq!(
+                                    actual[plane][i].to_bits(),
+                                    expected[plane][i].to_bits(),
+                                    "{revision:?} {w}x{h} plane {plane} index {i}"
+                                );
+                            }
+                        }
+                    }
+                }
+                runs += 1;
+            },
+        );
+        assert!(runs >= 1, "{report:?}");
+    }
+
     #[test]
     fn rev5_simd_edges_match_frozen_windows() {
         if std::env::var("REV5PERF_EDGES_CHILD").as_deref() != Ok("1") {
@@ -10990,6 +11364,175 @@ fn box_blur_v_local11_wide(
         for x in blocks * 16..width {
             let taps: [f32; 11] = std::array::from_fn(|k| input[rows[k] + x]);
             output[y * width + x] = local_sum_taps(&taps) * (1.0 / 11.0);
+        }
+    }
+}
+
+/// [`fused_blur_h_local11_wide`] and then [`box_blur_v_local11_wide`] on each
+/// of its four planes, a 256-column panel at a time: the panel's horizontal
+/// rows go to `hbuf` (four panel-wide planes, row stride = the panel's span,
+/// small enough for L2) instead of four image-wide planes. Every output has
+/// both kernels' trees, operands and roundings, so the moments are unchanged.
+#[cfg(all(target_arch = "x86_64", feature = "avx512", feature = "threads"))]
+#[magetypes(define(f32x16), v4x, -v4, -v3, -scalar)]
+#[allow(clippy::too_many_arguments)]
+fn fused_blur_hv_local11_wide(
+    token: Token,
+    src: &[f32],
+    dst: &[f32],
+    out_mu1: &mut [f32],
+    out_mu2: &mut [f32],
+    out_sigma_sq: &mut [f32],
+    out_sigma12: &mut [f32],
+    width: usize,
+    height: usize,
+    err: bool,
+    hbuf: [&mut [f32]; 4],
+) {
+    if width == 0 || height == 0 {
+        return;
+    }
+    let inv = f32x16::splat_t(token, 1.0 / 11.0);
+    let left: [usize; 26] =
+        std::array::from_fn(|i| crate::featcanon::tap_mirror(i as isize - 5, width));
+    let last = (width / 16).saturating_sub(1) * 16;
+    let right: [usize; 26] =
+        std::array::from_fn(|i| crate::featcanon::tap_mirror((last + i) as isize - 5, width));
+    // `fused_blur_h_local11_wide`'s 16-output block.
+    let block = |a_t: &[f32; 26], b_t: &[f32; 26]| {
+        let tap = |k: usize| {
+            let a = f32x16::load_t(token, a_t[k..k + 16].try_into().unwrap());
+            let b = f32x16::load_t(token, b_t[k..k + 16].try_into().unwrap());
+            let q = a.mul_add(a, b * b);
+            let p = if err {
+                let e = a - b;
+                e * e
+            } else {
+                a * b
+            };
+            (a, b, q, p)
+        };
+        let add = |a: (f32x16, f32x16, f32x16, f32x16), b: (f32x16, f32x16, f32x16, f32x16)| {
+            (a.0 + b.0, a.1 + b.1, a.2 + b.2, a.3 + b.3)
+        };
+        let pair = |k| add(tap(k), tap(k + 1));
+        let s01 = add(pair(0), pair(2));
+        let s45 = add(pair(4), pair(6));
+        add(add(add(s01, s45), pair(8)), tap(10))
+    };
+    let [h1, h2, hq, hp] = hbuf;
+    let mut outs = [out_mu1, out_mu2, out_sigma_sq, out_sigma12];
+    const PANEL: usize = 16;
+    let blocks = width / 16;
+    let mut pairs = [[f32x16::zero_t(token); PANEL]; 4];
+    let mut quads = [[f32x16::zero_t(token); PANEL]; 8];
+    for tile in (0..blocks).step_by(PANEL) {
+        let count = (blocks - tile).min(PANEL);
+        let (x0, span) = (tile * 16, count * 16);
+        // The panel's horizontal rows.
+        for y in 0..height {
+            let row = y * width;
+            let (sr, dr) = (&src[row..row + width], &dst[row..row + width]);
+            let o = y * span;
+            let r1 = &mut h1[o..o + span].as_chunks_mut::<16>().0[..count];
+            let r2 = &mut h2[o..o + span].as_chunks_mut::<16>().0[..count];
+            let rq = &mut hq[o..o + span].as_chunks_mut::<16>().0[..count];
+            let rp = &mut hp[o..o + span].as_chunks_mut::<16>().0[..count];
+            for c in 0..count {
+                let x = x0 + c * 16;
+                let sum = if x >= 5 && x + 16 + 5 <= width {
+                    block(
+                        sr[x - 5..x + 21].try_into().unwrap(),
+                        dr[x - 5..x + 21].try_into().unwrap(),
+                    )
+                } else {
+                    let indices = if x == 0 { &left } else { &right };
+                    block(&indices.map(|i| sr[i]), &indices.map(|i| dr[i]))
+                };
+                (sum.0 * inv).store(&mut r1[c]);
+                (sum.1 * inv).store(&mut r2[c]);
+                (sum.2 * inv).store(&mut rq[c]);
+                (sum.3 * inv).store(&mut rp[c]);
+            }
+        }
+        // `box_blur_v_local11_wide`'s panel walk over each of them.
+        for (input, output) in [&*h1, &*h2, &*hq, &*hp].into_iter().zip(outs.iter_mut()) {
+            for k in 0..9 {
+                let a = crate::featcanon::tap_mirror(k as isize - 5, height) * span;
+                let b = crate::featcanon::tap_mirror(k as isize - 4, height) * span;
+                let ra = &input[a..a + span].as_chunks::<16>().0[..count];
+                let rb = &input[b..b + span].as_chunks::<16>().0[..count];
+                for c in 0..count {
+                    pairs[k & 3][c] = f32x16::load_t(token, &ra[c]) + f32x16::load_t(token, &rb[c]);
+                }
+                if k >= 2 {
+                    for c in 0..count {
+                        quads[k - 2][c] = pairs[(k - 2) & 3][c] + pairs[k & 3][c];
+                    }
+                }
+            }
+            for y in 0..height {
+                let a = crate::featcanon::tap_mirror(y as isize + 4, height) * span;
+                let b = crate::featcanon::tap_mirror(y as isize + 5, height) * span;
+                let ra = &input[a..a + span].as_chunks::<16>().0[..count];
+                let rb = &input[b..b + span].as_chunks::<16>().0[..count];
+                let o = y * width + x0;
+                let ro = &mut output[o..o + span].as_chunks_mut::<16>().0[..count];
+                let (q0, q4, q7) = (y & 7, (y + 4) & 7, (y + 7) & 7);
+                let (p7, p8, p9) = ((y + 7) & 3, (y + 8) & 3, (y + 9) & 3);
+                for c in 0..count {
+                    let last = f32x16::load_t(token, &rb[c]);
+                    pairs[p9][c] = f32x16::load_t(token, &ra[c]) + last;
+                    quads[q7][c] = pairs[p7][c] + pairs[p9][c];
+                    let sum = ((quads[q0][c] + quads[q4][c]) + pairs[p8][c]) + last;
+                    (sum * inv).store(&mut ro[c]);
+                }
+            }
+        }
+    }
+    // The incomplete vector: both kernels' per-output scalar trees, the
+    // horizontal one per row into `hbuf` (row stride = the tail's width).
+    let xt = blocks * 16;
+    let tw = width - xt;
+    if tw == 0 {
+        return;
+    }
+    for y in 0..height {
+        let row = y * width;
+        let (sr, dr) = (&src[row..row + width], &dst[row..row + width]);
+        for x in xt..width {
+            let mut a = [0.0; 11];
+            let mut b = a;
+            let mut q = a;
+            let mut p = a;
+            for k in 0..11 {
+                let i = crate::featcanon::tap_mirror(x as isize + k as isize - 5, width);
+                a[k] = sr[i];
+                b[k] = dr[i];
+                q[k] = a[k].mul_add(a[k], b[k] * b[k]);
+                p[k] = if err {
+                    let e = a[k] - b[k];
+                    e * e
+                } else {
+                    a[k] * b[k]
+                };
+            }
+            let o = y * tw + (x - xt);
+            h1[o] = local_sum_taps(&a) * (1.0 / 11.0);
+            h2[o] = local_sum_taps(&b) * (1.0 / 11.0);
+            hq[o] = local_sum_taps(&q) * (1.0 / 11.0);
+            hp[o] = local_sum_taps(&p) * (1.0 / 11.0);
+        }
+    }
+    for (input, output) in [&*h1, &*h2, &*hq, &*hp].into_iter().zip(outs.iter_mut()) {
+        for y in 0..height {
+            let rows: [usize; 11] = std::array::from_fn(|k| {
+                crate::featcanon::tap_mirror(y as isize + k as isize - 5, height) * tw
+            });
+            for x in 0..tw {
+                let taps: [f32; 11] = std::array::from_fn(|k| input[rows[k] + x]);
+                output[y * width + xt + x] = local_sum_taps(&taps) * (1.0 / 11.0);
+            }
         }
     }
 }

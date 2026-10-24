@@ -2050,6 +2050,23 @@ The changes, in order:
     One thread does not use this path. Sixteen threads on eight cores remain slower than eight: each running job
     still writes and reads eleven planes of 148 rows (9.8 MB at 1507 columns), which is the next target.
 
+20. **The SSIM moments in one pass per column panel** (every revision from 5; strip jobs in pools of eight or more
+    threads): each job's four horizontal moment planes (148 rows of the full width) were written by one pass and read
+    back by four vertical blurs. `blur::fused_blur_hv_ssim_at_revision` computes a 256-column panel's horizontal rows
+    into the first rows of those planes (about 600 KB, held in L2) and runs the vertical blur on them at once, with
+    both kernels' trees, operands and roundings at every tier (16 lanes on v4x, eight on v4 and v3, the two scalar
+    kernels in turn on the scalar tier). Bits: 110 of 110 dumps at revisions 5/6 and at revision 7; 72 revision-7
+    dumps (B and Tga, three photos, v4x and v3, 1 to 32 threads) identical to v4x one thread;
+    `fused_moment_pass_matches_the_two_passes` compares the fused pass with the two passes at every tier
+    permutation over twelve geometries (remainder columns, the panel edge, heights 1 to 148) and fails when the
+    eight-lane kernel reads a wrong vertical tap. Paired, 10 rounds, against item 19 (B at revision 7,
+    `rev7_blockwalk_vs_fusedhv_jobs_*`): eight threads −3.62% (−4.61..−1.73) at 1507×2048 and +0.11% (−1.72..+3.71)
+    at 1024², sixteen on eight cores −21.99% / −16.36%, 32 threads −10.79% / −3.06%, v3 at eight threads −1.88% /
+    −0.51%. Four threads measured +2.41% (+0.89..+8.00) / −2.99%, and the same pass in the one-thread walk +1.02% /
+    +1.01% / +1.95% on v4x (1507×2048 / 256² / 1024², `rev7_blockwalk_vs_fusedhv_serial_t1`): a panel's
+    horizontal pass reads each row in 1 KiB runs, shorter than the stream prefetchers like, and an uncontended L3
+    absorbs the two-pass traffic. So pools below eight threads and the serial walk keep the two passes.
+
 **Tried and not kept** (after 13): the three opsin cube roots interleaved step by step (bit-identical): −0.06% /
 −0.90% on v4x (`rev7_band_vs_cbrt3`, the 1507×2048 and 1024² cases), noise on v3; the conversion's inner loop runs at
 about two instructions per cycle, but interleaving did not raise it. The activity chain's `|src − mu1|` computed per
