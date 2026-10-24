@@ -499,6 +499,29 @@ pub enum FormulaRevision {
     /// `ZENSIM_FORMULA_REV=6` pins it for research, and a bake declaring
     /// revision 6 selects it per call.
     Rev6,
+    /// Revision 6 with faster and cancellation-free pooled arithmetic (the
+    /// `rowlanes` era, `benchmarks/byconstruction_2026-10-22.md`, "Speed pass
+    /// before revision 7"):
+    ///
+    /// * **f32 row lanes.** The dense, fused-SSIM and gradient pools add
+    ///   the columns of each row's complete 8-column chunks to sixteen f32
+    ///   lanes (`x & 15`) and fold every lane into its f64 lane at the end
+    ///   of the chunks and after every 4,096th column, instead of adding
+    ///   every column in f64; the remaining columns add in f64 as before.
+    ///   Pools whose features difference or ratio two large sums (v1
+    ///   variance, texture and contrast terms, the edge-width change, the
+    ///   band-lifetime raw moments) keep f64 lanes.
+    /// * **Central moments per row.** The SSIM deviation moments are
+    ///   two-pass per row (a sixteen-lane f64 mean, then the centred sums)
+    ///   with one Chan/Pébay merge per row instead of one per 16 columns.
+    /// * **Cancellation-free forms.** The v2 SSIM luminance term is
+    ///   `(m1 − m2)²`, the bounded dissimilarities `(a − b)²/(a² + b² + c)`
+    ///   and the v1 edge ratio `(x − y)/(1 + y)`: the exact values the old
+    ///   forms computed by subtracting nearly equal numbers.
+    ///
+    /// Any live slot may move (an arithmetic era); scope and process model
+    /// are Rev6's (`ZENSIM_FORMULA_REV=7`, or a bake declaring revision 7).
+    Rev7,
 }
 
 impl FormulaRevision {
@@ -558,18 +581,47 @@ impl FormulaRevision {
                 "localwin",
                 "ringhpm",
             ],
+            Self::Rev7 => &[
+                "v1ssimcap",
+                "freecomp",
+                "v1hfgain",
+                "v1detroot",
+                "scorepow",
+                "v1ssimstable",
+                "v2ssimstable",
+                "v1extfused",
+                "tiercanon",
+                "c3negfold",
+                "localwin",
+                "ringhpm",
+                "rowlanes",
+            ],
         }
     }
 
     /// Whether the v2 `ringing` family measures the local-mean-removed error
     /// ([`Self::Rev6`]'s `ringhpm` era) rather than the raw pixel error.
     pub(crate) const fn ring_high_pass(self) -> bool {
-        matches!(self, Self::Rev6)
+        matches!(self, Self::Rev6 | Self::Rev7)
     }
 
     /// Whether the `globaff` family (f1867..1890) is computed at this revision.
     pub(crate) const fn computes_globaff(self) -> bool {
-        matches!(self, Self::Rev6)
+        matches!(self, Self::Rev6 | Self::Rev7)
+    }
+
+    /// Whether the pools add columns in f32 row lanes and the central
+    /// moments are two-pass per row ([`Self::Rev7`]'s `rowlanes` era).
+    pub(crate) const fn row_lanes(self) -> bool {
+        matches!(self, Self::Rev7)
+    }
+
+    /// Whether the cancellation-free forms replace the subtractive ones:
+    /// `(m1 − m2)²` for the v2 SSIM luminance term, `(a − b)²/(a² + b² + c)`
+    /// for the bounded dissimilarities and `(x − y)/(1 + y)` for the v1 edge
+    /// ratio ([`Self::Rev7`]).
+    pub(crate) const fn stable_forms(self) -> bool {
+        matches!(self, Self::Rev7)
     }
 
     /// Whether `GLOBAL_CGAIN`/`GLOBAL_CLOSS` are formed from the PAIRED
@@ -600,7 +652,7 @@ impl FormulaRevision {
     pub(crate) const fn paired_global_contrast(self) -> bool {
         matches!(
             self,
-            Self::Rev2 | Self::Rev3 | Self::Rev4 | Self::Rev5 | Self::Rev6
+            Self::Rev2 | Self::Rev3 | Self::Rev4 | Self::Rev5 | Self::Rev6 | Self::Rev7
         )
     }
 
@@ -1347,9 +1399,48 @@ const REV_LOCALWIN: Revision = Revision {
 /// [`FormulaRevision::moved_slots`]), is registered for
 /// `research::era_is_registered`, and — when the build computes it — is every
 /// slot's provenance era (`research::current_era_of`).
+/// The defect behind the `rowlanes` era: subtractive forms that cancel, and
+/// pooled arithmetic that costs more than its precision needs.
+const DEFECT_FORM_CANCELLATION: Defect = Defect {
+    id: "FORMCANCEL",
+    note: "Three formulas compute a small value by subtracting nearly equal \
+           numbers: the v2 SSIM luminance term `(m1² + m2² + C1) − (2·m1·m2 + \
+           C1)`, the bounded dissimilarity `1 − (2ab + c)/(a² + b² + c)` and \
+           the v1 edge ratio `(1 + x)/(1 + y) − 1`. MEASURED \
+           (byconstruction record, \"Formula revision 7\"): +336% / −87% on \
+           near-identical chroma features of 1e-8 to 1e-9; scores move by at \
+           most 7.9e-5 points. Separately, every pool column was added in f64 \
+           (a conversion and an f64 add per term) and the central moments \
+           merged once per 16 columns, most of the pooled kernels' time.",
+};
+
+/// The `rowlanes` era: Rev6 with f32 row lanes, per-row central moments and
+/// the cancellation-free forms ([`FormulaRevision::Rev7`]).
+const REV_ROWLANES: Revision = Revision {
+    era: "rowlanes",
+    commit: "-",
+    status: RevisionStatus::Proposed,
+    note: "rev7: the dense, fused-SSIM and gradient pools add the columns of \
+           each row's complete 8-column chunks to sixteen f32 lanes (`x & 15`, \
+           ascending x), folded into the f64 lanes at the end of the chunks and \
+           after every 4,096th column, except pools whose features difference \
+           or ratio two large sums (f64, as before); the SSIM deviation moments \
+           are two-pass per row with one Chan/Pébay merge per row; the three \
+           subtractive forms become their exact cancellation-free equivalents. \
+           MEASURED (byconstruction record, \"Formula revision 7 \
+           implemented\"): against revision 6 on 110 dumps, features move by \
+           a median 1.6e-8 relative (largest 4.1e-3, an absolute 2.4e-8) and \
+           scores by at most 7.1e-6 points; against the exact f64 oracle the \
+           worst per-feature median error falls from 5.10e-5 to 4.93e-5; \
+           21.6% faster at 2048² v4x and 23.9% at v3 (B). Registered as \
+           moving every live slot (an arithmetic era); tier-identical by the \
+           same fixed order.",
+};
+
 pub(crate) const ARITHMETIC_REVISIONS: &[(Defect, Revision)] = &[
     (DEFECT_TIER_DIVERGENCE, REV_TIERCANON),
     (DEFECT_WINDOW_DRIFT, REV_LOCALWIN),
+    (DEFECT_FORM_CANCELLATION, REV_ROWLANES),
 ];
 
 /// Whether `era` names a registered ARITHMETIC era.

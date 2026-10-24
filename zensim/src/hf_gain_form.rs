@@ -157,7 +157,8 @@ impl HfGainForm {
             | FormulaRevision::Rev3
             | FormulaRevision::Rev4
             | FormulaRevision::Rev5
-            | FormulaRevision::Rev6 => Self::REV2_HFGAIN,
+            | FormulaRevision::Rev6
+            | FormulaRevision::Rev7 => Self::REV2_HFGAIN,
         }
     }
 

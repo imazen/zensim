@@ -517,6 +517,60 @@ impl Pool for Lanes16F64 {
     }
 }
 
+/// Revision 7's sixteen f32 row lanes (the `rowlanes` era,
+/// [`crate::feature_defs::FormulaRevision::Rev7`]).
+///
+/// A pool's terms for the columns of a row's complete eight-column chunks
+/// (`x < 8·⌊width/8⌋`) add here, lane `x & 15`, ascending `x`;
+/// [`Self::fold_into`] then adds each lane to the matching f64 lane of the
+/// pool's [`Lanes16F64`] and clears it, after every column `x` with
+/// `(x + 1) % ROW_LANES_FOLD == 0` and at the end of the chunks. The row's
+/// tail columns add to the f64 lanes directly. One f32 add per term replaces a
+/// conversion and an f64 add, and no f32 lane takes more than 256 terms
+/// between folds.
+#[derive(Debug, Clone, Copy, Default)]
+#[repr(align(64))]
+pub(crate) struct Lanes16F32(pub [f32; 16]);
+
+/// Columns between two folds of [`Lanes16F32`] into the f64 lanes.
+pub(crate) const ROW_LANES_FOLD: usize = 4096;
+
+impl Lanes16F32 {
+    /// Lanes `offset..offset + 8` (`offset` is 0 or 8).
+    #[inline(always)]
+    pub(crate) fn chunk8(&mut self, offset: usize) -> &mut [f32; 8] {
+        (&mut self.0[offset..offset + 8]).try_into().unwrap()
+    }
+
+    /// Add every lane to `pool`'s matching lane (for [`Lanes16F64`],
+    /// `lane += v as f64`), then clear.
+    #[inline(always)]
+    pub(crate) fn fold_into<P: Pool>(&mut self, pool: &mut P) {
+        for l in 0..16 {
+            pool.add(l, self.0[l]);
+        }
+        self.0 = [0.0; 16];
+    }
+}
+
+impl Pool for Lanes16F32 {
+    const LANES: usize = 16;
+    #[inline(always)]
+    fn zero() -> Self {
+        Self([0.0; 16])
+    }
+    #[inline(always)]
+    fn add(&mut self, lane: usize, v: f32) {
+        self.0[lane & 15] += v;
+    }
+    /// Row lanes are folded into [`Lanes16F64`], never finished themselves;
+    /// this reduces them by its tree for completeness.
+    #[inline(always)]
+    fn fin(self) -> f64 {
+        Lanes16F64(self.0.map(f64::from)).fin()
+    }
+}
+
 /// Fixed f64 lane storage used by the existing vector kernels.
 pub(crate) trait Pool64: Pool {
     fn chunk8(&mut self, offset: usize) -> &mut [f64; 8];

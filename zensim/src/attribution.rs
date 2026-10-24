@@ -1558,6 +1558,8 @@ fn basic_combine_channel(
     co: &SlotCoeffs,
     id_slice: &mut [f64],
     bl_slice: &mut [f64],
+    // Revision 7: the v1 edge ratio as `(x − y)/(1 + y)`.
+    stable7: bool,
 ) {
     for i in 0..n {
         let sd = bufs.sd[i] as f64;
@@ -1567,10 +1569,11 @@ fn basic_combine_channel(
         let m2 = bufs.mu2[i] as f64;
         let d1 = (sv - m1).abs();
         let d2 = (dv - m2).abs();
-        #[cfg(not(zensim_stable_forms))]
-        let ed = (1.0 + d2) / (1.0 + d1) - 1.0;
-        #[cfg(zensim_stable_forms)]
-        let ed = (d2 - d1) / (1.0 + d1);
+        let ed = if stable7 {
+            (d2 - d1) / (1.0 + d1)
+        } else {
+            (1.0 + d2) / (1.0 + d1) - 1.0
+        };
         let art = ed.max(0.0);
         let det = (-ed).max(0.0);
         let sd2 = sd * sd;
@@ -1698,7 +1701,16 @@ fn build_attribution_into_sink(
                 let acc = process_channel_banded(src_c, dst_c, sw, sh, radius, buf);
                 let base_k = scale * FPC * 3 + c * FPC;
                 let co = SlotCoeffs::derive(s, base_k, &acc, n as f64);
-                basic_combine_channel(buf, src_c, dst_c, n, &co, &mut idp[..n], &mut winp[..n]);
+                basic_combine_channel(
+                    buf,
+                    src_c,
+                    dst_c,
+                    n,
+                    &co,
+                    &mut idp[..n],
+                    &mut winp[..n],
+                    crate::ssim_form::active_revision().stable_forms(),
+                );
                 acc
             };
             #[cfg(feature = "threads")]
@@ -2605,6 +2617,7 @@ mod tests {
                         co,
                         &mut expected_id,
                         &mut expected_win,
+                        false,
                     );
                     fused_combine_l8_f32(
                         sd,
@@ -2616,7 +2629,9 @@ mod tests {
                         &mut expected_id,
                         &mut expected_win,
                     );
-                    combine_basic_and_l8::<true>(sd, src, dst, mu1, mu2, co, l8, &mut id, &mut win);
+                    combine_basic_and_l8::<true>(
+                        sd, src, dst, mu1, mu2, co, l8, &mut id, &mut win, false,
+                    );
                     for (a, b) in id
                         .iter()
                         .chain(&win)
@@ -4481,6 +4496,7 @@ mod tests {
                     co32[c],
                     &mut id_plane[..n],
                     &mut win_plane[..n],
+                    false,
                 );
             }
             crate::blur::box_spread_merge_f32(
@@ -4798,8 +4814,11 @@ pub(crate) fn fused_combine_plane_f32(
     co: [f32; 12],
     id_plane: &mut [f32],
     win_plane: &mut [f32],
+    stable7: bool,
 ) {
-    combine_basic_and_l8::<false>(sd, src, dst, mu1, mu2, co, [0.0; 3], id_plane, win_plane);
+    combine_basic_and_l8::<false>(
+        sd, src, dst, mu1, mu2, co, [0.0; 3], id_plane, win_plane, stable7,
+    );
 }
 
 #[autoversion]
@@ -4814,6 +4833,8 @@ fn combine_basic_and_l8<const L8: bool>(
     l8: [f64; 3],
     id_plane: &mut [f32],
     win_plane: &mut [f32],
+    // Revision 7: the v1 edge ratio as `(x − y)/(1 + y)`.
+    stable7: bool,
 ) {
     let n = id_plane.len();
     let sd = &sd[..n];
@@ -4830,10 +4851,11 @@ fn combine_basic_and_l8<const L8: bool>(
         let m2 = mu2[i];
         let d1 = (sv - m1).abs();
         let d2 = (dv - m2).abs();
-        #[cfg(not(zensim_stable_forms))]
-        let ed = (1.0 + d2) / (1.0 + d1) - 1.0;
-        #[cfg(zensim_stable_forms)]
-        let ed = (d2 - d1) / (1.0 + d1);
+        let ed = if stable7 {
+            (d2 - d1) / (1.0 + d1)
+        } else {
+            (1.0 + d2) / (1.0 + d1) - 1.0
+        };
         let art = ed.max(0.0);
         let det = (-ed).max(0.0);
         let sd2 = sdv * sdv;
@@ -6592,6 +6614,7 @@ impl crate::metric::Zensim {
                 sess.hf_src.push(hf);
             }
             // Row-banded parallel combine (disjoint id/win rows per band).
+            let stable7 = config.revision().stable_forms();
             let run_band = |band: usize, idc: &mut [f32], winc: &mut [f32]| {
                 let off = band * 64 * sw;
                 let len = idc.len();
@@ -6614,6 +6637,7 @@ impl crate::metric::Zensim {
                         l8_co[c],
                         idc,
                         winc,
+                        stable7,
                     );
                 }
             };

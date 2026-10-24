@@ -70,8 +70,9 @@ impl core::fmt::Display for PlanError {
             }
             PlanError::UnsupportedAtRev5 { extra } => write!(
                 f,
-                "formula revision 5 computes only the basic + peaks + v2 \
-                 families; requested slot(s) {extra} are outside them"
+                "formula revisions 5 and later compute only the basic + peaks \
+                 + v2 families (and globaff from revision 6); requested \
+                 slot(s) {extra} are outside them"
             ),
         }
     }
@@ -1844,7 +1845,8 @@ pub(crate) mod servability_census {
             | FormulaRevision::Rev3
             | FormulaRevision::Rev4
             | FormulaRevision::Rev5
-            | FormulaRevision::Rev6 => FormulaRevision::Rev1,
+            | FormulaRevision::Rev6
+            | FormulaRevision::Rev7 => FormulaRevision::Rev1,
         };
         assert!(
             !a.revisions_agree(&b),

@@ -177,7 +177,7 @@ impl Request {
     #[must_use]
     pub fn everything() -> Request {
         let w = full_width();
-        // `globaff` exists only at formula revision 6; below it, everything
+        // `globaff` exists only from formula revision 6; below it, everything
         // is every other registered slot.
         let globaff = feature_defs::family_slots(ComputeToken::GlobAff, crate::NUM_SCALES);
         let computes_globaff = crate::ssim_form::active_revision().computes_globaff();

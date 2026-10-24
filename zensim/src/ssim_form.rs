@@ -929,7 +929,8 @@ impl SsimLumaForm {
             | FormulaRevision::Rev3
             | FormulaRevision::Rev4
             | FormulaRevision::Rev5
-            | FormulaRevision::Rev6 => Self::REV2_LUMA,
+            | FormulaRevision::Rev6
+            | FormulaRevision::Rev7 => Self::REV2_LUMA,
         }
     }
 
@@ -1023,6 +1024,7 @@ pub(crate) fn active_revision() -> FormulaRevision {
         Ok("4") => FormulaRevision::Rev4,
         Ok("5") => FormulaRevision::Rev5,
         Ok("6") => FormulaRevision::Rev6,
+        Ok("7") => FormulaRevision::Rev7,
         _ => SHIPPED_REVISION,
     })
 }

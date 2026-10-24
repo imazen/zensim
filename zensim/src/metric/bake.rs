@@ -4802,8 +4802,9 @@ mod revision_contract_tests {
             crate::ssim_form::SHIPPED_REVISION
         );
         // `4` is registered since featcanon (Rev4, the `tiercanon` era), `5`
-        // since rev5 (the `localwin` era) and `6` since the by-construction
-        // `ringhpm` era; the first unregistered value is `7`.
+        // since rev5 (the `localwin` era), `6` since the by-construction
+        // `ringhpm` era and `7` since the `rowlanes` era; the first
+        // unregistered value is `8`.
         let bytes = bake_declaring(Some("4"), 5);
         let model = zenpredict::Model::from_bytes(&bytes).expect("parse bake");
         assert_eq!(
@@ -4823,6 +4824,12 @@ mod revision_contract_tests {
             crate::feature_defs::FormulaRevision::Rev6
         );
         let bytes = bake_declaring(Some("7"), 5);
+        let model = zenpredict::Model::from_bytes(&bytes).expect("parse bake");
+        assert_eq!(
+            crate::feature_layout::formula_revision(&model).expect("7 resolves"),
+            crate::feature_defs::FormulaRevision::Rev7
+        );
+        let bytes = bake_declaring(Some("8"), 5);
         let model = zenpredict::Model::from_bytes(&bytes).expect("parse bake");
         assert!(
             crate::feature_layout::formula_revision(&model).is_err(),

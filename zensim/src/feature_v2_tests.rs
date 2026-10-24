@@ -279,19 +279,23 @@ pub(crate) mod tests {
             let na = (2.0 * m1 * m2 + C1_V2) as f32;
             let nb = (m1 * m1 + m2 * m2 + C1_V2) as f32;
             let nd = (ssq - m1 * m1 - m2 * m2 + C2_V2) as f32;
-            for (direct, s12) in [(true, s12_direct), (false, s12_prod)] {
-                let want = ssim_d_local(m1, m2, s12, ssq, direct);
-                let got = f64::from(ssim_d_px(
-                    na, nb, nd, m1 as f32, m2 as f32, s12 as f32, direct,
-                ));
-                assert!(
-                    (0.0..=2.0 + 1e-3).contains(&got),
-                    "d out of range: {got} (direct {direct})"
-                );
-                assert!(
-                    (got - want).abs() < 2e-3,
-                    "px {got} vs f64 {want} (direct {direct})"
-                );
+            // Both luminance forms: revision 7's `(m1 − m2)²` and the
+            // subtractive one before it.
+            for stable in [false, true] {
+                for (direct, s12) in [(true, s12_direct), (false, s12_prod)] {
+                    let want = ssim_d_local(m1, m2, s12, ssq, direct, stable);
+                    let got = f64::from(ssim_d_px(
+                        na, nb, nd, m1 as f32, m2 as f32, s12 as f32, direct, stable,
+                    ));
+                    assert!(
+                        (0.0..=2.0 + 1e-3).contains(&got),
+                        "d out of range: {got} (direct {direct}, stable {stable})"
+                    );
+                    assert!(
+                        (got - want).abs() < 2e-3,
+                        "px {got} vs f64 {want} (direct {direct}, stable {stable})"
+                    );
+                }
             }
         }
     }

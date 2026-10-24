@@ -1120,8 +1120,8 @@ pub(crate) fn fused_vblur_features_ssim(
 /// Computes edge, variance, texture, and MSE features inline.
 ///
 /// `revision` is the computation's formula revision; it selects the canonical
-/// body at Rev4 (featcanon D1) and nothing else — the edge features have no
-/// revision-dependent formula.
+/// body at Rev4 (featcanon D1) and nothing else. Revision 7 changes the edge
+/// ratio's form, but no canonical revision takes this route.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn fused_vblur_features_edge(
     h_mu1: &[f32],
@@ -1138,6 +1138,13 @@ pub(crate) fn fused_vblur_features_edge(
     store_mu: bool,
     revision: crate::feature_defs::FormulaRevision,
 ) -> StripChannelAccum {
+    // Canonical revisions route every channel through the fused SSIM kernels
+    // (`streaming::active_channels`), so revision 7 never reaches this route;
+    // its edge ratio here keeps the subtractive form.
+    assert!(
+        !revision.stable_forms(),
+        "the edge-only route has no revision-7 form; canonical revisions use the SSIM route"
+    );
     let mode = crate::featcanon::mode(crate::ssim_form::effective_revision(revision));
     match mode {
         #[cfg(feature = "oracle")]
@@ -1498,10 +1505,7 @@ fn fused_vblur_ssim_inner_v4(
                 // === Edge ===
                 let diff1 = (s - mu1).abs();
                 let diff2 = (d - mu2).abs();
-                #[cfg(not(zensim_stable_forms))]
                 let ed = (one + diff2) / (one + diff1) - one;
-                #[cfg(zensim_stable_forms)]
-                let ed = (diff2 - diff1) / (one + diff1);
                 let artifact = ed.max(zero);
                 let detail_lost = (-ed).max(zero);
                 let a2 = artifact * artifact;
@@ -1723,10 +1727,7 @@ fn fused_vblur_ssim_inner_v4(
                 // Edge
                 let diff1 = (s - mu1).abs();
                 let diff2 = (d - mu2).abs();
-                #[cfg(not(zensim_stable_forms))]
                 let ed = (one8 + diff2) / (one8 + diff1) - one8;
-                #[cfg(zensim_stable_forms)]
-                let ed = (diff2 - diff1) / (one8 + diff1);
                 let artifact = ed.max(zero8);
                 let detail_lost = (-ed).max(zero8);
                 let a2 = artifact * artifact;
@@ -1921,10 +1922,7 @@ fn fused_vblur_ssim_inner_v4(
                 // Edge (f32 to match SIMD paths)
                 let diff1 = (sv - mu1).abs();
                 let diff2 = (dv - mu2).abs();
-                #[cfg(not(zensim_stable_forms))]
                 let ed = (1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32;
-                #[cfg(zensim_stable_forms)]
-                let ed = (diff2 - diff1) / (1.0f32 + diff1);
                 let artifact = ed.max(0.0f32);
                 let detail_lost = (-ed).max(0.0f32);
                 let a2 = artifact * artifact;
@@ -2221,10 +2219,7 @@ fn fused_vblur_ssim_inner_v4x(
                 // === Edge ===
                 let diff1 = (s - mu1).abs();
                 let diff2 = (d - mu2).abs();
-                #[cfg(not(zensim_stable_forms))]
                 let ed = (one + diff2) / (one + diff1) - one;
-                #[cfg(zensim_stable_forms)]
-                let ed = (diff2 - diff1) / (one + diff1);
                 let artifact = ed.max(zero);
                 let detail_lost = (-ed).max(zero);
                 let a2 = artifact * artifact;
@@ -2446,10 +2441,7 @@ fn fused_vblur_ssim_inner_v4x(
                 // Edge
                 let diff1 = (s - mu1).abs();
                 let diff2 = (d - mu2).abs();
-                #[cfg(not(zensim_stable_forms))]
                 let ed = (one8 + diff2) / (one8 + diff1) - one8;
-                #[cfg(zensim_stable_forms)]
-                let ed = (diff2 - diff1) / (one8 + diff1);
                 let artifact = ed.max(zero8);
                 let detail_lost = (-ed).max(zero8);
                 let a2 = artifact * artifact;
@@ -2644,10 +2636,7 @@ fn fused_vblur_ssim_inner_v4x(
                 // Edge (f32 to match SIMD paths)
                 let diff1 = (sv - mu1).abs();
                 let diff2 = (dv - mu2).abs();
-                #[cfg(not(zensim_stable_forms))]
                 let ed = (1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32;
-                #[cfg(zensim_stable_forms)]
-                let ed = (diff2 - diff1) / (1.0f32 + diff1);
                 let artifact = ed.max(0.0f32);
                 let detail_lost = (-ed).max(0.0f32);
                 let a2 = artifact * artifact;
@@ -2940,10 +2929,7 @@ fn fused_vblur_ssim_inner_v3(
                 // Edge
                 let diff1 = (s - mu1).abs();
                 let diff2 = (d - mu2).abs();
-                #[cfg(not(zensim_stable_forms))]
                 let ed = (one + diff2) / (one + diff1) - one;
-                #[cfg(zensim_stable_forms)]
-                let ed = (diff2 - diff1) / (one + diff1);
                 let artifact = ed.max(zero);
                 let detail_lost = (-ed).max(zero);
                 let a2 = artifact * artifact;
@@ -3141,10 +3127,7 @@ fn fused_vblur_ssim_inner_v3(
                 // Edge
                 let diff1 = (sv - mu1).abs();
                 let diff2 = (dv - mu2).abs();
-                #[cfg(not(zensim_stable_forms))]
                 let ed = (1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32;
-                #[cfg(zensim_stable_forms)]
-                let ed = (diff2 - diff1) / (1.0f32 + diff1);
                 let artifact = ed.max(0.0f32);
                 let detail_lost = (-ed).max(0.0f32);
                 let a2 = artifact * artifact;
@@ -3397,10 +3380,7 @@ fn fused_vblur_ssim_inner(
                 // Edge
                 let diff1 = (s - mu1).abs();
                 let diff2 = (d - mu2).abs();
-                #[cfg(not(zensim_stable_forms))]
                 let ed = (one + diff2) / (one + diff1) - one;
-                #[cfg(zensim_stable_forms)]
-                let ed = (diff2 - diff1) / (one + diff1);
                 let artifact = ed.max(zero);
                 let detail_lost = (-ed).max(zero);
                 let a2 = artifact * artifact;
@@ -3604,10 +3584,7 @@ fn fused_vblur_ssim_inner(
                 // Edge
                 let diff1 = (sv - mu1).abs();
                 let diff2 = (dv - mu2).abs();
-                #[cfg(not(zensim_stable_forms))]
                 let ed = (1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32;
-                #[cfg(zensim_stable_forms)]
-                let ed = (diff2 - diff1) / (1.0f32 + diff1);
                 let artifact = ed.max(0.0f32);
                 let detail_lost = (-ed).max(0.0f32);
                 let a2 = artifact * artifact;
@@ -3764,10 +3741,7 @@ fn fused_vblur_edge_inner_v4(
                 // Edge
                 let diff1 = (s - mu1).abs();
                 let diff2 = (d - mu2).abs();
-                #[cfg(not(zensim_stable_forms))]
                 let ed = (one + diff2) / (one + diff1) - one;
-                #[cfg(zensim_stable_forms)]
-                let ed = (diff2 - diff1) / (one + diff1);
                 let artifact = ed.max(zero);
                 let detail_lost = (-ed).max(zero);
                 let a2 = artifact * artifact;
@@ -3849,10 +3823,7 @@ fn fused_vblur_edge_inner_v4(
 
                 let diff1 = (s - mu1).abs();
                 let diff2 = (d - mu2).abs();
-                #[cfg(not(zensim_stable_forms))]
                 let ed = (one8 + diff2) / (one8 + diff1) - one8;
-                #[cfg(zensim_stable_forms)]
-                let ed = (diff2 - diff1) / (one8 + diff1);
                 let artifact = ed.max(zero8);
                 let detail_lost = (-ed).max(zero8);
                 let a2 = artifact * artifact;
@@ -3919,10 +3890,7 @@ fn fused_vblur_edge_inner_v4(
                 // Edge
                 let diff1 = (sv - mu1).abs();
                 let diff2 = (dv - mu2).abs();
-                #[cfg(not(zensim_stable_forms))]
                 let ed = (1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32;
-                #[cfg(zensim_stable_forms)]
-                let ed = (diff2 - diff1) / (1.0f32 + diff1);
                 let artifact = ed.max(0.0f32);
                 let detail_lost = (-ed).max(0.0f32);
                 let a2 = artifact * artifact;
@@ -4016,10 +3984,7 @@ fn fused_vblur_edge_inner_v4x(
                 // Edge
                 let diff1 = (s - mu1).abs();
                 let diff2 = (d - mu2).abs();
-                #[cfg(not(zensim_stable_forms))]
                 let ed = (one + diff2) / (one + diff1) - one;
-                #[cfg(zensim_stable_forms)]
-                let ed = (diff2 - diff1) / (one + diff1);
                 let artifact = ed.max(zero);
                 let detail_lost = (-ed).max(zero);
                 let a2 = artifact * artifact;
@@ -4101,10 +4066,7 @@ fn fused_vblur_edge_inner_v4x(
 
                 let diff1 = (s - mu1).abs();
                 let diff2 = (d - mu2).abs();
-                #[cfg(not(zensim_stable_forms))]
                 let ed = (one8 + diff2) / (one8 + diff1) - one8;
-                #[cfg(zensim_stable_forms)]
-                let ed = (diff2 - diff1) / (one8 + diff1);
                 let artifact = ed.max(zero8);
                 let detail_lost = (-ed).max(zero8);
                 let a2 = artifact * artifact;
@@ -4171,10 +4133,7 @@ fn fused_vblur_edge_inner_v4x(
                 // Edge
                 let diff1 = (sv - mu1).abs();
                 let diff2 = (dv - mu2).abs();
-                #[cfg(not(zensim_stable_forms))]
                 let ed = (1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32;
-                #[cfg(zensim_stable_forms)]
-                let ed = (diff2 - diff1) / (1.0f32 + diff1);
                 let artifact = ed.max(0.0f32);
                 let detail_lost = (-ed).max(0.0f32);
                 let a2 = artifact * artifact;
@@ -4268,10 +4227,7 @@ fn fused_vblur_edge_inner_v3(
 
                 let diff1 = (s - mu1).abs();
                 let diff2 = (d - mu2).abs();
-                #[cfg(not(zensim_stable_forms))]
                 let ed = (one + diff2) / (one + diff1) - one;
-                #[cfg(zensim_stable_forms)]
-                let ed = (diff2 - diff1) / (one + diff1);
                 let artifact = ed.max(zero);
                 let detail_lost = (-ed).max(zero);
                 let a2 = artifact * artifact;
@@ -4340,10 +4296,7 @@ fn fused_vblur_edge_inner_v3(
                 // Edge
                 let diff1 = (sv - mu1).abs();
                 let diff2 = (dv - mu2).abs();
-                #[cfg(not(zensim_stable_forms))]
                 let ed = (1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32;
-                #[cfg(zensim_stable_forms)]
-                let ed = (diff2 - diff1) / (1.0f32 + diff1);
                 let artifact = ed.max(0.0f32);
                 let detail_lost = (-ed).max(0.0f32);
                 let a2 = artifact * artifact;
@@ -4449,10 +4402,7 @@ fn fused_vblur_edge_inner(
 
                 let diff1 = (s - mu1).abs();
                 let diff2 = (d - mu2).abs();
-                #[cfg(not(zensim_stable_forms))]
                 let ed = (one + diff2) / (one + diff1) - one;
-                #[cfg(zensim_stable_forms)]
-                let ed = (diff2 - diff1) / (one + diff1);
                 let artifact = ed.max(zero);
                 let detail_lost = (-ed).max(zero);
                 let a2 = artifact * artifact;
@@ -4524,10 +4474,7 @@ fn fused_vblur_edge_inner(
                 // Edge
                 let diff1 = (sv - mu1).abs();
                 let diff2 = (dv - mu2).abs();
-                #[cfg(not(zensim_stable_forms))]
                 let ed = (1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32;
-                #[cfg(zensim_stable_forms)]
-                let ed = (diff2 - diff1) / (1.0f32 + diff1);
                 let artifact = ed.max(0.0f32);
                 let detail_lost = (-ed).max(0.0f32);
                 let a2 = artifact * artifact;
@@ -4673,6 +4620,40 @@ struct BandPools<P: Copy> {
     wd_den: P,
     wb_num: P,
     wb_den: P,
+}
+
+impl VblurPools<crate::featcanon::Lanes16F32> {
+    /// Revision 7: fold the f32 row lanes of every pool except the four
+    /// `hf_*` sums (which difference large sums and stay f64) into `row`, and
+    /// clear them (`crate::featcanon::Lanes16F32::fold_into`).
+    fn fold_into<P: crate::featcanon::Pool>(&mut self, row: &mut VblurPools<P>) {
+        self.ssim_d.fold_into(&mut row.ssim_d);
+        self.ssim_d4.fold_into(&mut row.ssim_d4);
+        self.ssim_d2.fold_into(&mut row.ssim_d2);
+        self.ssim_d8.fold_into(&mut row.ssim_d8);
+        self.edge_art.fold_into(&mut row.edge_art);
+        self.edge_art4.fold_into(&mut row.edge_art4);
+        self.edge_art2.fold_into(&mut row.edge_art2);
+        self.edge_art8.fold_into(&mut row.edge_art8);
+        self.edge_det.fold_into(&mut row.edge_det);
+        self.edge_det4.fold_into(&mut row.edge_det4);
+        self.edge_det2.fold_into(&mut row.edge_det2);
+        self.edge_det8.fold_into(&mut row.edge_det8);
+        self.mse.fold_into(&mut row.mse);
+        self.act_sum.fold_into(&mut row.act_sum);
+        self.masked_ssim_d.fold_into(&mut row.masked_ssim_d);
+        self.masked_ssim_d4.fold_into(&mut row.masked_ssim_d4);
+        self.masked_ssim_d2.fold_into(&mut row.masked_ssim_d2);
+        self.masked_art4.fold_into(&mut row.masked_art4);
+        self.masked_det4.fold_into(&mut row.masked_det4);
+        self.masked_mse.fold_into(&mut row.masked_mse);
+        self.iw_ssim_d.fold_into(&mut row.iw_ssim_d);
+        self.iw_ssim_d4.fold_into(&mut row.iw_ssim_d4);
+        self.iw_ssim_d2.fold_into(&mut row.iw_ssim_d2);
+        self.iw_art4.fold_into(&mut row.iw_art4);
+        self.iw_det4.fold_into(&mut row.iw_det4);
+        self.iw_mse.fold_into(&mut row.iw_mse);
+    }
 }
 
 impl<P: crate::featcanon::Pool> BandPools<P> {
@@ -5164,6 +5145,8 @@ fn vblur_ssim_elem_canon<P: crate::featcanon::Pool>(
     base: usize,
     form: crate::ssim_form::SsimLumaForm,
     direct: bool,
+    // Revision 7: the v1 edge ratio as `(x − y)/(1 + y)`.
+    stable7: bool,
     free: FreeExtrasWork,
     ext: ExtPoolsWork,
     store_mu: bool,
@@ -5175,10 +5158,21 @@ fn vblur_ssim_elem_canon<P: crate::featcanon::Pool>(
     ssq_out: &mut [f32],
     s12_out: &mut [f32],
     row: &mut VblurPools<P>,
+    // Revision 7: where the f32-lane pools add (`None`: `row`, f64).
+    mut row32: Option<&mut VblurPools<crate::featcanon::Lanes16F32>>,
     band: &mut BandPools<P>,
     acc: &mut StripChannelAccum,
 ) {
     let lane = x & (P::LANES - 1);
+    macro_rules! rowadd {
+        ($f:ident, $v:expr) => {{
+            let v = $v;
+            match row32.as_deref_mut() {
+                Some(r) => crate::featcanon::Pool::add(&mut r.$f, lane, v),
+                None => row.$f.add(lane, v),
+            }
+        }};
+    }
     let sd = if direct {
         ssim_direct_raw_scalar(form, mu1, mu2, ssq, s12).max(0.0f32)
     } else {
@@ -5186,11 +5180,11 @@ fn vblur_ssim_elem_canon<P: crate::featcanon::Pool>(
     };
     let sd2 = sd * sd;
     let sd4 = sd2 * sd2;
-    row.ssim_d.add(lane, sd);
-    row.ssim_d4.add(lane, sd4);
-    row.ssim_d2.add(lane, sd2);
+    rowadd!(ssim_d, sd);
+    rowadd!(ssim_d4, sd4);
+    rowadd!(ssim_d2, sd2);
     if !free.local_only && !free.omit_peaks {
-        row.ssim_d8.add(lane, sd4 * sd4);
+        rowadd!(ssim_d8, sd4 * sd4);
         acc.ssim_max = acc.ssim_max.max(sd);
     }
     if store_sd {
@@ -5208,10 +5202,11 @@ fn vblur_ssim_elem_canon<P: crate::featcanon::Pool>(
     // Edge
     let diff1 = (s - mu1).abs();
     let diff2 = (d - mu2).abs();
-    #[cfg(not(zensim_stable_forms))]
-    let ed = (1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32;
-    #[cfg(zensim_stable_forms)]
-    let ed = (diff2 - diff1) / (1.0f32 + diff1);
+    let ed = if stable7 {
+        (diff2 - diff1) / (1.0f32 + diff1)
+    } else {
+        (1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32
+    };
     let artifact = ed.max(0.0f32);
     let detail_lost = (-ed).max(0.0f32);
     let a2 = artifact * artifact;
@@ -5219,15 +5214,15 @@ fn vblur_ssim_elem_canon<P: crate::featcanon::Pool>(
     let a4 = a2 * a2;
     let dl4 = dl2 * dl2;
     if !free.omit_edges {
-        row.edge_art.add(lane, artifact);
-        row.edge_art4.add(lane, a4);
-        row.edge_art2.add(lane, a2);
-        row.edge_det.add(lane, detail_lost);
-        row.edge_det4.add(lane, dl4);
-        row.edge_det2.add(lane, dl2);
+        rowadd!(edge_art, artifact);
+        rowadd!(edge_art4, a4);
+        rowadd!(edge_art2, a2);
+        rowadd!(edge_det, detail_lost);
+        rowadd!(edge_det4, dl4);
+        rowadd!(edge_det2, dl2);
         if !free.omit_peaks {
-            row.edge_art8.add(lane, a4 * a4);
-            row.edge_det8.add(lane, dl4 * dl4);
+            rowadd!(edge_art8, a4 * a4);
+            rowadd!(edge_det8, dl4 * dl4);
             acc.edge_art_max = acc.edge_art_max.max(artifact);
             acc.edge_det_max = acc.edge_det_max.max(detail_lost);
         }
@@ -5246,36 +5241,36 @@ fn vblur_ssim_elem_canon<P: crate::featcanon::Pool>(
     // MSE + ext pools
     let pd = s - d;
     let d2 = pd * pd;
-    row.mse.add(lane, d2);
+    rowadd!(mse, d2);
     if ext.on {
-        row.act_sum.add(lane, act);
+        rowadd!(act_sum, act);
         if ext.mask {
             let w = 1.0f32 / ext.k_mask.mul_add(act, 1.0f32);
             let da = (sd * w).max(0.0);
             let d2a = da * da;
-            row.masked_ssim_d.add(lane, da);
-            row.masked_ssim_d2.add(lane, d2a);
-            row.masked_ssim_d4.add(lane, d2a * d2a);
+            rowadd!(masked_ssim_d, da);
+            rowadd!(masked_ssim_d2, d2a);
+            rowadd!(masked_ssim_d4, d2a * d2a);
             let e = ed * w;
             let a2 = e.max(0.0) * e.max(0.0);
             let dl2 = (-e).max(0.0) * (-e).max(0.0);
-            row.masked_art4.add(lane, a2 * a2);
-            row.masked_det4.add(lane, dl2 * dl2);
-            row.masked_mse.add(lane, d2 * w);
+            rowadd!(masked_art4, a2 * a2);
+            rowadd!(masked_det4, dl2 * dl2);
+            rowadd!(masked_mse, d2 * w);
         }
         if ext.iw {
             let w = ext.k_iw.mul_add(act, 1.0f32);
             let db = (sd * w).max(0.0);
             let d2b = db * db;
-            row.iw_ssim_d.add(lane, db);
-            row.iw_ssim_d2.add(lane, d2b);
-            row.iw_ssim_d4.add(lane, d2b * d2b);
+            rowadd!(iw_ssim_d, db);
+            rowadd!(iw_ssim_d2, d2b);
+            rowadd!(iw_ssim_d4, d2b * d2b);
             let e = ed * w;
             let a2 = e.max(0.0) * e.max(0.0);
             let dl2 = (-e).max(0.0) * (-e).max(0.0);
-            row.iw_art4.add(lane, a2 * a2);
-            row.iw_det4.add(lane, dl2 * dl2);
-            row.iw_mse.add(lane, d2 * w);
+            rowadd!(iw_art4, a2 * a2);
+            rowadd!(iw_det4, dl2 * dl2);
+            rowadd!(iw_mse, d2 * w);
         }
     }
 
@@ -5341,6 +5336,8 @@ fn fused_vblur_ssim_canon<P: crate::featcanon::Pool>(
     mode: crate::featcanon::Mode,
 ) -> StripChannelAccum {
     let form = free.luma_form();
+    // Revision 7: the v1 edge ratio without cancellation.
+    let stable7 = free.revision().stable_forms();
     let r = radius;
     let inner_end = inner_start + inner_h;
 
@@ -5385,6 +5382,7 @@ fn fused_vblur_ssim_canon<P: crate::featcanon::Pool>(
                     base,
                     form,
                     direct,
+                    stable7,
                     free,
                     ext,
                     store_mu,
@@ -5396,6 +5394,7 @@ fn fused_vblur_ssim_canon<P: crate::featcanon::Pool>(
                     ssq_out,
                     s12_out,
                     &mut row,
+                    None,
                     &mut band,
                     &mut acc,
                 );
@@ -5512,6 +5511,15 @@ fn fused_vblur_ssim_local<P: crate::featcanon::Pool>(
         crate::fold_timing::work(crate::fold_timing::Work::PeakBand, 1);
     }
     let form = free.luma_form();
+    // Revision 7: the v1 edge ratio without cancellation.
+    let stable7 = free.revision().stable_forms();
+    // Revision 7's row lanes: the columns of complete eight-column chunks add
+    // the f32-lane pools in `crate::featcanon::Lanes16F32`, folded every
+    // `ROW_LANES_FOLD` columns and at the end of the chunks, as the vector
+    // body does; the tail adds in f64.
+    use crate::featcanon::ROW_LANES_FOLD;
+    let rev7 = free.revision().row_lanes() && P::LANES == 16;
+    let chunk_end = (width / 8) * 8;
     let r = radius;
     let inner_end = inner_start + inner_h;
     let planes = VWinPlanes {
@@ -5556,6 +5564,7 @@ fn fused_vblur_ssim_local<P: crate::featcanon::Pool>(
         }
         let base = y * width;
         let mut row = VblurPools::<P>::zero();
+        let mut row32 = VblurPools::<crate::featcanon::Lanes16F32>::zero();
         for x in 0..width {
             let mut win_at = |plane: &[f32]| -> f32 {
                 if plane.is_empty() {
@@ -5591,6 +5600,7 @@ fn fused_vblur_ssim_local<P: crate::featcanon::Pool>(
                 base,
                 form,
                 direct,
+                stable7,
                 free,
                 ext,
                 store_mu,
@@ -5602,9 +5612,19 @@ fn fused_vblur_ssim_local<P: crate::featcanon::Pool>(
                 ssq_out,
                 s12_out,
                 &mut row,
+                if rev7 && x < chunk_end {
+                    Some(&mut row32)
+                } else {
+                    None
+                },
                 &mut band,
                 &mut acc,
             );
+            if rev7
+                && (x + 1 == chunk_end || (x < chunk_end && (x + 1).is_multiple_of(ROW_LANES_FOLD)))
+            {
+                row32.fold_into(&mut row);
+            }
         }
         // One fixed-order finish per row per pool.
         acc.ssim_d += row.ssim_d.fin();
@@ -5723,6 +5743,8 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
     mode: crate::featcanon::Mode,
 ) -> StripChannelAccum {
     let form = free.luma_form();
+    // Revision 7: the v1 edge ratio without cancellation.
+    let stable7 = free.revision().stable_forms();
     let r = radius;
     let inner_end = inner_start + inner_h;
     let planes = VWinPlanes {
@@ -5777,17 +5799,17 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
         f32x8::from_array_t(token, std::array::from_fn(|i| a[i] as f32))
     };
 
-    // Revision-7 candidate (measurement only, `--cfg zensim_rev7_pools`):
-    // each pool's chunk adds go to f32 lanes for the row, folded into the
-    // f64 lanes before the scalar tail. The default build keeps the f64
-    // per-chunk update of revisions 5 and 6.
-    let rev7 = cfg!(zensim_rev7_pools) && local;
+    // Revision 7 (`rowlanes`): each f32-lane pool's chunk adds go to
+    // `crate::featcanon::Lanes16F32` for the row, folded into the f64 lanes
+    // every `ROW_LANES_FOLD` columns and at the end of the chunks
+    // (`VblurPools::fold_into`); the tail adds in f64. Revisions 5 and 6 keep
+    // the f64 per-chunk update.
+    let rev7 = free.revision().row_lanes() && local;
     macro_rules! pool_add {
         ($tgt:ident, $tgt32:ident, $field:ident, $x0:expr, $v:expr) => {{
             let v: f32x8 = $v;
             if rev7 {
-                let off = $x0 & 15;
-                let lanes: &mut [f32; 8] = (&mut $tgt32.$field[off..off + 8]).try_into().unwrap();
+                let lanes = $tgt32.$field.chunk8($x0 & 15);
                 (f32x8::load_t(token, lanes) + v).store(lanes);
             } else {
                 let values = v.to_array();
@@ -5810,18 +5832,6 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
             }
         }};
     }
-    macro_rules! pool_fold {
-        ($tgt:ident, $tgt32:ident, [$($field:ident),*]) => {{
-            $(
-                for off in [0usize, 8] {
-                    let lanes = $tgt.$field.chunk8(off);
-                    let a: [f64; 8] = std::array::from_fn(|l| $tgt32.$field[off + l] as f64);
-                    (f64x8::load_t(token, lanes) + f64x8::from_array_t(token, a)).store(lanes);
-                    $tgt32.$field[off..off + 8].fill(0.0);
-                }
-            )*
-        }};
-    }
     for y in if local {
         inner_start..inner_end
     } else {
@@ -5830,39 +5840,7 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
         if y >= inner_start && y < inner_end {
             let base = y * width;
             let mut row = VblurPools::<P>::zero();
-            let mut row32 = VblurPools::<[f32; 16]> {
-                ssim_d: [0.0; 16],
-                ssim_d4: [0.0; 16],
-                ssim_d2: [0.0; 16],
-                ssim_d8: [0.0; 16],
-                edge_art: [0.0; 16],
-                edge_art4: [0.0; 16],
-                edge_art2: [0.0; 16],
-                edge_art8: [0.0; 16],
-                edge_det: [0.0; 16],
-                edge_det4: [0.0; 16],
-                edge_det2: [0.0; 16],
-                edge_det8: [0.0; 16],
-                // Unused: these pools keep f64 lanes (`pool_add64`).
-                hf_sq_src: [0.0; 16],
-                hf_sq_dst: [0.0; 16],
-                hf_abs_src: [0.0; 16],
-                hf_abs_dst: [0.0; 16],
-                mse: [0.0; 16],
-                act_sum: [0.0; 16],
-                masked_ssim_d: [0.0; 16],
-                masked_ssim_d4: [0.0; 16],
-                masked_ssim_d2: [0.0; 16],
-                masked_art4: [0.0; 16],
-                masked_det4: [0.0; 16],
-                masked_mse: [0.0; 16],
-                iw_ssim_d: [0.0; 16],
-                iw_ssim_d4: [0.0; 16],
-                iw_ssim_d2: [0.0; 16],
-                iw_art4: [0.0; 16],
-                iw_det4: [0.0; 16],
-                iw_mse: [0.0; 16],
-            };
+            let mut row32 = VblurPools::<crate::featcanon::Lanes16F32>::zero();
             let [wm1, wm2, wsq, ws12, wact] = win.f64_states().unwrap_or([&[]; 5]);
             // Provable-length slices: `x0 + 8 <= full * 8` is then literal,
             // so `narrow`'s window reads and the plane loads compile with
@@ -5946,10 +5924,11 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
                 // Edge
                 let diff1 = (sv - m1v).abs();
                 let diff2 = (dv - m2v).abs();
-                #[cfg(not(zensim_stable_forms))]
-                let ed = (one + diff2) / (one + diff1) - one;
-                #[cfg(zensim_stable_forms)]
-                let ed = (diff2 - diff1) / (one + diff1);
+                let ed = if stable7 {
+                    (diff2 - diff1) / (one + diff1)
+                } else {
+                    (one + diff2) / (one + diff1) - one
+                };
                 let artifact = ed.max(zero);
                 let detail_lost = (-ed).max(zero);
                 let a2 = artifact * artifact;
@@ -6052,44 +6031,13 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
                         pool_add64!(band, wb_den, x0, wb);
                     }
                 }
+                if rev7 && (x0 + 8).is_multiple_of(crate::featcanon::ROW_LANES_FOLD) {
+                    row32.fold_into(&mut row);
+                }
             }
-            if rev7 {
-                pool_fold!(
-                    row,
-                    row32,
-                    [
-                        ssim_d,
-                        ssim_d4,
-                        ssim_d2,
-                        ssim_d8,
-                        edge_art,
-                        edge_art4,
-                        edge_art2,
-                        edge_art8,
-                        edge_det,
-                        edge_det4,
-                        edge_det2,
-                        edge_det8,
-                        hf_sq_src,
-                        hf_sq_dst,
-                        hf_abs_src,
-                        hf_abs_dst,
-                        mse,
-                        act_sum,
-                        masked_ssim_d,
-                        masked_ssim_d4,
-                        masked_ssim_d2,
-                        masked_art4,
-                        masked_det4,
-                        masked_mse,
-                        iw_ssim_d,
-                        iw_ssim_d4,
-                        iw_ssim_d2,
-                        iw_art4,
-                        iw_det4,
-                        iw_mse
-                    ]
-                );
+            // The end of the chunks, unless the last chunk already folded.
+            if rev7 && full > 0 && !(full * 8).is_multiple_of(crate::featcanon::ROW_LANES_FOLD) {
+                row32.fold_into(&mut row);
             }
             // Scalar tail — the canonical element step verbatim.
             for x in full * 8..width {
@@ -6108,6 +6056,7 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
                     base,
                     form,
                     direct,
+                    stable7,
                     free,
                     ext,
                     store_mu,
@@ -6119,6 +6068,7 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
                     ssq_out,
                     s12_out,
                     &mut row,
+                    None,
                     &mut band,
                     &mut acc,
                 );
@@ -6485,6 +6435,8 @@ fn fused_vblur_ssim_exact(
 ) -> StripChannelAccum {
     use crate::featcanon::{Neum64, Pool as _};
     let form = free.luma_form();
+    // Revision 7: the v1 edge ratio without cancellation.
+    let stable7 = free.revision().stable_forms();
     let r = radius;
     let inner_end = inner_start + inner_h;
 
@@ -6543,10 +6495,11 @@ fn fused_vblur_ssim_exact(
 
                 let diff1 = (s - mu1).abs();
                 let diff2 = (d - mu2).abs();
-                #[cfg(not(zensim_stable_forms))]
-                let ed = (1.0f64 + diff2) / (1.0f64 + diff1) - 1.0f64;
-                #[cfg(zensim_stable_forms)]
-                let ed = (diff2 - diff1) / (1.0f64 + diff1);
+                let ed = if stable7 {
+                    (diff2 - diff1) / (1.0f64 + diff1)
+                } else {
+                    (1.0f64 + diff2) / (1.0f64 + diff1) - 1.0f64
+                };
                 let artifact = ed.max(0.0f64);
                 let detail_lost = (-ed).max(0.0f64);
                 let a2 = artifact * artifact;
@@ -6766,10 +6719,7 @@ fn vblur_edge_elem_canon<P: crate::featcanon::Pool>(
     }
     let diff1 = (s - mu1).abs();
     let diff2 = (d - mu2).abs();
-    #[cfg(not(zensim_stable_forms))]
     let ed = (1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32;
-    #[cfg(zensim_stable_forms)]
-    let ed = (diff2 - diff1) / (1.0f32 + diff1);
     let artifact = ed.max(0.0f32);
     let detail_lost = (-ed).max(0.0f32);
     let a2 = artifact * artifact;
@@ -6939,10 +6889,7 @@ fn fused_vblur_edge_canon64_vec(
                 let dv = f32x8::load_t(token, drow[x0..x0 + 8].try_into().unwrap());
                 let diff1 = (sv - m1v).abs();
                 let diff2 = (dv - m2v).abs();
-                #[cfg(not(zensim_stable_forms))]
                 let ed = (one + diff2) / (one + diff1) - one;
-                #[cfg(zensim_stable_forms)]
-                let ed = (diff2 - diff1) / (one + diff1);
                 let artifact = ed.max(zero);
                 let detail_lost = (-ed).max(zero);
                 let a2 = artifact * artifact;
@@ -7171,10 +7118,7 @@ fn fused_vblur_edge_exact(
                 }
                 let diff1 = (s - mu1).abs();
                 let diff2 = (d - mu2).abs();
-                #[cfg(not(zensim_stable_forms))]
                 let ed = (1.0f64 + diff2) / (1.0f64 + diff1) - 1.0f64;
-                #[cfg(zensim_stable_forms)]
-                let ed = (diff2 - diff1) / (1.0f64 + diff1);
                 let artifact = ed.max(0.0f64);
                 let detail_lost = (-ed).max(0.0f64);
                 let a2 = artifact * artifact;

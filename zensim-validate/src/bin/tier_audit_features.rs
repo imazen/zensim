@@ -326,14 +326,17 @@ fn main() {
             }
             apply_tier(tier);
             let t0 = std::time::Instant::now();
-            let rev = std::env::var("ZENSIM_FORMULA_REV");
-            let request = if matches!(rev.as_deref(), Ok("5") | Ok("6")) {
+            let rev = std::env::var("ZENSIM_FORMULA_REV")
+                .ok()
+                .and_then(|r| r.parse::<u32>().ok())
+                .unwrap_or(0);
+            let request = if rev >= 5 {
                 use zensim::feature_set_id::ComputeToken;
                 // Revisions 5+ compute basic, peaks and v2; revision 6 adds globaff.
                 let mut slots = research::family_slots(ComputeToken::Basic)
                     .union(&research::family_slots(ComputeToken::Peaks))
                     .union(&research::family_slots(ComputeToken::V2));
-                if rev.as_deref() == Ok("6") {
+                if rev >= 6 {
                     slots = slots.union(&research::family_slots(ComputeToken::GlobAff));
                 }
                 Request::for_slots(slots, research::full_width())

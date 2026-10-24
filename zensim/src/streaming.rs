@@ -2292,6 +2292,7 @@ fn process_strip_channel(
                     co,
                     id_out,
                     win_out,
+                    config.revision().stable_forms(),
                 );
             }
             #[cfg(not(feature = "custom-profiles"))]
@@ -8811,6 +8812,7 @@ mod tests {
             crate::feature_defs::FormulaRevision::Rev4 => 4,
             crate::feature_defs::FormulaRevision::Rev5 => 5,
             crate::feature_defs::FormulaRevision::Rev6 => 6,
+            crate::feature_defs::FormulaRevision::Rev7 => 7,
         };
         let expected = spec
             .get("formula_revision")

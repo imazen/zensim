@@ -1042,10 +1042,7 @@ fn edge_diff_masked_inner_v4(
 
         let diff1 = (i1 - m1).abs();
         let diff2 = (i2 - m2).abs();
-        #[cfg(not(zensim_stable_forms))]
         let d1 = ((one + diff2) / (one + diff1) - one) * mv;
-        #[cfg(zensim_stable_forms)]
-        let d1 = ((diff2 - diff1) / (one + diff1)) * mv;
 
         let artifact = d1.max(zero);
         let detail_lost = (-d1).max(zero);
@@ -1064,10 +1061,7 @@ fn edge_diff_masked_inner_v4(
     for i in (chunks * 16)..n {
         let diff1 = (img1[i] - mu1[i]).abs();
         let diff2 = (img2[i] - mu2[i]).abs();
-        #[cfg(not(zensim_stable_forms))]
         let d1 = ((1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32) * mask[i];
-        #[cfg(zensim_stable_forms)]
-        let d1 = ((diff2 - diff1) / (1.0f32 + diff1)) * mask[i];
 
         let artifact = d1.max(0.0f32);
         let detail_lost = (-d1).max(0.0f32);
@@ -1116,10 +1110,7 @@ fn edge_diff_masked_inner_v3(
 
         let diff1 = (i1 - m1).abs();
         let diff2 = (i2 - m2).abs();
-        #[cfg(not(zensim_stable_forms))]
         let d1 = ((one + diff2) / (one + diff1) - one) * mv;
-        #[cfg(zensim_stable_forms)]
-        let d1 = ((diff2 - diff1) / (one + diff1)) * mv;
 
         let artifact = d1.max(zero);
         let detail_lost = (-d1).max(zero);
@@ -1138,10 +1129,7 @@ fn edge_diff_masked_inner_v3(
     for i in (chunks * 8)..n {
         let diff1 = (img1[i] - mu1[i]).abs();
         let diff2 = (img2[i] - mu2[i]).abs();
-        #[cfg(not(zensim_stable_forms))]
         let d1 = ((1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32) * mask[i];
-        #[cfg(zensim_stable_forms)]
-        let d1 = ((diff2 - diff1) / (1.0f32 + diff1)) * mask[i];
 
         let artifact = d1.max(0.0f32);
         let detail_lost = (-d1).max(0.0f32);
@@ -1200,10 +1188,7 @@ fn edge_diff_masked_inner(
 
         let diff1 = (i1 - m1).abs();
         let diff2 = (i2 - m2).abs();
-        #[cfg(not(zensim_stable_forms))]
         let d1 = ((one + diff2) / (one + diff1) - one) * mv;
-        #[cfg(zensim_stable_forms)]
-        let d1 = ((diff2 - diff1) / (one + diff1)) * mv;
 
         let artifact = d1.max(zero);
         let detail_lost = (-d1).max(zero);
@@ -1224,10 +1209,7 @@ fn edge_diff_masked_inner(
         let j = off + i;
         let diff1 = (img1[j] - mu1[j]).abs();
         let diff2 = (img2[j] - mu2[j]).abs();
-        #[cfg(not(zensim_stable_forms))]
         let d1 = ((1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32) * mask[j];
-        #[cfg(zensim_stable_forms)]
-        let d1 = ((diff2 - diff1) / (1.0f32 + diff1)) * mask[j];
 
         let artifact = d1.max(0.0f32);
         let detail_lost = (-d1).max(0.0f32);
@@ -1282,10 +1264,7 @@ fn edge_diff_masked_2_art4_det4_inner_v4(
         // Shared unweighted edge response ∈ [..., ...]
         let diff1 = (i1 - m1).abs();
         let diff2 = (i2 - m2).abs();
-        #[cfg(not(zensim_stable_forms))]
         let d_raw = (one + diff2) / (one + diff1) - one;
-        #[cfg(zensim_stable_forms)]
-        let d_raw = (diff2 - diff1) / (one + diff1);
 
         let da = d_raw * mva;
         let artifact_a = da.max(zero);
@@ -1307,10 +1286,7 @@ fn edge_diff_masked_2_art4_det4_inner_v4(
     for i in (chunks * 16)..n {
         let diff1 = (img1[i] - mu1[i]).abs();
         let diff2 = (img2[i] - mu2[i]).abs();
-        #[cfg(not(zensim_stable_forms))]
         let d_raw = (1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32;
-        #[cfg(zensim_stable_forms)]
-        let d_raw = (diff2 - diff1) / (1.0f32 + diff1);
 
         let da = d_raw * mask_a[i];
         let aa = da.max(0.0f32);
@@ -1364,10 +1340,7 @@ fn edge_diff_masked_2_art4_det4_inner_v3(
 
         let diff1 = (i1 - m1).abs();
         let diff2 = (i2 - m2).abs();
-        #[cfg(not(zensim_stable_forms))]
         let d_raw = (one + diff2) / (one + diff1) - one;
-        #[cfg(zensim_stable_forms)]
-        let d_raw = (diff2 - diff1) / (one + diff1);
 
         let da = d_raw * mva;
         let artifact_a = da.max(zero);
@@ -1389,10 +1362,7 @@ fn edge_diff_masked_2_art4_det4_inner_v3(
     for i in (chunks * 8)..n {
         let diff1 = (img1[i] - mu1[i]).abs();
         let diff2 = (img2[i] - mu2[i]).abs();
-        #[cfg(not(zensim_stable_forms))]
         let d_raw = (1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32;
-        #[cfg(zensim_stable_forms)]
-        let d_raw = (diff2 - diff1) / (1.0f32 + diff1);
 
         let da = d_raw * mask_a[i];
         let aa = da.max(0.0f32);
@@ -1458,10 +1428,7 @@ fn edge_diff_masked_2_art4_det4_inner(
 
         let diff1 = (i1 - m1).abs();
         let diff2 = (i2 - m2).abs();
-        #[cfg(not(zensim_stable_forms))]
         let d_raw = (one + diff2) / (one + diff1) - one;
-        #[cfg(zensim_stable_forms)]
-        let d_raw = (diff2 - diff1) / (one + diff1);
 
         let da = d_raw * mva;
         let artifact_a = da.max(zero);
@@ -1485,10 +1452,7 @@ fn edge_diff_masked_2_art4_det4_inner(
         let j = off + i;
         let diff1 = (img1[j] - mu1[j]).abs();
         let diff2 = (img2[j] - mu2[j]).abs();
-        #[cfg(not(zensim_stable_forms))]
         let d_raw = (1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32;
-        #[cfg(zensim_stable_forms)]
-        let d_raw = (diff2 - diff1) / (1.0f32 + diff1);
 
         let da = d_raw * mask_a[j];
         let aa = da.max(0.0f32);
@@ -2127,10 +2091,7 @@ fn edge_diff_extended_inner_v4(
 
         let diff1 = (i1 - m1).abs();
         let diff2 = (i2 - m2).abs();
-        #[cfg(not(zensim_stable_forms))]
         let d1 = (one + diff2) / (one + diff1) - one;
-        #[cfg(zensim_stable_forms)]
-        let d1 = (diff2 - diff1) / (one + diff1);
 
         let artifact = d1.max(zero);
         let detail_lost = (-d1).max(zero);
@@ -2160,10 +2121,7 @@ fn edge_diff_extended_inner_v4(
     for i in (chunks * 16)..n {
         let diff1 = (img1[i] - mu1[i]).abs();
         let diff2 = (img2[i] - mu2[i]).abs();
-        #[cfg(not(zensim_stable_forms))]
         let d1 = (1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32;
-        #[cfg(zensim_stable_forms)]
-        let d1 = (diff2 - diff1) / (1.0f32 + diff1);
 
         let artifact = d1.max(0.0f32);
         let detail_lost = (-d1).max(0.0f32);
@@ -2223,10 +2181,7 @@ fn edge_diff_extended_inner_v3(
 
         let diff1 = (i1 - m1).abs();
         let diff2 = (i2 - m2).abs();
-        #[cfg(not(zensim_stable_forms))]
         let d1 = (one + diff2) / (one + diff1) - one;
-        #[cfg(zensim_stable_forms)]
-        let d1 = (diff2 - diff1) / (one + diff1);
 
         let artifact = d1.max(zero);
         let detail_lost = (-d1).max(zero);
@@ -2256,10 +2211,7 @@ fn edge_diff_extended_inner_v3(
     for i in (chunks * 8)..n {
         let diff1 = (img1[i] - mu1[i]).abs();
         let diff2 = (img2[i] - mu2[i]).abs();
-        #[cfg(not(zensim_stable_forms))]
         let d1 = (1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32;
-        #[cfg(zensim_stable_forms)]
-        let d1 = (diff2 - diff1) / (1.0f32 + diff1);
 
         let artifact = d1.max(0.0f32);
         let detail_lost = (-d1).max(0.0f32);
@@ -2327,10 +2279,7 @@ fn edge_diff_extended_inner(
 
         let diff1 = (i1 - m1).abs();
         let diff2 = (i2 - m2).abs();
-        #[cfg(not(zensim_stable_forms))]
         let d1 = (one + diff2) / (one + diff1) - one;
-        #[cfg(zensim_stable_forms)]
-        let d1 = (diff2 - diff1) / (one + diff1);
 
         let artifact = d1.max(zero);
         let detail_lost = (-d1).max(zero);
@@ -2362,10 +2311,7 @@ fn edge_diff_extended_inner(
         let j = off + i;
         let diff1 = (img1[j] - mu1[j]).abs();
         let diff2 = (img2[j] - mu2[j]).abs();
-        #[cfg(not(zensim_stable_forms))]
         let d1 = (1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32;
-        #[cfg(zensim_stable_forms)]
-        let d1 = (diff2 - diff1) / (1.0f32 + diff1);
 
         let artifact = d1.max(0.0f32);
         let detail_lost = (-d1).max(0.0f32);
@@ -2811,10 +2757,7 @@ fn edge_diff_channel_masked_with_iw_inline_inner(
 
         let diff1 = (i1 - m1).abs();
         let diff2 = (i2 - m2).abs();
-        #[cfg(not(zensim_stable_forms))]
         let d_raw = (one + diff2) / (one + diff1) - one;
-        #[cfg(zensim_stable_forms)]
-        let d_raw = (diff2 - diff1) / (one + diff1);
 
         let da = d_raw * mva;
         let artifact_a = da.max(zero);
@@ -2838,10 +2781,7 @@ fn edge_diff_channel_masked_with_iw_inline_inner(
         let j = off + i;
         let diff1 = (img1[j] - mu1[j]).abs();
         let diff2 = (img2[j] - mu2[j]).abs();
-        #[cfg(not(zensim_stable_forms))]
         let d_raw = (1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32;
-        #[cfg(zensim_stable_forms)]
-        let d_raw = (diff2 - diff1) / (1.0f32 + diff1);
         let iw = 1.0f32 + k_iw * activity[j];
 
         let da = d_raw * mask[j];
@@ -2909,10 +2849,7 @@ fn edge_diff_channel_iw_inline_inner(
 
         let diff1 = (i1 - m1).abs();
         let diff2 = (i2 - m2).abs();
-        #[cfg(not(zensim_stable_forms))]
         let d1 = ((one + diff2) / (one + diff1) - one) * mv;
-        #[cfg(zensim_stable_forms)]
-        let d1 = ((diff2 - diff1) / (one + diff1)) * mv;
 
         let artifact = d1.max(zero);
         let detail_lost = (-d1).max(zero);
@@ -2934,10 +2871,7 @@ fn edge_diff_channel_iw_inline_inner(
         let diff1 = (img1[j] - mu1[j]).abs();
         let diff2 = (img2[j] - mu2[j]).abs();
         let iw = 1.0f32 + k_iw * activity[j];
-        #[cfg(not(zensim_stable_forms))]
         let d1 = ((1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32) * iw;
-        #[cfg(zensim_stable_forms)]
-        let d1 = ((diff2 - diff1) / (1.0f32 + diff1)) * iw;
 
         let artifact = d1.max(0.0f32);
         let detail_lost = (-d1).max(0.0f32);
@@ -3565,10 +3499,7 @@ fn edge_diff_channel_inline_both_inner(
 
         let diff1 = (i1 - m1).abs();
         let diff2 = (i2 - m2).abs();
-        #[cfg(not(zensim_stable_forms))]
         let d_raw = (one + diff2) / (one + diff1) - one;
-        #[cfg(zensim_stable_forms)]
-        let d_raw = (diff2 - diff1) / (one + diff1);
 
         let da = d_raw * mva;
         let artifact_a = da.max(zero);
@@ -3592,10 +3523,7 @@ fn edge_diff_channel_inline_both_inner(
         let j = off + i;
         let diff1 = (img1[j] - mu1[j]).abs();
         let diff2 = (img2[j] - mu2[j]).abs();
-        #[cfg(not(zensim_stable_forms))]
         let d_raw = (1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32;
-        #[cfg(zensim_stable_forms)]
-        let d_raw = (diff2 - diff1) / (1.0f32 + diff1);
         let mask = 1.0f32 / (1.0f32 + k_mask * activity[j]);
         let iw = 1.0f32 + k_iw * activity[j];
 
@@ -3664,10 +3592,7 @@ fn edge_diff_channel_inline_mask_inner(
 
         let diff1 = (i1 - m1).abs();
         let diff2 = (i2 - m2).abs();
-        #[cfg(not(zensim_stable_forms))]
         let d1 = ((one + diff2) / (one + diff1) - one) * mv;
-        #[cfg(zensim_stable_forms)]
-        let d1 = ((diff2 - diff1) / (one + diff1)) * mv;
 
         let artifact = d1.max(zero);
         let detail_lost = (-d1).max(zero);
@@ -3689,10 +3614,7 @@ fn edge_diff_channel_inline_mask_inner(
         let diff1 = (img1[j] - mu1[j]).abs();
         let diff2 = (img2[j] - mu2[j]).abs();
         let mask = 1.0f32 / (1.0f32 + k_mask * activity[j]);
-        #[cfg(not(zensim_stable_forms))]
         let d1 = ((1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32) * mask;
-        #[cfg(zensim_stable_forms)]
-        let d1 = ((diff2 - diff1) / (1.0f32 + diff1)) * mask;
 
         let artifact = d1.max(0.0f32);
         let detail_lost = (-d1).max(0.0f32);

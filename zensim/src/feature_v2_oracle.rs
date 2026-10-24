@@ -280,8 +280,7 @@ pub(crate) mod oracle {
                     s12[i] as f64,
                     ssq[i] as f64,
                     crate::ssim_form::active_revision()
-                        >= crate::feature_defs::FormulaRevision::Rev3,
-                );
+                        >= crate::feature_defs::FormulaRevision::Rev3, false);
                 push(&mut s, &mut sum_abs, 0, d);
                 push(&mut s, &mut sum_abs, 1, d * d);
                 push(&mut s, &mut sum_abs, 2, d * d * d);
@@ -289,7 +288,7 @@ pub(crate) mod oracle {
 
                 let diff_src = (sv - m1).abs();
                 let diff_dst = (dv - m2).abs();
-                let edge_dissim = bounded_dissim(diff_src, diff_dst, C_EDGE);
+                let edge_dissim = bounded_dissim(diff_src, diff_dst, C_EDGE, false);
                 let (mut art_i, mut det_i) = (0.0, 0.0);
                 if diff_dst > diff_src {
                     art_i = edge_dissim;
@@ -810,6 +809,7 @@ fn dense_block_kernel_era2_generic<T: F32x8Backend + Copy, const FUSED: bool>(
     // Revision 3 (issue #61): the `s12` plane is the direct error moment, so
     // the v2 SSIM signal must read it as such. Hoisted once per call;
     // loop-invariant, so every call site below unswitches on it.
+    let stable = crate::ssim_form::active_revision().stable_forms();
     let direct = crate::ssim_form::active_revision() >= crate::feature_defs::FormulaRevision::Rev3;
     let _ = FUSED; // the split is chosen by tier; see the entries above
     let zero = V8::<T>::zero_t(token);
@@ -849,11 +849,11 @@ fn dense_block_kernel_era2_generic<T: F32x8Backend + Copy, const FUSED: bool>(
             macro_rules! terms {
                 ($s:expr, $dd:expr, $m1:expr, $m2:expr, $q:expr, $p:expr, $act:expr) => {{
                     let (s, dd, m1, m2, q, p, act) = ($s, $dd, $m1, $m2, $q, $p, $act);
-                    let d = ssim_d_local_v(token, m1, m2, p, q, c1, c2, direct);
+                    let d = ssim_d_local_v(token, m1, m2, p, q, c1, c2, direct, stable);
                     let d2 = d * d;
                     let diff_src = (s - m1).abs();
                     let diff_dst = (dd - m2).abs();
-                    let edge_dissim = bounded_dissim_v(token, diff_src, diff_dst, c_edge);
+                    let edge_dissim = bounded_dissim_v(token, diff_src, diff_dst, c_edge, stable);
                     let gt = diff_dst.simd_gt(diff_src);
                     let lt = diff_dst.simd_lt(diff_src);
                     let art_i = V8::<T>::blend(gt, edge_dissim, zero);
@@ -1130,6 +1130,7 @@ pub(crate) fn dense_terms32(
     act: f32,
     transducer_bank: bool,
     direct: bool,
+    stable: bool,
 ) -> (
     [f32; 13],
     f32,
@@ -1152,10 +1153,7 @@ pub(crate) fn dense_terms32(
         if direct {
             let mu_diff = m1 - m2;
             let err_var = (p - mu_diff * mu_diff).max(0.0);
-            #[cfg(not(zensim_stable_forms))]
-            let lum = b - a;
-            #[cfg(zensim_stable_forms)]
-            let lum = mu_diff * mu_diff;
+            let lum = if stable { mu_diff * mu_diff } else { b - a };
             ((dl * lum + a * err_var) / (b * dl)).max(0.0)
         } else {
             let cov = p - m1 * m2;
@@ -1167,10 +1165,9 @@ pub(crate) fn dense_terms32(
     let d2 = d * d;
     let diff_src = (s - m1).abs();
     let diff_dst = (dd - m2).abs();
-    // `bounded_sim_v` — `(2ab+c)/(a²+b²+c)` plain ops.
-    let edge_dissim = 1.0f32
-        - (2.0f32 * diff_src * diff_dst + C_EDGE as f32)
-            / (diff_src * diff_src + diff_dst * diff_dst + C_EDGE as f32);
+    // `bounded_dissim_v` — `1 − (2ab+c)/(a²+b²+c)`, or revision 7's exact
+    // `(a−b)²/(a²+b²+c)`, plain ops in the same order.
+    let edge_dissim = crate::feature_v2::bounded_dissim32(diff_src, diff_dst, C_EDGE as f32, stable);
     // `simd_gt`/`blend` — scalar select, same values.
     let (art_i, det_i) = if diff_dst > diff_src {
         (edge_dissim, 0.0f32)
@@ -1256,8 +1253,17 @@ fn dense_block_kernel_canon<P: crate::featcanon::Pool>(
     mut r4: Option<Rev4Dense<'_>>,
     revision: FormulaRevision,
 ) -> DenseAccum {
+    use crate::featcanon::{Lanes16F32, ROW_LANES_FOLD};
     let direct = revision >= FormulaRevision::Rev3;
-    let stable = revision >= FormulaRevision::Rev5;
+    let stable_moments = revision >= FormulaRevision::Rev5;
+    let forms7 = revision.stable_forms();
+    // Revision 7's row lanes (`crate::featcanon::Lanes16F32`): the columns of
+    // the row's complete eight-column chunks add in f32 lanes, folded into the
+    // f64 pools every `ROW_LANES_FOLD` columns and at the end of the chunks;
+    // the central moments are two-pass per row.
+    let rev7 = revision.row_lanes();
+    let chunk_end = (width / 8) * 8;
+    let mut dvals = if rev7 { vec![0.0f64; width] } else { Vec::new() };
     let mut acc = DenseAccum::default();
     let mut b0 = 0usize;
     while b0 < height {
@@ -1273,35 +1279,89 @@ fn dense_block_kernel_canon<P: crate::featcanon::Pool>(
             let mut p_kn = [P::zero(); 3];
             let mut p_kd = [P::zero(); 3];
             let mut local = [0.0f64; 16];
+            let mut r32 = [Lanes16F32::default(); 13];
+            let (mut p_mw32, mut p_iw32) = (Lanes16F32::default(), Lanes16F32::default());
+            let (mut p_m32, mut p_i32) = ([Lanes16F32::default(); 4], [Lanes16F32::default(); 4]);
+            let (mut p_kn32, mut p_kd32) = ([Lanes16F32::default(); 3], [Lanes16F32::default(); 3]);
             for x in 0..width {
                 let i = row + x;
-                let d = dense_elem_canon(
-                    src[i],
-                    dst[i],
-                    mu1[i],
-                    mu2[i],
-                    ssq[i],
-                    s12[i],
-                    activity[i],
-                    x,
-                    transducer_bank,
-                    direct,
-                    &mut r4,
-                    &mut r,
-                    &mut p_mw,
-                    &mut p_iw,
-                    &mut p_m,
-                    &mut p_i,
-                    &mut p_kn,
-                    &mut p_kd,
-                );
-                if stable {
+                let d = if rev7 && x < chunk_end {
+                    let d = dense_elem_canon(
+                        src[i],
+                        dst[i],
+                        mu1[i],
+                        mu2[i],
+                        ssq[i],
+                        s12[i],
+                        activity[i],
+                        x,
+                        transducer_bank,
+                        direct,
+                        forms7,
+                        &mut r4,
+                        &mut r32,
+                        &mut p_mw32,
+                        &mut p_iw32,
+                        &mut p_m32,
+                        &mut p_i32,
+                        &mut p_kn32,
+                        &mut p_kd32,
+                    );
+                    if (x + 1).is_multiple_of(ROW_LANES_FOLD) || x + 1 == chunk_end {
+                        for (l32, l) in r32.iter_mut().zip(r.iter_mut()) {
+                            l32.fold_into(l);
+                        }
+                        p_mw32.fold_into(&mut p_mw);
+                        p_iw32.fold_into(&mut p_iw);
+                        for (l32, l) in p_m32.iter_mut().zip(p_m.iter_mut()) {
+                            l32.fold_into(l);
+                        }
+                        for (l32, l) in p_i32.iter_mut().zip(p_i.iter_mut()) {
+                            l32.fold_into(l);
+                        }
+                        for (l32, l) in p_kn32.iter_mut().zip(p_kn.iter_mut()) {
+                            l32.fold_into(l);
+                        }
+                        for (l32, l) in p_kd32.iter_mut().zip(p_kd.iter_mut()) {
+                            l32.fold_into(l);
+                        }
+                    }
+                    d
+                } else {
+                    dense_elem_canon(
+                        src[i],
+                        dst[i],
+                        mu1[i],
+                        mu2[i],
+                        ssq[i],
+                        s12[i],
+                        activity[i],
+                        x,
+                        transducer_bank,
+                        direct,
+                        forms7,
+                        &mut r4,
+                        &mut r,
+                        &mut p_mw,
+                        &mut p_iw,
+                        &mut p_m,
+                        &mut p_i,
+                        &mut p_kn,
+                        &mut p_kd,
+                    )
+                };
+                if rev7 {
+                    dvals[x] = d as f64;
+                } else if stable_moments {
                     local[x & 15] = d as f64;
                     if x & 15 == 15 || x + 1 == width {
                         acc.central
                             .merge(OnlineMoments::block(&local[..(x & 15) + 1]));
                     }
                 }
+            }
+            if rev7 {
+                acc.central.merge(row_moments_canon(&dvals));
             }
             for j in 0..13 {
                 band[j] += r[j].fin();
@@ -1372,6 +1432,7 @@ fn dense_terms32_v<T: F32x8Backend + Copy>(
     act: V8<T>,
     transducer_bank: bool,
     direct: bool,
+    stable: bool,
 ) -> (
     [V8<T>; 13],
     V8<T>,
@@ -1399,11 +1460,11 @@ fn dense_terms32_v<T: F32x8Backend + Copy>(
     let iw_floor = V8::<T>::splat_t(token, IW_WEIGHT_FLOOR as f32);
     let one = V8::<T>::splat_t(token, 1.0);
     let zero = V8::<T>::zero_t(token);
-    let d = ssim_d_local_v(token, m1, m2, p, q, c1, c2, direct);
+    let d = ssim_d_local_v(token, m1, m2, p, q, c1, c2, direct, stable);
     let d2 = d * d;
     let diff_src = (s - m1).abs();
     let diff_dst = (dd - m2).abs();
-    let edge_dissim = bounded_dissim_v(token, diff_src, diff_dst, c_edge);
+    let edge_dissim = bounded_dissim_v(token, diff_src, diff_dst, c_edge, stable);
     let gt = diff_dst.simd_gt(diff_src);
     let lt = diff_dst.simd_lt(diff_src);
     let art_i = V8::<T>::blend(gt, edge_dissim, zero);
@@ -1475,6 +1536,7 @@ fn dense_elem_canon<P: crate::featcanon::Pool>(
     x: usize,
     transducer_bank: bool,
     direct: bool,
+    stable: bool,
     r4: &mut Option<Rev4Dense<'_>>,
     r: &mut [P; 13],
     p_mw: &mut P,
@@ -1486,7 +1548,7 @@ fn dense_elem_canon<P: crate::featcanon::Pool>(
 ) -> f32 {
     let lane = x & (P::LANES - 1);
     let (t, art_i, det_i, mse_i, m_w, i_w, mv, iv, kn, kd) =
-        dense_terms32(s, dd, m1, m2, q, p, act, transducer_bank, direct);
+        dense_terms32(s, dd, m1, m2, q, p, act, transducer_bank, direct, stable);
     for j in 0..13 {
         r[j].add(lane, t[j]);
     }
@@ -1555,7 +1617,8 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64>(
 ) -> DenseAccum {
     let mut r4 = r4;
     let direct = revision >= FormulaRevision::Rev3;
-    let stable = P::LANES == 16;
+    let stable_moments = P::LANES == 16;
+    let forms7 = revision.stable_forms();
     let mut acc = DenseAccum::default();
     // Provable-length plane slices: the chunk loop reads `i + 8 <= row +
     // full * 8` and the tail reads `row + x < height * width` — both literal
@@ -1614,13 +1677,14 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64>(
             });
         }
     };
-    // Revision-7 candidates (measurement only, `--cfg zensim_rev7_pools`,
-    // record "Speed pass before revision 7"): f32 row lanes for the 29 pools,
-    // folded into the f64 lanes once per row, and the central moments of `d`
-    // two-pass per row (a sixteen-lane f64 mean, then centred sums), merged
-    // once per row. Both change feature bits; the default build keeps
-    // revisions 5 and 6 exactly.
-    let rev7 = cfg!(zensim_rev7_pools) && stable;
+    // Revision 7 (`rowlanes`, `crate::featcanon::Lanes16F32`): the 29 pools
+    // add each complete chunk's columns in f32 row lanes, folded into the f64
+    // lanes every `ROW_LANES_FOLD` columns and before the tail, and the
+    // central moments of `d` are two-pass per row (`row_moments_canon`'s
+    // ops, lane-parallel) with one merge per row. Revisions 5 and 6 keep
+    // their bits.
+    let rev7 = revision.row_lanes();
+    debug_assert!(!rev7 || stable_moments, "revision 7 runs on the sixteen-lane pools");
     let mut dvals = if rev7 { vec![0.0f64; width] } else { Vec::new() };
     let row_moments = |v: &[f64]| -> OnlineMoments {
         let n = v.len();
@@ -1685,7 +1749,7 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64>(
             // the former v3-only dispatch worked around). The tail slices
             // give `dense_elem_canon` the same typed pool refs — zero cost.
             let mut pools = [P::zero(); 29];
-            let mut pools32 = [[0.0f32; 16]; 29];
+            let mut pools32 = [crate::featcanon::Lanes16F32::default(); 29];
             let mut local = [0.0f64; 16];
             let mut blocks = 0usize;
             let full = width / 8;
@@ -1716,6 +1780,7 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64>(
                     actv,
                     transducer_bank,
                     direct,
+                    forms7,
                 );
                 let bufs: [[f32; 8]; 29] = [
                     t[0].to_array(),
@@ -1751,14 +1816,18 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64>(
                 if rev7 {
                     let off = i & 15;
                     for j in 0..29 {
-                        let lanes: &mut [f32; 8] =
-                            (&mut pools32[j][off..off + 8]).try_into().unwrap();
+                        let lanes = pools32[j].chunk8(off);
                         (f32x8::load_t(token, lanes) + f32x8::load_t(token, &bufs[j])).store(lanes);
                     }
                     for l in 0..8 {
                         dvals[i + l] = bufs[0][l] as f64;
                     }
-                } else if stable {
+                    if (i + 8).is_multiple_of(crate::featcanon::ROW_LANES_FOLD) {
+                        for (l32, l) in pools32.iter_mut().zip(pools.iter_mut()) {
+                            l32.fold_into(l);
+                        }
+                    }
+                } else if stable_moments {
                     // Chunk `c` adds to lanes `(c & 1) * 8..`; a block starts
                     // at an even chunk (`DENSE_ILV` is even), so a buffered
                     // chunk's parity is its position's.
@@ -1794,7 +1863,7 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64>(
                             .store(lanes);
                     }
                 }
-                if stable && !rev7 {
+                if stable_moments && !rev7 {
                     let off = i & 15;
                     for l in 0..8 {
                         local[off + l] = bufs[0][l] as f64;
@@ -1827,13 +1896,10 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64>(
             }
             // Full blocks before the tail's own blocks, in raster order.
             central8(&cols, blocks, &mut acc.central);
-            if rev7 {
-                for j in 0..29 {
-                    for off in [0usize, 8] {
-                        let lanes = pools[j].chunk8(off);
-                        let a: [f64; 8] = std::array::from_fn(|l| pools32[j][off + l] as f64);
-                        (f64x8::load_t(token, lanes) + f64x8::from_array_t(token, a)).store(lanes);
-                    }
+            // The end of the chunks, unless the last chunk already folded.
+            if rev7 && !(full * 8).is_multiple_of(crate::featcanon::ROW_LANES_FOLD) {
+                for (l32, l) in pools32.iter_mut().zip(pools.iter_mut()) {
+                    l32.fold_into(l);
                 }
             }
             // Scalar tail — the canonical element step verbatim.
@@ -1857,6 +1923,7 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64>(
                         x,
                         transducer_bank,
                         direct,
+                        forms7,
                         &mut r4,
                         r.try_into().unwrap(),
                         &mut mw[0],
@@ -1868,7 +1935,7 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64>(
                     );
                     if rev7 {
                         dvals[x] = d as f64;
-                    } else if stable {
+                    } else if stable_moments {
                         local[x & 15] = d as f64;
                         if x & 15 == 15 || x + 1 == width {
                             acc.central
@@ -2053,7 +2120,8 @@ fn dense_block_kernel_exact(
 ) -> DenseAccum {
     use crate::featcanon::{Neum64, Pool as _};
     let direct = crate::ssim_form::active_revision() >= crate::feature_defs::FormulaRevision::Rev3;
-    let stable = crate::ssim_form::active_revision() >= FormulaRevision::Rev5;
+    let stable_moments = crate::ssim_form::active_revision() >= FormulaRevision::Rev5;
+    let forms7 = crate::ssim_form::active_revision().stable_forms();
     let mut acc = DenseAccum::default();
     let mut b0 = 0usize;
     while b0 < height {
@@ -2077,8 +2145,8 @@ fn dense_block_kernel_exact(
                 let m1 = mu1[i] as f64;
                 let m2 = mu2[i] as f64;
                 let act = activity[i] as f64;
-                let d = ssim_d_local(m1, m2, s12[i] as f64, ssq[i] as f64, direct);
-                if stable {
+                let d = ssim_d_local(m1, m2, s12[i] as f64, ssq[i] as f64, direct, forms7);
+                if stable_moments {
                     local[x & 15] = d;
                     if x & 15 == 15 || x + 1 == width {
                         acc.central
@@ -2088,7 +2156,7 @@ fn dense_block_kernel_exact(
                 let d2 = d * d;
                 let diff_src = (s - m1).abs();
                 let diff_dst = (dd - m2).abs();
-                let edge_dissim = bounded_dissim(diff_src, diff_dst, C_EDGE);
+                let edge_dissim = bounded_dissim(diff_src, diff_dst, C_EDGE, forms7);
                 let (art_i, det_i) = if diff_dst > diff_src {
                     (edge_dissim, 0.0)
                 } else if diff_dst < diff_src {
@@ -2739,7 +2807,7 @@ mod featcanon_contract_tests {
                         ($want:ident, $got:ident, $B:literal, $V:literal, $K:literal, $R:literal) => {{
                             let ($want, want_hooks) = run_gradient::<$B, $V, $K>(
                                 |s, d, a, ad, w, h, lo, hi, r4| {
-                                    gradient_block_kernel_canon::<LanesF64, $B, $V, $K, $R>(
+                                    gradient_block_kernel_canon::<LanesF64, $B, $V, $K, $R, false>(
                                         s,
                                         d,
                                         a,
@@ -2876,7 +2944,7 @@ mod featcanon_contract_tests {
                 hi: f32,
                 r4: Option<Rev4Grad<'_>>,
             ) -> GradientAccum {
-                gradient_block_kernel_canon64_vec_scalar::<crate::featcanon::LanesF64, B, V, K, R>(
+                gradient_block_kernel_canon64_vec_scalar::<crate::featcanon::LanesF64, B, V, K, R, false>(
                     _t,
                     s,
                     d,
@@ -2907,7 +2975,7 @@ mod featcanon_contract_tests {
                 hi: f32,
                 r4: Option<Rev4Grad<'_>>,
             ) -> GradientAccum {
-                gradient_block_kernel_canon64_vec_v3::<crate::featcanon::LanesF64, B, V, K, R>(
+                gradient_block_kernel_canon64_vec_v3::<crate::featcanon::LanesF64, B, V, K, R, false>(
                     t,
                     s,
                     d,
@@ -2938,7 +3006,7 @@ mod featcanon_contract_tests {
                 hi: f32,
                 r4: Option<Rev4Grad<'_>>,
             ) -> GradientAccum {
-                gradient_block_kernel_canon64_vec_v4::<crate::featcanon::LanesF64, B, V, K, R>(
+                gradient_block_kernel_canon64_vec_v4::<crate::featcanon::LanesF64, B, V, K, R, false>(
                     t,
                     s,
                     d,
@@ -2969,7 +3037,7 @@ mod featcanon_contract_tests {
                 hi: f32,
                 r4: Option<Rev4Grad<'_>>,
             ) -> GradientAccum {
-                gradient_block_kernel_canon64_vec_v4x::<crate::featcanon::LanesF64, B, V, K, R>(
+                gradient_block_kernel_canon64_vec_v4x::<crate::featcanon::LanesF64, B, V, K, R, false>(
                     t,
                     s,
                     d,
