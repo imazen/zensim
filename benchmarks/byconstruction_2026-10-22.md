@@ -1969,6 +1969,14 @@ The changes, in order:
     most 1.3e-14 relative; tiers identical). Blockiness falls from 5.4% to 2.0% of v4x samples. Paired
     (`rev7_band_vs_blockiness`): v4x −2.08% / −3.01% / −3.26%, v3 −0.67% / −1.96% / −2.00%.
 
+15. **No raw `d²`, `d³`, `d⁴` pools at revision 7**: from revision 5 on the SSIM deviation features read the central
+    moments, and nothing reads `sum_d2`, `sum_d3` or `sum_d4` (their only other use, the attribution context, is
+    overridden by the central moments). Revision 7's dense kernel no longer accumulates them (26 of 29 pools; the
+    three sums stay zero). Every emitted value keeps its bits at every revision (110 of 110 dumps at revisions 5/6
+    and at revision 7). Paired (`rev7_blockiness_vs_raw3`): v4x −0.32% / −2.78% / −1.61%, v3 −1.35% / −2.96% /
+    −1.67%. Skipping the three pools with `continue` inside the 29-pool loop instead was 12% slower (it changed the
+    loop's code generation); the kernel takes a constant index list.
+
 **Tried and not kept** (after 13): the three opsin cube roots interleaved step by step (bit-identical): −0.06% /
 −0.90% on v4x (`rev7_band_vs_cbrt3`, the 1507×2048 and 1024² cases), noise on v3; the conversion's inner loop runs at
 about two instructions per cycle, but interleaving did not raise it. The activity chain's `|src − mu1|` computed per

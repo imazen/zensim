@@ -1380,11 +1380,11 @@ fn dense_block_kernel_canon<P: crate::featcanon::Pool>(
             if rev7 {
                 acc.central.merge(row_moments_canon(&dvals));
             } else {
-                dense_band_add(&mut band, &row_pools);
+                dense_band_add(&mut band, &row_pools, rev7);
             }
         }
         if rev7 {
-            dense_band_add(&mut band, &band_pools);
+            dense_band_add(&mut band, &band_pools, rev7);
         }
         let s = &mut acc;
         s.sum_d += band[0];
@@ -1612,12 +1612,24 @@ fn dense_elem_canon<P: crate::featcanon::Pool>(
 /// updates (even, so a block starts on lanes 0..8; see the kernel below).
 const DENSE_ILV: usize = 16;
 
+/// The dense pools revision 7 accumulates: all but `d²`, `d³` and `d⁴`
+/// (pools 1–3). From revision 5 on the SSIM deviation features read the
+/// central moments, and nothing reads those three raw sums, so revision 7
+/// leaves `sum_d2`, `sum_d3` and `sum_d4` at zero.
+const DENSE_POOLS7: [usize; 26] = [
+    0, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28,
+];
+
 /// Add the 29 dense pools' finished sums to a band's 35 sums (`[r 0..13 | kn,kd
 /// pairs | m,mw pairs | i,iw pairs]`; the mean-weight and importance-weight
-/// sums are each the denominator of four weighted pools).
+/// sums are each the denominator of four weighted pools). Revision 7
+/// (`rev7`) skips the raw `d²`, `d³`, `d⁴` pools ([`DENSE_POOLS7`]).
 #[inline(always)]
-fn dense_band_add<P: crate::featcanon::Pool>(band: &mut [f64; 35], pools: &[P; 29]) {
+fn dense_band_add<P: crate::featcanon::Pool>(band: &mut [f64; 35], pools: &[P; 29], rev7: bool) {
     for j in 0..13 {
+        if rev7 && (1..4).contains(&j) {
+            continue;
+        }
         band[j] += pools[j].fin();
     }
     for j in 0..3 {
@@ -1815,7 +1827,7 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64, const R7: bool>(
                     let bufs: [[f32; 8]; 29] = $bufs;
                 if rev7 {
                     let off = i & 15;
-                    for j in 0..29 {
+                    for j in DENSE_POOLS7 {
                         let lanes = pools32[j].chunk8(off);
                         (f32x8::load_t(token, lanes) + f32x8::load_t(token, &bufs[j])).store(lanes);
                     }
@@ -1824,8 +1836,8 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64, const R7: bool>(
                         dv[l] = bufs[0][l] as f64;
                     }
                     if (i + 8).is_multiple_of(crate::featcanon::ROW_LANES_FOLD) {
-                        for (l32, l) in pools32.iter_mut().zip(pools.iter_mut()) {
-                            l32.fold_into(l);
+                        for j in DENSE_POOLS7 {
+                            pools32[j].fold_into(&mut pools[j]);
                         }
                     }
                 } else if stable_moments {
@@ -1921,7 +1933,7 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64, const R7: bool>(
                     kn[2], kd[0], kd[1], kd[2],
                 ];
                 if rev7 && r4.is_none() {
-                    for j in 0..29 {
+                    for j in DENSE_POOLS7 {
                         let lanes = &mut pools32[j].0;
                         (f32x16::load_t(token, lanes) + vecs[j]).store(lanes);
                     }
@@ -1931,8 +1943,8 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64, const R7: bool>(
                         dv[l] = d[l] as f64;
                     }
                     if (i + 16).is_multiple_of(crate::featcanon::ROW_LANES_FOLD) {
-                        for (l32, l) in pools32.iter_mut().zip(pools.iter_mut()) {
-                            l32.fold_into(l);
+                        for j in DENSE_POOLS7 {
+                            pools32[j].fold_into(&mut pools[j]);
                         }
                     }
                 } else {
@@ -2004,7 +2016,7 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64, const R7: bool>(
                 ];
                 if rev7 {
                     let off = i & 15;
-                    for j in 0..29 {
+                    for j in DENSE_POOLS7 {
                         let lanes = pools32[j].chunk8(off);
                         (f32x8::load_t(token, lanes) + f32x8::load_t(token, &bufs[j])).store(lanes);
                     }
@@ -2013,8 +2025,8 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64, const R7: bool>(
                         dv[l] = bufs[0][l] as f64;
                     }
                     if (i + 8).is_multiple_of(crate::featcanon::ROW_LANES_FOLD) {
-                        for (l32, l) in pools32.iter_mut().zip(pools.iter_mut()) {
-                            l32.fold_into(l);
+                        for j in DENSE_POOLS7 {
+                            pools32[j].fold_into(&mut pools[j]);
                         }
                     }
                 } else if stable_moments {
@@ -2088,8 +2100,8 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64, const R7: bool>(
             central8(&cols, blocks, &mut acc.central);
             // The end of the chunks, unless the last chunk already folded.
             if rev7 && !(full * 8).is_multiple_of(crate::featcanon::ROW_LANES_FOLD) {
-                for (l32, l) in pools32.iter_mut().zip(pools.iter_mut()) {
-                    l32.fold_into(l);
+                for j in DENSE_POOLS7 {
+                    pools32[j].fold_into(&mut pools[j]);
                 }
             }
             // Scalar tail — the canonical element step verbatim.
@@ -2137,11 +2149,11 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64, const R7: bool>(
             if rev7 {
                 acc.central.merge(row_moments(&dvals[..width]));
             } else {
-                dense_band_add(&mut band, pools);
+                dense_band_add(&mut band, pools, rev7);
             }
         }
         if rev7 {
-            dense_band_add(&mut band, &band_pools);
+            dense_band_add(&mut band, &band_pools, rev7);
         }
         let s = &mut acc;
         s.sum_d += band[0];
