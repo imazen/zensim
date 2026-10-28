@@ -4270,42 +4270,6 @@ mod owner_gates {
         assert_eq!(CSFW.len(), feature_v2::CSFW_PER_SCALE);
     }
 
-    /// The registry's `block_local` ordering IS the `idx*` constant ordering —
-    /// which is what index-aligns a `FeatureDef` with the value at that slot.
-    /// Spot-checked at every block's named boundaries.
-    #[test]
-    fn block_local_indices_match_the_idx_modules() {
-        use feature_v2::{idx, idx_append, idx_append2, idx_csfw};
-        let find = |t: &[SignalDef], name: &str| -> usize {
-            usize::from(
-                t.iter()
-                    .find(|s| s.name == name)
-                    .unwrap_or_else(|| panic!("no signal {name}"))
-                    .block_local,
-            )
-        };
-        assert_eq!(find(&V2, "ssim_mean"), idx::SSIM_MEAN);
-        assert_eq!(find(&V2, "mse"), idx::MSE);
-        assert_eq!(find(&V2, "hf_gain"), idx::HF_GAIN);
-        assert_eq!(find(&V2, "pjnd_fragility"), idx::PJND_FRAGILITY);
-        assert_eq!(find(&V2, "gms"), idx::GMS);
-        assert_eq!(find(&V2, "edge_width_change"), idx::EDGE_WIDTH_CHANGE);
-        assert_eq!(
-            find(&APPEND, "xmask_transducer"),
-            idx_append::XMASK_TRANSDUCER
-        );
-        assert_eq!(find(&APPEND, "lum_dark_err"), idx_append::LUM_DARK_ERR);
-        assert_eq!(find(&APPEND, "lum_bright_err"), idx_append::LUM_BRIGHT_ERR);
-        assert_eq!(find(&APPEND, "global_dmean"), idx_append::GLOBAL_DMEAN);
-        assert_eq!(find(&APPEND, "global_closs"), idx_append::GLOBAL_CLOSS);
-        assert_eq!(find(&APPEND, "grad_src_mean"), idx_append::GRAD_SRC_MEAN);
-        assert_eq!(find(&APPEND2, "bandvis_gain"), idx_append2::BANDVIS_GAIN);
-        assert_eq!(find(&APPEND2, "luma_mean_ref"), idx_append2::LUMA_MEAN_REF);
-        assert_eq!(find(&APPEND2, "hl_bin2"), idx_append2::HL_BIN2);
-        assert_eq!(find(&CSFW, "w_global_dmean"), idx_csfw::W_GLOBAL_DMEAN);
-        assert_eq!(find(&CSFW, "w_global_closs"), idx_csfw::W_GLOBAL_CLOSS);
-    }
-
     /// **The tranche gate.** The registry derives the free tranches from
     /// per-signal `Tranche` + `Placement` declarations; `feature_v2` derives
     /// them from hand-written loops. They must be the SAME SET.

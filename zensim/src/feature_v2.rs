@@ -593,56 +593,11 @@ pub(crate) const APPEND2_CHANNEL: usize = 1;
 
 /// Named local offsets within one scale's append2 block (all Y-only).
 pub mod idx_append2 {
-    /// BANDVIS banding-visibility GAIN (gaps-doc §6b design, 2026-07-27;
-    /// operator revised to CURVATURE during validation): per-pixel
-    /// `band(|∇²Y|; δ_lo, δ_hi) · (1 − sat(act, C_ACTIVITY))` indicators
-    /// on src and dst (`band(g) = sat(g, δ_lo)·(1 − sat(g, δ_hi))` —
-    /// soft band-pass over the SECOND-difference magnitude, half-points
-    /// at the EMPIRICAL one-code-step constants `BV_DELTA_*`, per
-    /// route). Second differences, not first: |∇²| of a linear gradient
-    /// is exactly 0 at any steepness, so smooth ramps stay out of the
-    /// band at every scale (the first-difference form measured
-    /// polarity-inverted on ramp fixtures — sub-step smooth gradients
-    /// were indistinguishable from steps); a plateau step reports the
-    /// full step at its flanking pixels, so the δ derivation is
-    /// operator-independent. FR
-    /// `bounded_excess(b_dst, b_src, C_BV)` mean-pooled. "NEW visible
-    /// steps in flat regions" — the CAMBI job on existing machinery; the
-    /// pyramid supplies the window sweep; the activity term supplies
-    /// dither masking. Foldable (plain mean).
-    ///
-    /// MEASURED MECHANICS (2026-07-27 behavioral run — load-bearing for
-    /// consumers): this is a COARSE-SCALE detector. At scale 0/1 a
-    /// realistic gradient's own per-pixel |∇| sits inside the visibility
-    /// band (a smooth ramp shallow enough to band is still ≥ ~¼ code per
-    /// 2-px span), so the FR excess largely cancels; each downscale
-    /// doubles smooth-gradient |∇| OUT of the band while plateau steps
-    /// persist, so scales 2–3 are where posterization fires (exactly
-    /// where CAMBI's 63-px windows land vs our radius-5 support). The
-    /// scale-0/1 slots are kept index-stable; expect near-zero there.
-    /// Steps beyond ~5 8-bit codes attenuate BY DESIGN (the band's upper
-    /// edge — CAMBI's own contrast cap is 4 ten-bit levels; giant steps
-    /// are edges, GMS/blockiness territory). Each step size therefore has
-    /// a RESONANT scale (finer steps → finer scale); consumers should
-    /// read the 4 per-scale slots as a response CURVE, not redundant
-    /// copies (measured ladder matrix:
-    /// `benchmarks/append2_bandvis_gates_2026-07-27.md`).
-    ///
-    /// OPT-IN VARIANT (`V2NewFeatureToggles::append2_dst_activity`,
-    /// default OFF — 2026-08-02 P1.5 adjudication): GAIN becomes the
-    /// pure-band FR excess pooled under the DST's own flatness weight
-    /// (dst-activity plane). Production extraction runs with it OFF
-    /// (adjudicated); rows extracted with it ON are a different feature
-    /// definition for this slot — never column-mix. Record:
-    /// `benchmarks/bandvis_dst_activity_2026-08-02.md`.
-    pub const BANDVIS_GAIN: usize = 0;
     /// Reference-only local-adaptation conditioner: `sat(mean(ref Y),
     /// C_LUM_T)` from the append kernel's existing `sum_s` accumulator
     /// (finalize-only — FREE). Correct-0 in any steering fold, like
     /// `PJND_FRAGILITY`/`GRAD_SRC_MEAN`.
     pub const LUMA_MEAN_REF: usize = 2;
-    /// Highlight bin 2: anchor = measured PU-Y of gray at 1000 cd/m².
-    pub const HL_BIN2: usize = 4;
 }
 
 // ============================================================================
@@ -716,18 +671,6 @@ pub const CSFW_PER_SCALE: usize = 3;
 /// unweighted) pair as non-orthogonal; LOO on a 956 bake adjudicates
 /// slot-worth, exactly the BANDVIS discipline.
 pub mod idx_csfw {
-    /// Luminance-weighted global mean shift:
-    /// `sat(|Σw·s − Σw·d| / Σw, C_GDMEAN)` — the weighted twin of
-    /// [`super::idx_append::GLOBAL_DMEAN`] (Y). V3's worst cross-route
-    /// diverging lane family (SROCC 0.49–0.85,
-    /// `benchmarks/hdr_streaming_gates_2026-07-27.md`): a mean shift's
-    /// visibility depends on WHERE in the tonal range it lands, and the
-    /// cbrt/PU encodings weight that differently — the route-common
-    /// physical weight is the fix (design §5.1).
-    pub const W_GLOBAL_DMEAN: usize = 0;
-    /// Reverse polarity of [`W_GLOBAL_CGAIN`] — weighted twin of
-    /// [`super::idx_append::GLOBAL_CLOSS`] (Y).
-    pub const W_GLOBAL_CLOSS: usize = 2;
 }
 
 // ============================================================================
@@ -1290,48 +1233,6 @@ fn gmsbank_cell_live(local: &ComputeSet, scale: usize, ch: usize) -> bool {
 // `finish_arttype_scale` (its blur term needs the cross-scale EWC value,
 // which only exists at finalize).
 // ---------------------------------------------------------------------------
-
-/// Emit the 12 `tailhist` slots for one cell: p95/p99/max over SSIM-d,
-/// ART, DET, MSE in that order. `p_q` is the LOWER EDGE of the first bin
-/// whose cumulative count reaches `ceil(q·n)`; bin 0 emits 0.0.
-fn finish_tailhist_cell(tail: &TailAccum, n_px: usize, out: &mut [f64; TAILHIST_PER_CELL]) {
-    *out = [0.0; TAILHIST_PER_CELL];
-    if n_px == 0 {
-        return;
-    }
-    let edges = tail_edges();
-    for m in 0..4 {
-        let h = &tail.hist[m];
-        // Every scattered value lands in exactly one bin, so the quantile walk
-        // below always reaches its target (the fallthrough is unreachable).
-        debug_assert_eq!(h.iter().map(|&c| c as usize).sum::<usize>(), n_px);
-        let p95 = tail_quantile_edge(h, n_px, 0.95, edges);
-        let p99 = tail_quantile_edge(h, n_px, 0.99, edges);
-        out[m * 3] = p95;
-        out[m * 3 + 1] = p99;
-        out[m * 3 + 2] = tail.max[m];
-    }
-}
-
-/// Lower edge (as the true-log value, not bits) of the first bin whose
-/// cumulative count reaches `ceil(q·n)`. Bin 0's lower edge is 0.0 (the
-/// exact-identity cell). Only called with `n > 0`.
-fn tail_quantile_edge(h: &[u32; TAILHIST_BINS], n: usize, q: f64, edges: &TailEdges) -> f64 {
-    let target = (q * n as f64).ceil() as u64;
-    let mut cum = 0u64;
-    for (i, &c) in h.iter().enumerate() {
-        cum += c as u64;
-        if cum >= target {
-            return if i == 0 {
-                0.0
-            } else {
-                f64::from_bits(edges.edges[i - 1])
-            };
-        }
-    }
-    // Unreachable given target <= n, but keep the function total.
-    f64::from_bits(edges.edges[TAILHIST_BINS - 2])
-}
 
 /// Box blur radius at scale 0 — matches v1's `ZensimConfig::default()`.
 pub(crate) const BLUR_RADIUS: usize = 5;
