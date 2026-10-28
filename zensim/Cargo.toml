@@ -60,6 +60,8 @@ zenresize = { git = "https://github.com/imazen/zenresize", rev = "e3975fb9d6d6b7
 
 [dev-dependencies]
 image = { workspace = true }
+# Builds synthetic bakes for the layout tests; stripped from the published manifest.
+zenpredict-bake = { git = "https://github.com/imazen/zenanalyze", rev = "f0903489300aea240ffae2e3f1359f8f2b9a0ba4" }
 archmage = { workspace = true, features = ["testable_dispatch"] }
 serde_json = "1"
 

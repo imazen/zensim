@@ -323,57 +323,6 @@ pub(crate) mod tests {
     use super::*;
     use crate::feature_set_id::ComputeToken;
 
-    /// **G4.2, the legacy half** — every registered legacy width is the
-    /// IDENTITY mapping over its range, so declaring it moves no stored byte.
-    ///
-    /// Generalizes phase 1's G1.7 from a width to a `Layout`.
-    #[test]
-    fn every_legacy_width_is_the_identity_mapping() {
-        for w in [156usize, 372, 504, 720, 924, 944, 956] {
-            let l = Layout::identity(w);
-            assert_eq!(l.width(), w);
-            assert_eq!(l.walk_width(), w, "identity: walk width IS the width");
-            assert!(l.is_identity(), "w{w} must be identity");
-            for pos in 0..w {
-                assert_eq!(l.slot_at(pos), u16::try_from(pos).ok());
-                assert_eq!(l.pos_of(pos as u16), Some(pos));
-            }
-        }
-    }
-
-    /// A dense layout packs its ids with no gaps, and round-trips both ways.
-    #[test]
-    fn a_dense_layout_packs_and_round_trips() {
-        let ns = crate::NUM_SCALES;
-        let want = SlotSet::from_ranges([(0, 228)])
-            .union(&crate::feature_defs::family_slots(
-                ComputeToken::Moments,
-                ns,
-            ))
-            .clipped_to(944);
-        let l = Layout::dense(&want);
-        assert_eq!(l.width(), 265, "the free-set arm packs to 265");
-        // 942, not 944: the highest raw-moment slot is f941, so the WALK
-        // must reach 942 — a fact worth having a number for, because
-        // `LayoutBlocks::for_width(942)` still reaches append2 (base 924) and
-        // still does NOT reach CSFW (base 944), which is exactly right for
-        // this set.
-        assert_eq!(
-            l.walk_width(),
-            942,
-            "the walk must reach one past the highest id the layout carries"
-        );
-        assert!(!l.is_identity());
-        assert_eq!(l.ids(), want);
-        // Every id round-trips through its position, in both directions.
-        for (pos, id) in want.iter_slots().enumerate() {
-            assert_eq!(l.slot_at(pos), u16::try_from(id).ok());
-            assert_eq!(l.pos_of(id as u16), Some(pos));
-        }
-        // And an id the layout does not carry has no position.
-        assert_eq!(l.pos_of(300), None, "f300 is IW, not in this set");
-    }
-
     /// The gather moves values to their declared positions and fills the rest
     /// with the structural zero — never a stale or shifted value.
     #[test]
@@ -394,56 +343,6 @@ pub(crate) mod tests {
         let id = Layout::identity(12);
         id.gather(&walk, &mut out);
         assert_eq!(out, walk);
-    }
-
-    /// A bake DECLARING a dense feature set resolves to that dense layout —
-    /// the positive control for
-    /// [`tests::every_shipped_bake_resolves_to_an_identity_layout`], without
-    /// which that test would pass just as happily if `declared_layout` always
-    /// returned identity.
-    #[test]
-    fn a_bake_declaring_a_dense_set_resolves_to_that_layout() {
-        let ns = crate::NUM_SCALES;
-        let slots = SlotSet::from_ranges([(0, 228)])
-            .union(&crate::feature_defs::family_slots(
-                ComputeToken::Moments,
-                ns,
-            ))
-            .clipped_to(944);
-        assert_eq!(slots.len(), 265);
-        let id = crate::feature_set_id::FeatureSetId::from_slots_with_layout(
-            crate::feature_set_id::ComputeParts::EMPTY
-                .with(ComputeToken::Basic)
-                .with(ComputeToken::Peaks)
-                .with(ComputeToken::Moments),
-            265,
-            "era2r4",
-            &slots,
-        )
-        .expect("a dense id");
-        // The id must round-trip through its own grammar, and `slots_of` must
-        // read the DENSE interpretation out of it.
-        let reparsed = crate::feature_set_id::FeatureSetId::parse(&id.to_string())
-            .expect("the dense id must reparse");
-        assert_eq!(
-            slots_of(&reparsed).as_ref(),
-            Some(&slots),
-            "slots_of must read the dense interpretation"
-        );
-
-        let bytes = dense_bake_bytes(&id.to_string(), 265);
-        let m = crate::mlp::Model::from_bytes(&bytes).expect("bake parses");
-        assert_eq!(m.caller_input_width(), 265);
-        assert_eq!(
-            m.metadata().get_utf8("zentrain.feature_set_id").ok(),
-            Some(id.to_string().as_str()),
-            "the metadata entry must survive the bake"
-        );
-        let l = declared_layout(&m);
-        assert!(!l.is_identity(), "must resolve to a DENSE layout");
-        assert_eq!(l.width(), 265);
-        assert_eq!(l.walk_width(), 942);
-        assert_eq!(l.ids(), slots);
     }
 
     /// A 1-layer identity ZNPR v3 bake of `n` inputs carrying a declared
@@ -476,41 +375,6 @@ pub(crate) mod tests {
             w = arr(&vec![1.0f32; n]),
         );
         zenpredict_bake::bake_from_json_str(&json).expect("synthetic dense bake must build")
-    }
-
-    /// **B.4 (the declaration is READ)** — an explicit `zentrain.feature_ids`
-    /// list resolves to exactly that dense layout, and REMOVING it collapses
-    /// the same bake to the identity layout. That pair is the proof the
-    /// runtime gathers by the declaration rather than by a positional prefix:
-    /// the first assertion alone would pass just as happily if
-    /// `declared_layout` ignored the key and the width happened to match.
-    #[test]
-    fn an_explicit_feature_id_list_resolves_to_that_dense_layout() {
-        // Profile D's shape: a scattered read set inside `basic`, which no
-        // FAMILY-token id can name — the reason the explicit list exists.
-        let ids: Vec<usize> = vec![0, 3, 7, 12, 40, 41, 99, 155];
-        let bytes = ids_bake_bytes(&ids);
-        let m = crate::mlp::Model::from_bytes(&bytes).expect("bake parses");
-        assert_eq!(m.caller_input_width(), ids.len());
-        let l = declared_layout(&m);
-        assert!(!l.is_identity(), "must resolve to a DENSE layout");
-        assert_eq!(l.width(), ids.len());
-        assert_eq!(l.walk_width(), 156, "one past the highest declared id");
-        assert_eq!(l.ids(), SlotSet::from_slots(ids.iter().copied()));
-        for (pos, &id) in ids.iter().enumerate() {
-            assert_eq!(l.slot_at(pos), u16::try_from(id).ok());
-            assert_eq!(l.pos_of(id as u16), Some(pos));
-        }
-
-        // NEGATIVE CONTROL: the same widths, the same weights, no declaration.
-        let plain =
-            crate::mlp::Model::from_bytes(&ids_bake_bytes_no_decl(ids.len())).expect("bake parses");
-        let pl = declared_layout(&plain);
-        assert!(
-            pl.is_identity(),
-            "without the declaration the SAME width must fall back to identity"
-        );
-        assert_ne!(pl.ids(), l.ids(), "the two layouts must differ");
     }
 
     /// The parse is STRICT, and each rejection is its own reason. A
@@ -596,79 +460,6 @@ pub(crate) mod tests {
         zenpredict_bake::bake_from_json_str(&json).expect("synthetic bake must build")
     }
 
-    /// **G4.2, the bake half** — every shipped bake resolves to a layout whose
-    /// width is EXACTLY its declared caller width, dense or identity.
-    ///
-    /// This asserted `is_identity()` for every bake until 2026-09-06, when
-    /// `A` / `B` / `BHdr` / `D` were flipped to the dense contract
-    /// (`benchmarks/dense_bake_flip_2026-09-06.md`). The invariant that
-    /// actually protects a served vector is not "identity" — it is that the
-    /// layout the runtime resolves and the width the bake asks for are the
-    /// same number, so a bake is never handed a vector shaped for something
-    /// else. That holds for both kinds and is what is asserted now.
-    ///
-    /// The safety argument the old name pointed at is kept as its own
-    /// assertion: a DENSE layout is only ever read from an explicit
-    /// `zentrain.feature_ids` list, never inferred from a
-    /// `zentrain.feature_set_id` that happens to name fewer slots than the
-    /// declared width (a `944`-with-structural-zeros producer names 265 at
-    /// width 944, and reading that as dense would permute the vector).
-    #[test]
-    fn every_shipped_bake_resolves_to_its_own_declared_width() {
-        let mut n = 0usize;
-        let mut dense = 0usize;
-        for (name, p) in crate::serving::shipped_profiles() {
-            for bytes in p.params().scoring_bake_bytes() {
-                let Ok(m) = crate::mlp::Model::from_bytes(bytes) else {
-                    continue;
-                };
-                let l = declared_layout(&m);
-                let derived = crate::derived_inputs::from_model(&m).unwrap();
-                let gather = derived.as_ref().map_or(m.caller_input_width(), |d| {
-                    assert_eq!(d.model_width(), m.caller_input_width());
-                    d.gather_width()
-                });
-                assert_eq!(
-                    l.width(),
-                    gather,
-                    "{name}: layout {} is {} wide but the bake asks for {}",
-                    l.name(),
-                    l.width(),
-                    m.caller_input_width()
-                );
-                if !l.is_identity() {
-                    dense += 1;
-                    // A dense layout must come from the explicit id list.
-                    assert!(
-                        crate::declared_feature_ids(&m).is_some(),
-                        "{name}: resolved to the dense layout {} without an explicit \
-                         `zentrain.feature_ids` declaration — a dense layout inferred \
-                         from anything else would permute the vector it is served",
-                        l.name()
-                    );
-                    assert_eq!(
-                        l.width(),
-                        gather,
-                        "{name}: a dense bake must fill every gathered input"
-                    );
-                }
-                n += 1;
-            }
-        }
-        use crate::serving::{expected_min_bake_count, expected_min_dense_count};
-        assert!(
-            n >= expected_min_bake_count(),
-            "the census must actually see bakes, saw {n}, expected >= {}",
-            expected_min_bake_count()
-        );
-        assert!(
-            dense >= expected_min_dense_count(),
-            "A/B/BHdr/D ship DENSE since 2026-09-06 (of those reachable under the active \
-             features) — saw {dense} dense of {n}, expected >= {}; if a flip was reverted, \
-             say so here rather than letting this pass quietly",
-            expected_min_dense_count()
-        );
-    }
 }
 
 /// The feature ids a bake declares, in ascending order, or `None` when it

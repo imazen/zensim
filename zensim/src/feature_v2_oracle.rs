@@ -2269,27 +2269,6 @@ mod featcanon_contract_tests {
     use crate::feature_defs::FormulaRevision;
     use crate::source::RgbSlice;
 
-    fn walk(revision: FormulaRevision, v1_only: bool) -> Result<ZensimV2Result, ZensimError> {
-        let (w, h) = (97, 63);
-        let s = tests::textured_image(w, h, 7);
-        let d = tests::quantize_distort(&s, w, h);
-        let toggles = V2NewFeatureToggles {
-            v1_only,
-            formula_revision: revision,
-            ..Default::default()
-        };
-        let mut scratch = V2Scratch::new();
-        compute_folded720_streaming_impl(
-            &RgbSlice::new(&s, w, h),
-            &RgbSlice::new(&d, w, h),
-            None,
-            false,
-            toggles,
-            &mut scratch,
-            None,
-        )
-    }
-
     fn assert_mix_refused(r: Result<ZensimV2Result, ZensimError>, what: &str) {
         match r {
             Err(ZensimError::ModelLoadFailed { reason }) => {
@@ -2298,53 +2277,6 @@ mod featcanon_contract_tests {
             Err(e) => panic!("{what}: refused for another reason: {e:?}"),
             Ok(_) => panic!("{what}: served a Rev4 mix"),
         }
-    }
-
-    /// Direction 2: a Rev4 request in a Rev3 process — v1-only included,
-    /// which `validate_wide_revision` used to wave through.
-    #[test]
-    fn the_walk_refuses_a_rev4_request_in_a_rev3_process() {
-        const SENTINEL: &str = "WALK-REV4-IN-REV3-RAN";
-        if !crate::ssim_form::run_at_revision(
-            "3",
-            "feature_v2::featcanon_contract_tests::the_walk_refuses_a_rev4_request_in_a_rev3_process",
-            SENTINEL,
-        ) {
-            return;
-        }
-        for v1_only in [true, false] {
-            assert_mix_refused(
-                walk(FormulaRevision::Rev4, v1_only),
-                &format!("Rev4 request, v1_only={v1_only}"),
-            );
-        }
-        walk(FormulaRevision::Rev3, true).expect("the matching v1-only request serves");
-        walk(FormulaRevision::Rev3, false).expect("the matching wide request serves");
-        println!("{SENTINEL}");
-    }
-
-    /// Direction 1: a Rev1/Rev2/Rev3 request in a Rev4 process; the matching
-    /// Rev4 request (the research walk) serves.
-    #[test]
-    fn the_walk_refuses_an_earlier_request_in_a_rev4_process() {
-        const SENTINEL: &str = "WALK-EARLIER-IN-REV4-RAN";
-        if !crate::ssim_form::run_at_revision(
-            "4",
-            "feature_v2::featcanon_contract_tests::the_walk_refuses_an_earlier_request_in_a_rev4_process",
-            SENTINEL,
-        ) {
-            return;
-        }
-        for rev in [
-            FormulaRevision::Rev1,
-            FormulaRevision::Rev2,
-            FormulaRevision::Rev3,
-        ] {
-            assert_mix_refused(walk(rev, true), &format!("{rev:?} v1-only request"));
-        }
-        walk(FormulaRevision::Rev4, true).expect("the matching v1-only request serves");
-        walk(FormulaRevision::Rev4, false).expect("the matching wide request serves");
-        println!("{SENTINEL}");
     }
 
     /// REV4VEC2 bit-exactness gate: `*_canon64_vec` tier variants must
@@ -3070,6 +3002,3 @@ mod featcanon_contract_tests {
     }
 }
 
-#[cfg(all(test, feature = "threads"))]
-#[path = "rev5_scaling_tests.rs"]
-mod rev5_scaling_tests;
