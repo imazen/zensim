@@ -46,6 +46,6 @@ pushed tag and GitHub release.
   linear diffmap scores differ on the 65×63 checkerboard fixture with padded rows.
   Score bits: interleaved `4635359462469191635`, planar `4635359462376882550`.
   The audit also found PreviewV0_2 score mismatches and legacy map rounding
-  differences at 65×63 and 257×193. Reproducer fixture: `tests/cross_path.rs`.
+  differences at 65×63 and 257×193. Reproducer fixture: `zensim/tests/cross_path.rs`.
   This predates the reuse refactor; preserving
   every existing score prevents silently canonicalizing either path.

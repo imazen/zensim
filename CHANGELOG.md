@@ -30,6 +30,9 @@
 - `PrecomputedReference::width` / `height`; `try_score_from_features` (`training` feature).
 
 #### Changed
+- Share diffmap scoring and mask/sqrt/crop postprocessing across RGB and planar paths,
+  preserving existing score and map bits. Extend revision-7 cross-path contracts to
+  feature vectors, scratch reuse, SIMD dispatch, strided planes and map options.
 - Remove obsolete research commentary from the extraction and scoring code.
 - Remove the constant transducer channel gate after auditing profile, cached, and training paths.
 - Fold revision-1 defaults in legacy kernels; canonical kernels retain explicit per-call revisions.
