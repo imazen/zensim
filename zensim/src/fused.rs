@@ -893,99 +893,36 @@ pub(crate) fn fused_vblur_features_ssim(
     let mode = crate::featcanon::mode(free.revision());
     match mode {
         crate::featcanon::Mode::Canon64 => {
-            // rev4vec2: the Rec64 axis runs the chunked `f32x8`/`f64x8` body on
-            // the fused-FMA tiers — bit-identical to the `LanesF64` scalar
-            // canonical body. Rev5's `localwin` axis runs the per-output pair
-            // tree body. Any OTHER blur axis (an oracle `BLUR` override)
-            // keeps the scalar body, which honours it.
-            let blur_axis = crate::featcanon::canon_blur_axis_for(mode, free.revision());
-            if matches!(blur_axis, crate::featcanon::BlurMode::Local) {
-                return incant!(
-                    fused_vblur_ssim_canon64_vec::<crate::featcanon::Lanes16F64>(
-                        h_mu1,
-                        h_mu2,
-                        h_sigma_sq,
-                        h_sigma12,
-                        src,
-                        dst,
-                        width,
-                        height,
-                        inner_start,
-                        inner_h,
-                        radius,
-                        mu1_out,
-                        mu2_out,
-                        store_mu,
-                        sd_out,
-                        store_sd,
-                        ssq_out,
-                        s12_out,
-                        store_sigma,
-                        free,
-                        direct,
-                        ext,
-                        h_act,
-                        mode,
-                    ),
-                    [v4x, v4, v3, neon, wasm128, scalar]
-                );
-            }
-            if matches!(blur_axis, crate::featcanon::BlurMode::Rec64) {
-                return incant!(
-                    fused_vblur_ssim_canon64_vec::<crate::featcanon::LanesF64>(
-                        h_mu1,
-                        h_mu2,
-                        h_sigma_sq,
-                        h_sigma12,
-                        src,
-                        dst,
-                        width,
-                        height,
-                        inner_start,
-                        inner_h,
-                        radius,
-                        mu1_out,
-                        mu2_out,
-                        store_mu,
-                        sd_out,
-                        store_sd,
-                        ssq_out,
-                        s12_out,
-                        store_sigma,
-                        free,
-                        direct,
-                        ext,
-                        h_act,
-                        mode,
-                    ),
-                    [v4x, v4, v3, neon, wasm128, scalar]
-                );
-            }
-            return fused_vblur_ssim_canon::<crate::featcanon::LanesF64>(
-                h_mu1,
-                h_mu2,
-                h_sigma_sq,
-                h_sigma12,
-                src,
-                dst,
-                width,
-                height,
-                inner_start,
-                inner_h,
-                radius,
-                mu1_out,
-                mu2_out,
-                store_mu,
-                sd_out,
-                store_sd,
-                ssq_out,
-                s12_out,
-                store_sigma,
-                free,
-                direct,
-                ext,
-                h_act,
-                mode,
+            // Revisions 5 and 7 (the only canonical revisions) blur with the
+            // per-output local window (`localwin`).
+            return incant!(
+                fused_vblur_ssim_canon64_vec::<crate::featcanon::Lanes16F64>(
+                    h_mu1,
+                    h_mu2,
+                    h_sigma_sq,
+                    h_sigma12,
+                    src,
+                    dst,
+                    width,
+                    height,
+                    inner_start,
+                    inner_h,
+                    radius,
+                    mu1_out,
+                    mu2_out,
+                    store_mu,
+                    sd_out,
+                    store_sd,
+                    ssq_out,
+                    s12_out,
+                    store_sigma,
+                    free,
+                    direct,
+                    ext,
+                    h_act,
+                    mode,
+                ),
+                [v4x, v4, v3, neon, wasm128, scalar]
             );
         }
         crate::featcanon::Mode::Off => {}
