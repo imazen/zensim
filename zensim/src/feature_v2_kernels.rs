@@ -713,11 +713,11 @@ impl ComputeSet {
         self.v1_full_scales = Self::ALL_SCALES;
     }
 
-    pub(crate) fn free_work(&self, ch: usize, scale: usize) -> crate::fused::FreeExtrasWork {
+    pub(crate) fn fused_work(&self, ch: usize, scale: usize) -> crate::fused::FusedWork {
         if self.formula_revision >= FormulaRevision::Rev5 && scale == 0 && ch != 1 {
             // Count actual scale-zero chroma consumers, regardless of plan intent.
         }
-        crate::fused::FreeExtrasWork {
+        crate::fused::FusedWork {
             revision: Some(self.formula_revision),
             omit_peaks: self.formula_revision >= FormulaRevision::Rev5
                 && self.v1_pools == V1PoolsMode::Off,

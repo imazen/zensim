@@ -22,7 +22,7 @@ pub(crate) enum RootForm {
 }
 
 impl RootForm {
-    /// Resolve a per-comparison revision while retaining explicit research defaults.
+    /// Resolve a per-comparison revision, defaulting to revision 1.
     pub(crate) fn at_revision(revision: Option<crate::feature_defs::FormulaRevision>) -> Self {
         Self::for_revision(revision.unwrap_or(FormulaRevision::Rev1))
     }

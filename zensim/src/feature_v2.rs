@@ -768,7 +768,7 @@ fn fold_v1_one_band(
     raw: [&[f32]; 2],
     sums: &mut V1BasicSums,
     mut pools: Option<(&mut FoldPoolScratch, BandPoolWork)>,
-    free: crate::fused::FreeExtrasWork,
+    free: crate::fused::FusedWork,
 ) -> usize {
     let [src, dst] = raw;
     let rows = 0..rows_end;
@@ -1200,7 +1200,7 @@ fn fold_v1_basic_bands(
     // `free`: see [`fold_v1_one_band`] — forwarded verbatim to every band on
     // both the serial and the band-parallel path, so the two stay identical
     // by construction.
-    free: crate::fused::FreeExtrasWork,
+    free: crate::fused::FusedWork,
 ) {
     assert!(
         !matches!(h_src, FoldHSource::SelfBlur) || pools.is_some(),
@@ -1829,7 +1829,7 @@ fn rev5_execute_job(
         true,
         false,
         false,
-        local.free_work(job.ch, scale),
+        local.fused_work(job.ch, scale),
         &mut job.result,
     );
     if fold_v1 {
@@ -1854,7 +1854,7 @@ fn rev5_execute_job(
                 raw,
                 band,
                 None,
-                local.free_work(job.ch, scale),
+                local.fused_work(job.ch, scale),
             );
         }
     }
@@ -2602,7 +2602,7 @@ fn stream_phase_b(
     self_blur: bool,
     // The resolved per-channel work order. Do not reconstruct it from public
     // toggles: that loses private subset restrictions and runs dead reductions.
-    free: crate::fused::FreeExtrasWork,
+    free: crate::fused::FusedWork,
     acc: &mut StreamChannelAccums,
 ) {
     let width = info.plane_w;
@@ -2700,7 +2700,7 @@ fn stream_fold_v1(
     v2_blocks: bool,
     band_parallel: bool,
     self_blur: bool,
-    free: crate::fused::FreeExtrasWork,
+    free: crate::fused::FusedWork,
     acc: &mut StreamChannelAccums,
 ) {
     let width = info.plane_w;
@@ -3534,7 +3534,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                         v2_blocks,
                         band_parallel,
                         self_blur,
-                        local.free_work(ch, scale),
+                        local.fused_work(ch, scale),
                         acc,
                     );
                 });
@@ -3585,7 +3585,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                     v2_blocks,
                     band_parallel,
                     false,
-                    local.free_work(ch, scale),
+                    local.fused_work(ch, scale),
                     acc,
                 );
             });
@@ -3638,7 +3638,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                     v2_blocks,
                     band_parallel,
                     false,
-                    local.free_work(ch, scale),
+                    local.fused_work(ch, scale),
                     &mut accums[ch],
                 );
             }
@@ -3665,7 +3665,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                     v2_blocks,
                     band_parallel,
                     false,
-                    local.free_work(1, scale),
+                    local.fused_work(1, scale),
                     &mut accums[1],
                 );
             }
@@ -3846,4 +3846,4 @@ thread_local! {
 
 include!("feature_v2_tests.rs");
 
-include!("feature_v2_oracle.rs");
+include!("feature_v2_dense.rs");

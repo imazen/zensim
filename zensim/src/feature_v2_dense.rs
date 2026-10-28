@@ -1,54 +1,15 @@
 
-// ============================================================================
-// ERA-2 DENSE KERNEL (`benchmarks/era2_perf_break_2026-08-31.md` §2, §13.2, §14)
-//
-// NOT YET THE DEFAULT. Built alongside era-1 so it can be gated and measured
-// without moving a byte; the flip is a separate, sequenced commit (design §8 —
-// it lands after the fold-engine lane pins its parity stages).
-//
-// THE SHAPE, and every part of it is semantics rather than implementation:
-//   * 8 f32 virtual lanes per accumulator, term at pixel x -> lane[x mod 8],
-//     entered via `as_chunks::<8>` — NEVER modulo indexing, which was MEASURED
-//     11x slower because it defeats vectorisation entirely (§13);
-//   * the scalar tail folds into the SAME lanes, so the shape is
-//     width-independent (era-1's tail landed in the f64 running total, which is
-//     what made its grouping depend on `width % 8`);
-//   * a FIXED reduction tree — `era2_reduce8`, never `reduce_add()`, which is
-//     TIER-DEPENDENT (§14.2: x86_v3 pairs lane i with i+4 first, wasm/scalar
-//     pair adjacent lanes — different groupings of the same eight addends);
-//   * an f64 BAND layer: rows fold into a band partial, band partials merge in
-//     band order. Band layout is a pure function of (height, ERA2_BAND_ROWS),
-//     never of thread count.
-//
-// PASS STRUCTURE IS A PERF KNOB, NOT SEMANTICS. Splitting the row into several
-// passes changes neither which terms an accumulator sees nor their order — each
-// accumulator still receives its terms in increasing x — so any pass split
-// yields IDENTICAL bytes. That frees the split to be tuned per tier for
-// register pressure without touching the era.
+// Dense feature kernels use fixed virtual lanes, a fixed reduction tree, and
+// geometry-defined bands so accumulation order does not depend on SIMD tier
+// or thread count. Legacy and canonical arithmetic have separate bodies.
 
-/// era-2 band height. A pure function of geometry; deliberately NOT derived
-/// from the thread count, which is what makes thread-invariance structural.
-// NOTE ON `dead_code`: these primitives are consumed by the era-2 dense kernel,
-// which lands in the SEQUENCED flip commit (design §8 — after the fold-engine
-// lane pins its parity stages). Until then they are exercised only by the
-// era-2 structural gates, so a non-test build sees them as unused. The
-// allow comes off with the kernel.
+/// Band height, independent of thread count.
 pub(crate) const ERA2_BAND_ROWS: usize = 32;
 
 #[allow(unused_imports)]
 pub(crate) use crate::featcanon::era2_reduce8;
 
-/// Tier dispatch for the era-2 kernel. The BODY is one source shared by every
-/// tier (see `dense_block_kernel_era2_inner`); `#[magetypes]` exists here only
-/// to put that body inside each tier's `target_feature` region.
-///
-/// **This is what the first measurement was missing.** Plain Rust compiles to
-/// baseline x86-64 (SSE2) no matter what the host supports, which measured
-/// **4.4x slower** than era-1's `#[arcane]`-wrapped kernel — not a shape
-/// problem, an ISA problem. Cross-tier bit-identity survives because the
-/// source is identical and Rust does not contract `a*b+c` into an FMA without
-/// fast-math (which is off); it is VERIFIED, not assumed, by
-/// `era2_vendor_probe` across the AMD/Intel pair.
+/// Dispatch the shared legacy dense-kernel body to the available SIMD tier.
 #[allow(clippy::too_many_arguments)]
 fn dense_block_kernel_era2(
     src: &[f32],

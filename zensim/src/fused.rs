@@ -186,8 +186,8 @@ pub(crate) const C_MSE_F32: f32 = 0.01;
 pub(crate) const C_LUM_T_F32: f32 = 0.35;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) struct FreeExtrasWork {
-    /// Explicit per-request SSIM arithmetic; None retains research defaults.
+pub(crate) struct FusedWork {
+    /// Explicit per-request SSIM arithmetic; None selects revision 1.
     pub revision: Option<crate::feature_defs::FormulaRevision>,
     /// Skip peak and whole-plane HF reductions when no declared input reads them.
     pub local_only: bool,
@@ -197,7 +197,7 @@ pub(crate) struct FreeExtrasWork {
     pub omit_edges: bool,
 }
 
-impl FreeExtrasWork {
+impl FusedWork {
     pub(crate) fn revision(self) -> crate::feature_defs::FormulaRevision {
         crate::ssim_form::effective_revision(
             self.revision
@@ -337,7 +337,7 @@ pub(crate) fn fused_vblur_features_ssim(
     ssq_out: &mut [f32],
     s12_out: &mut [f32],
     store_sigma: bool,
-    free: FreeExtrasWork,
+    free: FusedWork,
     ext: ExtPoolsWork,
     h_act: &[f32],
 ) -> StripChannelAccum {
@@ -560,7 +560,7 @@ fn fused_vblur_ssim_inner_v4(
     ssq_out: &mut [f32],
     s12_out: &mut [f32],
     store_sigma: bool,
-    free: FreeExtrasWork,
+    free: FusedWork,
     direct: bool,
     ext: ExtPoolsWork,
     h_act: &[f32],
@@ -1115,7 +1115,7 @@ fn fused_vblur_ssim_inner_v4x(
     ssq_out: &mut [f32],
     s12_out: &mut [f32],
     store_sigma: bool,
-    free: FreeExtrasWork,
+    free: FusedWork,
     direct: bool,
     ext: ExtPoolsWork,
     h_act: &[f32],
@@ -1675,7 +1675,7 @@ fn fused_vblur_ssim_inner_v3(
     ssq_out: &mut [f32],
     s12_out: &mut [f32],
     store_sigma: bool,
-    free: FreeExtrasWork,
+    free: FusedWork,
     direct: bool,
     ext: ExtPoolsWork,
     h_act: &[f32],
@@ -2061,7 +2061,7 @@ fn fused_vblur_ssim_inner(
     ssq_out: &mut [f32],
     s12_out: &mut [f32],
     store_sigma: bool,
-    free: FreeExtrasWork,
+    free: FusedWork,
     direct: bool,
     ext: ExtPoolsWork,
     h_act: &[f32],
@@ -3310,7 +3310,7 @@ impl<P: crate::featcanon::Pool> VblurPools<P> {
     }
     /// Add each pool's finished sum to `acc`, in the fixed order every body
     /// uses: once per row, or at revision 7 once per call.
-    fn finish_into(&self, acc: &mut StripChannelAccum, free: FreeExtrasWork, ext: ExtPoolsWork) {
+    fn finish_into(&self, acc: &mut StripChannelAccum, free: FusedWork, ext: ExtPoolsWork) {
         acc.ssim_d += self.ssim_d.fin();
         acc.ssim_d4 += self.ssim_d4.fin();
         acc.ssim_d2 += self.ssim_d2.fin();
@@ -3366,7 +3366,7 @@ impl VblurPools<crate::featcanon::Lanes16F32> {
     fn fold_into<P: crate::featcanon::Pool>(
         &mut self,
         row: &mut VblurPools<P>,
-        free: FreeExtrasWork,
+        free: FusedWork,
         ext: ExtPoolsWork,
     ) {
         if !free.local_only {
@@ -3714,7 +3714,7 @@ fn vblur_ssim_elem_canon<P: crate::featcanon::Pool>(
     direct: bool,
     // Revision 7: the v1 edge ratio as `(x − y)/(1 + y)`.
     stable7: bool,
-    free: FreeExtrasWork,
+    free: FusedWork,
     ext: ExtPoolsWork,
     store_mu: bool,
     store_sd: bool,
@@ -3882,7 +3882,7 @@ fn fused_vblur_ssim_canon<P: crate::featcanon::Pool>(
     ssq_out: &mut [f32],
     s12_out: &mut [f32],
     store_sigma: bool,
-    free: FreeExtrasWork,
+    free: FusedWork,
     direct: bool,
     ext: ExtPoolsWork,
     h_act: &[f32],
@@ -4023,7 +4023,7 @@ fn fused_vblur_ssim_local<P: crate::featcanon::Pool>(
     ssq_out: &mut [f32],
     s12_out: &mut [f32],
     store_sigma: bool,
-    free: FreeExtrasWork,
+    free: FusedWork,
     direct: bool,
     ext: ExtPoolsWork,
     h_act: &[f32],
@@ -4186,7 +4186,7 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
     ssq_out: &mut [f32],
     s12_out: &mut [f32],
     store_sigma: bool,
-    free: FreeExtrasWork,
+    free: FusedWork,
     direct: bool,
     ext: ExtPoolsWork,
     h_act: &[f32],
@@ -4824,7 +4824,7 @@ fn fused_vblur_ssim_canon64_vec_scalar<P: crate::featcanon::Pool64>(
     ssq_out: &mut [f32],
     s12_out: &mut [f32],
     store_sigma: bool,
-    free: FreeExtrasWork,
+    free: FusedWork,
     direct: bool,
     ext: ExtPoolsWork,
     h_act: &[f32],
@@ -4910,7 +4910,7 @@ fn fused_vblur_ssim_canon64_vec_wasm128<P: crate::featcanon::Pool64>(
     ssq_out: &mut [f32],
     s12_out: &mut [f32],
     store_sigma: bool,
-    free: FreeExtrasWork,
+    free: FusedWork,
     direct: bool,
     ext: ExtPoolsWork,
     h_act: &[f32],
@@ -4997,7 +4997,7 @@ fn fused_vblur_ssim_canon64_vec_neon<P: crate::featcanon::Pool64>(
     ssq_out: &mut [f32],
     s12_out: &mut [f32],
     store_sigma: bool,
-    free: FreeExtrasWork,
+    free: FusedWork,
     direct: bool,
     ext: ExtPoolsWork,
     h_act: &[f32],
@@ -5528,25 +5528,25 @@ mod tests {
             store_mu: bool,
             store_sd: bool,
             store_sigma: bool,
-            free: FreeExtrasWork,
+            free: FusedWork,
             direct: bool,
             ext: ExtPoolsWork,
         }
 
         fn ssim_cases() -> Vec<SsimCase> {
-            let free_all = FreeExtrasWork {
+            let free_all = FusedWork {
                 revision: None,
                 local_only: false,
                 omit_peaks: false,
                 omit_edges: false,
             };
-            let free_none = FreeExtrasWork {
+            let free_none = FusedWork {
                 revision: None,
                 local_only: true,
                 omit_peaks: false,
                 omit_edges: true,
             };
-            let free_mix = FreeExtrasWork {
+            let free_mix = FusedWork {
                 revision: None,
                 local_only: false,
                 omit_peaks: false,
@@ -5939,7 +5939,7 @@ mod tests {
         #[test]
         fn vblur_ssim_rev7_lean_loop_matches_every_tier() {
             let mut rng = Rng(0x7E57_1EA2_5EED_0007);
-            let free = FreeExtrasWork {
+            let free = FusedWork {
                 revision: Some(crate::feature_defs::FormulaRevision::Rev7),
                 local_only: false,
                 omit_peaks: true,

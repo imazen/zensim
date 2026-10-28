@@ -1702,7 +1702,7 @@ fn process_strip_channel(
                 &mut [],
                 &mut [],
                 false,
-                crate::fused::FreeExtrasWork {
+                crate::fused::FusedWork {
                     revision: config.formula_revision,
                     local_only: config.local_only,
                     omit_edges: config.omit_edges,

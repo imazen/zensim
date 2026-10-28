@@ -7028,7 +7028,7 @@ mod tests {
             &mut [],
             &mut [],
             false,
-            crate::fused::FreeExtrasWork::default(),
+            crate::fused::FusedWork::default(),
             crate::fused::ExtPoolsWork::default(),
             &[],
         );
