@@ -321,7 +321,7 @@ fn dense_slots_of(id: &FeatureSetId) -> Option<SlotSet> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::feature_set_id::ComputeToken;
+    
 
     /// The gather moves values to their declared positions and fills the rest
     /// with the structural zero — never a stale or shifted value.
@@ -343,38 +343,6 @@ pub(crate) mod tests {
         let id = Layout::identity(12);
         id.gather(&walk, &mut out);
         assert_eq!(out, walk);
-    }
-
-    /// A 1-layer identity ZNPR v3 bake of `n` inputs carrying a declared
-    /// feature-set id. Built through the mandated JSON pipeline.
-    fn dense_bake_bytes(set_id: &str, n: usize) -> Vec<u8> {
-        let arr = |v: &[f32]| -> String {
-            let mut s = String::from("[");
-            for (k, x) in v.iter().enumerate() {
-                if k > 0 {
-                    s.push(',');
-                }
-                s.push_str(&x.to_string());
-            }
-            s.push(']');
-            s
-        };
-        let json = format!(
-            r#"{{
-                "schema_hash": 1,
-                "scaler_mean": {mean},
-                "scaler_scale": {scale},
-                "metadata": [{{"key": "zentrain.feature_set_id", "type": "utf8", "text": "{set_id}"}}],
-                "layers": [
-                    {{"in_dim": {n}, "out_dim": 1, "activation": "identity",
-                      "dtype": "f32", "weights": {w}, "biases": [0.0]}}
-                ]
-            }}"#,
-            mean = arr(&vec![0.0f32; n]),
-            scale = arr(&vec![1.0f32; n]),
-            w = arr(&vec![1.0f32; n]),
-        );
-        zenpredict_bake::bake_from_json_str(&json).expect("synthetic dense bake must build")
     }
 
     /// The parse is STRICT, and each rejection is its own reason. A
@@ -424,10 +392,6 @@ pub(crate) mod tests {
                 list.replace('\n', "\\n")
             ),
         )
-    }
-
-    fn ids_bake_bytes_no_decl(n: usize) -> Vec<u8> {
-        bake_bytes_with_metadata(n, "")
     }
 
     fn bake_bytes_with_metadata(n: usize, md: &str) -> Vec<u8> {

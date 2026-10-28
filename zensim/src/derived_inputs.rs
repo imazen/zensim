@@ -240,8 +240,6 @@ mod tests {
         }
     }
 
-    const FX: &str = "zensim-derived-inputs v1\nin 13\nin 401\nproduct 13 422\nproduct 401 422\n";
-
     #[test]
     fn refusals() {
         for (text, why) in [

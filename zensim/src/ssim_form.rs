@@ -1036,48 +1036,6 @@ pub(crate) fn effective_revision(revision: FormulaRevision) -> FormulaRevision {
 }
 
 #[cfg(test)]
-/// Run a SIMD-tier-toggling `#[test]` body alone in a child process.
-///
-/// `archmage::testing::for_each_token_permutation` disables tiers
-/// process-wide. In the shared test process, every other test that compares
-/// two extractions bit for bit without `lock_token_testing()` can then see a
-/// tier change between, or inside, its calls (CI run 38104576912; the
-/// class is in zensim's Known Bugs history). A toggler therefore owns its
-/// own process. Returns `true` in that child (run the body); otherwise it
-/// re-executes THIS test binary for exactly this one test, with
-/// `ZENSIM_TIER_TOGGLER_CHILD` set to `test_path` and, when given,
-/// `ZENSIM_FORMULA_REV` set to `rev`, and fails if the child fails or never
-/// prints `sentinel`. Unlike [`run_at_revision`] it re-executes even when
-/// the process is already at `rev`, so a revision child running many tests
-/// (`rerun_tests_at_revision`) never toggles beside them.
-pub(crate) fn run_in_own_process(test_path: &str, sentinel: &str, rev: Option<&str>) -> bool {
-    const CHILD: &str = "ZENSIM_TIER_TOGGLER_CHILD";
-    if std::env::var(CHILD).as_deref() == Ok(test_path) {
-        return true;
-    }
-    let exe = std::env::current_exe().expect("test binary path");
-    let mut cmd = std::process::Command::new(exe);
-    cmd.args([test_path, "--exact", "--nocapture", "--test-threads=1"])
-        .env(CHILD, test_path);
-    if let Some(rev) = rev {
-        cmd.env("ZENSIM_FORMULA_REV", rev);
-    }
-    let out = cmd.output().expect("re-exec the test binary");
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(
-        out.status.success(),
-        "{test_path} failed in its own process\n--- stdout ---\n{stdout}\n--- stderr ---\n{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    assert!(
-        stdout.contains(sentinel),
-        "{test_path} exited 0 in its own process but never reached its body \
-         (sentinel {sentinel:?} absent)\n{stdout}"
-    );
-    false
-}
-
-#[cfg(test)]
 /// Run one `#[test]` body under an explicit `ZENSIM_FORMULA_REV`.
 ///
 /// `ssim_form::active_revision` is a `OnceLock`, so a revision cannot be

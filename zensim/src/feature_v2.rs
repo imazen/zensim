@@ -772,8 +772,6 @@ pub mod idx_csfw {
 /// derives the same number — asserted in `rev4_base_matches_registry`).
 #[cfg_attr(not(test), allow(dead_code))] // the registered rev4 base — read by the parity/layout gates
 pub(crate) const REV4_BASE: usize = 986;
-#[cfg(test)]
-pub(crate) const GMSBANK_BASE: usize = 1322;
 pub(crate) const GMSBANK_PER_CELL: usize = 15;
 /// mapdev slots per (scale, channel) cell (`feature_defs::MAPDEV_SIGNALS`).
 pub(crate) const MAPDEV_PER_CELL: usize = 5;
@@ -6258,41 +6256,6 @@ pub(crate) fn cached_ref_feed_usable(
         sh /= 2;
     }
     true
-}
-
-/// **The ref-cached fold-backed v1-372 extraction** (fold-engine lane stage
-/// 3): [`compute_folded_v1_372_streaming_impl`] with the source side fed from
-/// an already-built XYB pyramid, so N distorted candidates amortise one
-/// reference's decode + sRGB→XYB conversion + 3-level downscale chain — the
-/// shape `Zensim::precompute_reference` / `compute_with_ref` has always had on
-/// the buffered path.
-///
-/// `distorted` must already be at the cache's COMPUTE dims (the caller
-/// reflect-pads a sub-64 distorted, exactly as `Zensim::compute_with_ref`
-/// does). Returns `None` when the cache cannot feed the fold
-/// ([`cached_ref_feed_usable`]) — the caller then falls back rather than
-/// scoring a different pyramid.
-///
-/// Bit-identical to N independent [`compute_folded_v1_372_streaming_impl`]
-/// calls; `fold_ref_cache_matches_independent_computes` is the gate.
-#[cfg(test)]
-pub(crate) fn compute_folded_v1_372_with_ref_impl(
-    precomputed: &crate::streaming::PrecomputedReference,
-    distorted: &impl ImageSource,
-    parallel: bool,
-    scratch: &mut V2Scratch,
-    pool_mode: Option<V1PoolsMode>,
-    plan: Option<&crate::feature_plan::Plan>,
-) -> Option<(Vec<f64>, [f64; 3])> {
-    compute_folded_v1_372_with_ref_stoppable(
-        precomputed,
-        distorted,
-        parallel,
-        scratch,
-        pool_mode,
-        plan,
-        None,
-    )
 }
 
 pub(crate) fn compute_folded_v1_372_with_ref_stoppable(

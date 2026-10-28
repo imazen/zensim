@@ -539,15 +539,9 @@ pub(crate) fn score_plan(
 
 #[cfg(test)]
 mod skip_policy_tests {
-    use super::*;
+    
     use crate::feature_v2::V1PoolsMode;
-    use crate::profile::ZensimProfile;
-
-    fn cfg_for(p: ZensimProfile) -> (&'static crate::profile::ProfileParams, ZensimConfig) {
-        let params = p.params();
-        let config = crate::metric::config_from_params(params, false);
-        (params, config)
-    }
+    
 
     /// **The `Off` is never served policy applies to the ID-SPACE branch too.**
     ///

@@ -1058,24 +1058,7 @@ impl crate::metric::Zensim {
 
 #[cfg(test)]
 mod tests {
-    use super::DiffmapWeighting;
-    use crate::{RgbSlice, ZensimProfile};
-
-    /// Deterministic non-flat synthetic content: structured enough that every
-    /// scale of the pyramid sees real signal (a flat field makes the identity
-    /// question vacuous — every SSIM term is already saturated).
-    fn synth(w: usize, h: usize) -> Vec<[u8; 3]> {
-        (0..w * h)
-            .map(|i| {
-                let x = (i % w) as u32;
-                let y = (i / w) as u32;
-                [
-                    ((x * 7 + y * 13) % 251) as u8,
-                    ((x * x + y * 3 + (x ^ y)) % 241) as u8,
-                    (((x ^ y) * 5 + 17 + y * y) % 239) as u8,
-                ]
-            })
-            .collect()
-    }
+    
+    
 
 }

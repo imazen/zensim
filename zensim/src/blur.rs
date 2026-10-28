@@ -9628,34 +9628,6 @@ mod tests {
             .collect()
     }
 
-    /// **The reference arithmetic for the sigma_sq/sigma12 gates below.**
-    /// Genuine fusion (one rounding) vs `a*b+c` (two roundings) is a
-    /// property of the `magetypes` BACKEND the kernel's tier dispatch
-    /// (`incant!`) actually picks: x86 v3/v4/v4x (FMA3) and `neon` (`vfma`)
-    /// are genuinely fused; `scalar` and `wasm128` implement `mul_add` as
-    /// the UNFUSED `a*b+c`
-    /// (`magetypes/src/simd/impls/{scalar,wasm128}.rs`). i686 can only ever
-    /// reach `scalar` — none of the 64-bit-only x86 tiers apply — so a
-    /// reference built from Rust's own (always genuinely fused)
-    /// `f32::mul_add` diverged from the dispatched kernel there by up to 1
-    /// ULP per operation: MEASURED in
-    /// `fused_h_ring_matches_regathered_reference` /
-    /// `h_entries_are_bit_exact_at_a_degenerate_last_column_tile`
-    /// (`-79349770 != -79349760`, `-290626370 != -290626340`), CI hygiene
-    /// 2026-09-06. This mirrors which form the ACTIVE tier actually uses,
-    /// so the reference describes the SAME arithmetic the kernel runs
-    /// rather than an arithmetic the kernel only sometimes performs.
-    /// `cfg!` makes the branch a compile-time constant, so it costs
-    /// nothing and can't itself introduce a runtime CPU-detection mismatch.
-    #[inline(always)]
-    fn ref_fma(a: f32, b: f32, c: f32) -> f32 {
-        if cfg!(any(target_arch = "x86", target_arch = "wasm32")) {
-            a * b + c
-        } else {
-            a.mul_add(b, c)
-        }
-    }
-
     /// Per-row scalar reference for the horizontal sliding window. The
     /// H-blur is an independent per-row recurrence and every lane does the
     /// same elementwise IEEE ops, so a scalar row-at-a-time walk reproduces
@@ -9719,75 +9691,6 @@ mod tests {
                 }
             }
         }
-    }
-
-    /// True reflect-101, period `2*(w - 1)`, total over the integers — the
-    /// index the H kernels' single-step mirror approximates. It agrees with
-    /// the kernels everywhere the mirror stays in range and DISAGREES in
-    /// exactly the out-of-range slot, which is what makes it the right
-    /// reference for [`h_entries_are_bit_exact_at_a_degenerate_last_column_tile`].
-    fn reflect101(i: isize, w: usize) -> usize {
-        if w <= 1 {
-            return 0;
-        }
-        let period = 2 * (w as isize - 1);
-        let mut m = i % period;
-        if m < 0 {
-            m += period;
-        }
-        if m >= w as isize {
-            (period - m) as usize
-        } else {
-            m as usize
-        }
-    }
-
-    /// [`ring_walk`] with the TRUE reflect-101 index in the slide. Prime is
-    /// copied verbatim from the kernels so the only difference between this
-    /// reference and the production recurrence is the one expression under
-    /// test.
-    fn tile_walk(tw: usize, radius: usize, mut step: impl FnMut(usize, usize, usize)) {
-        let r = radius;
-        for i in 0..2 * radius + 1 {
-            let idx = if i <= r {
-                (r - i).min(tw - 1)
-            } else {
-                (i - r).min(tw - 1)
-            };
-            step(usize::MAX, idx, usize::MAX);
-        }
-        for x in 0..tw {
-            step(
-                x,
-                reflect101((x + r + 1) as isize, tw),
-                reflect101(x as isize - r as isize, tw),
-            );
-        }
-    }
-
-    /// The column-tile decomposition every H entry applies when
-    /// `tile > 0 && width > tile`, as `(x0, xl, tw, keep, kn)` — the same
-    /// arithmetic as `h_tile_1in1out` / `h_tile_2in2out` /
-    /// `fused_blur_h_ssim_column_tiled`, which is what makes the reference a
-    /// reference and not a second implementation of the blur.
-    fn tile_spans(
-        width: usize,
-        radius: usize,
-        tile: usize,
-    ) -> Vec<(usize, usize, usize, usize, usize)> {
-        if tile == 0 || width <= tile {
-            return vec![(0, 0, width, 0, width)];
-        }
-        let mut v = Vec::new();
-        let mut x0 = 0usize;
-        while x0 < width {
-            let x1 = (x0 + tile).min(width);
-            let xl = x0.saturating_sub(radius);
-            let xr = (x1 + radius).min(width);
-            v.push((x0, xl, xr - xl, x0 - xl, x1 - x0));
-            x0 = x1;
-        }
-        v
     }
 
     /// **The era-2 column tile can emit a last tile only `radius + 1` columns

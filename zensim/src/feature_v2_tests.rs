@@ -1,8 +1,8 @@
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::PixelFormat;
-    use crate::source::{RgbSlice, StridedBytes};
+    
+    use crate::source::RgbSlice;
 
     /// imazen/zensimx#56 regression gate: the MSCN divisive normalizer must
     /// be the CORRECTLY-ROUNDED IEEE `resid / sqrt(var + c)` on every SIMD
@@ -140,44 +140,6 @@ pub(crate) mod tests {
     // kernel, keeps its own separate zero-tolerance `==` comparison in
     // `tests/v1_golden_bytes.rs`).
     const TOL: f64 = 5e-4;
-
-    fn flat_image(w: usize, h: usize, rgb: [u8; 3]) -> Vec<[u8; 3]> {
-        vec![rgb; w * h]
-    }
-
-    const ZERO_ONE_IDX: &[usize] = &[
-        idx::ART,
-        idx::DET,
-        idx::MSE,
-        idx::HF_GAIN,
-        idx::HF_LOSS,
-        idx::HF_MAG_LOSS,
-        idx::PJND_TRANSDUCER,
-        idx::PJND_FRAGILITY,
-        idx::GMS,
-        idx::PJND_TRANSDUCER_LOW_K,
-        idx::PJND_TRANSDUCER_HIGH_K,
-        idx::RINGING,
-        idx::BANDING,
-    ];
-    const ZERO_TWO_IDX: &[usize] = &[
-        idx::SSIM_MEAN,
-        idx::SSIM_DEV2,
-        idx::SSIM_DEV4,
-        idx::SSIM_SOFT_PEAK,
-        idx::ART_SOFT_PEAK,
-        idx::DET_SOFT_PEAK,
-        idx::MASKED_SSIM,
-        idx::MASKED_ART,
-        idx::MASKED_DET,
-        idx::MASKED_MSE,
-        idx::IW_SSIM,
-        idx::IW_ART,
-        idx::IW_DET,
-        idx::IW_MSE,
-        idx::BLOCKINESS, // can be up to 2 blocks (h+v corner)
-        idx::EDGE_WIDTH_CHANGE,
-    ];
 
     /// Gated-mirror pin (see `WeightedSum`'s doc): the incremental
     /// `WeightedSum` accumulator used by the fused kernel must match
@@ -333,22 +295,6 @@ pub(crate) mod tests {
         out
     }
 
-    /// All-rev4 toggles for the family unit tests (the same literal the
-    /// parity test uses — every block on, v1 pools full).
-    fn rev4_all_toggles() -> V2NewFeatureToggles {
-        V2NewFeatureToggles {
-            append_block: true,
-            append2_block: true,
-            csfw_block: true,
-            rev4_gridblk: true,
-            rev4_ringbasis: true,
-            rev4_tailhist: true,
-            rev4_arttype: true,
-            v1_pools: V1PoolsMode::Full,
-            ..Default::default()
-        }
-    }
-
     #[test]
     fn gmsbank_strict_contrast_reduction_routes_only_to_loss() {
         let mut cells = [GmsBankCell::default(); 5];
@@ -362,40 +308,6 @@ pub(crate) mod tests {
             assert!(cell.loss > 0.0);
             assert_eq!(cell.gain.to_bits(), 0.0f64.to_bits());
         }
-    }
-
-    /// Low-contrast content (gentle gradient + ±3 LCG noise) — content
-    /// steps stay ≪ block-flatten steps so a planted 8-px lattice
-    /// dominates the phase profile (the phase test's fixture).
-    fn smooth_image(w: usize, h: usize, seed: u32) -> Vec<[u8; 3]> {
-        let mut state = seed | 1;
-        let mut px = Vec::with_capacity(w * h);
-        for y in 0..h {
-            for x in 0..w {
-                state = state.wrapping_mul(1664525).wrapping_add(1013904223);
-                let noise = ((state >> 24) as i32 % 7) - 3;
-                let base = 96 + ((x * 48) / w.max(1)) as i32 + ((y * 32) / h.max(1)) as i32;
-                let v = (base + noise).clamp(0, 255) as u8;
-                px.push([v, (v as i32 + (noise >> 1)).clamp(0, 255) as u8, v]);
-            }
-        }
-        px
-    }
-
-    /// Alternating ±shift per 8-px column block: steps appear ONLY at
-    /// `x ≡ 0 mod 8` boundaries (the two sides inside a block share the
-    /// shift), planting a pure phase-0 lattice of added edges.
-    fn block_shift_distort(src: &[[u8; 3]], w: usize, h: usize) -> Vec<[u8; 3]> {
-        let mut out = src.to_vec();
-        for y in 0..h {
-            for x in 0..w {
-                let delta = if (x / 8) % 2 == 0 { 24i32 } else { -24i32 };
-                for c in out[y * w + x].iter_mut() {
-                    *c = (*c as i32 + delta).clamp(0, 255) as u8;
-                }
-            }
-        }
-        out
     }
 
     /// C3 machinery: `TailAccum`/`finish_tailhist_cell` against a
@@ -1593,42 +1505,6 @@ pub(crate) mod tests {
         }
     }
 
-    /// **FREE-EXTRAS GATE 2 — the free slots ARE the 944 slots.**
-    ///
-    /// The whole point of the free set is that a 156-class walk can emit
-    /// slots a model trained on 944 TABLES already knows. That is only true
-    /// if the value matches. It cannot match BITWISE — the v1 fused kernel
-    /// sums a (scale, channel) in column-group-major order over v1's 32-row
-    /// bands while the append kernel sums it row-major over 128-row strips,
-    /// so the two are the same multiset of f64 addends in a different
-    /// grouping — but they must agree to f64 reassociation.
-    ///
-    /// MEASURED, and the binding term is NOT reassociation — it is that the
-    /// two kernels accumulate at different PRECISION. The append kernel adds
-    /// a whole row into f32 SIMD lanes (`r_s = r_s + s`, `width/8` adds per
-    /// lane) and reduces to f64 once per row; the fused kernel reduces every
-    /// 16-lane group to f64 immediately. So the append side carries ~`width/8`
-    /// f32 accumulation steps where this side carries one, and the free value
-    /// is the MORE accurate of the two. The signature confirms it: the
-    /// deltas below scale with WIDTH (worst at the widest cell) and are
-    /// bit-identical between the serial and band-parallel arms, so nothing
-    /// about threading or band order is involved.
-    ///
-    /// Worst measured |Δ| over these cells (both arms): **4.62e-6** at
-    /// 2304×64 (4.44e-6 at 1152×72, 1.24e-6 at 576×96 — the width scaling)
-    /// on `GLOBAL_DMEAN`, i.e. ~1.9e-4 RELATIVE on a
-    /// feature of scale 2.4e-2 — three orders inside this module's own
-    /// documented 5e-4 v2 tolerance. The bar is 2e-5; the full table is in
-    /// `benchmarks/free_features_2026-09-01.md`. `ZENSIM_FREE_DIAG=1`
-    /// prints every non-zero delta with its (scale, channel, slot).
-    #[cfg(feature = "training")]
-    fn free_tol() -> f64 {
-        std::env::var("ZENSIM_FREE_TOL")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(2e-5)
-    }
-
     // =====================================================================
     // CLASS-C free slots (`V1FreeExtras::RawMomentsPlusBoundedErr`) —
     // `benchmarks/free_features_classC_2026-09-04.md`
@@ -1866,13 +1742,6 @@ pub(crate) mod tests {
     }
 
     impl NitsImage {
-        fn from_rgb_nits(rgb: &[[f32; 3]], w: usize, h: usize) -> Self {
-            Self {
-                data: rgb.iter().map(|p| [p[0], p[1], p[2], 1.0]).collect(),
-                w,
-                h,
-            }
-        }
     }
 
     impl crate::source::ImageSource for NitsImage {
@@ -1904,23 +1773,6 @@ pub(crate) mod tests {
     }
 
     impl Code16Image {
-        fn from_unit_codes(codes: &[[f32; 3]], w: usize, h: usize) -> Self {
-            Self {
-                data: codes
-                    .iter()
-                    .map(|p| {
-                        [
-                            (p[0].clamp(0.0, 1.0) * 65535.0).round() as u16,
-                            (p[1].clamp(0.0, 1.0) * 65535.0).round() as u16,
-                            (p[2].clamp(0.0, 1.0) * 65535.0).round() as u16,
-                            65535,
-                        ]
-                    })
-                    .collect(),
-                w,
-                h,
-            }
-        }
     }
 
     impl crate::source::ImageSource for Code16Image {
@@ -1942,42 +1794,6 @@ pub(crate) mod tests {
         fn is_hdr(&self) -> bool {
             true
         }
-    }
-
-    /// Deterministic HDR test content spanning the given luminance range
-    /// (geometric ramp + texture), in cd/m².
-    fn nits_image(w: usize, h: usize, lo: f32, hi: f32, seed: u32) -> Vec<[f32; 3]> {
-        let mut px = vec![[0.0f32; 3]; w * h];
-        let mut state = seed.wrapping_mul(0x9E37_79B9) | 1;
-        let mut next = move || {
-            state ^= state << 13;
-            state ^= state >> 17;
-            state ^= state << 5;
-            (state & 0xFFFF) as f32 / 65535.0
-        };
-        for y in 0..h {
-            for x in 0..w {
-                let t = (x + y * 3) as f32 / (w + h * 3) as f32;
-                let base = lo * (hi / lo).powf(t);
-                let n = 0.7 + 0.6 * next();
-                px[y * w + x] = [base * n, base * (0.8 + 0.4 * next()), base * n * 0.9];
-            }
-        }
-        px
-    }
-
-    fn distort_nits(src: &[[f32; 3]]) -> Vec<[f32; 3]> {
-        src.iter()
-            .map(|&[r, g, b]| {
-                // Multiplicative + quantization-flavored distortion that
-                // stays strictly positive at every luminance.
-                [
-                    (r * 1.06).max(0.001),
-                    (g * 0.95 + 0.02 * r).max(0.001),
-                    (b * 1.02).max(0.001),
-                ]
-            })
-            .collect()
     }
 
     /// BANDVIS δ-constant derivation (append2, 2026-07-27): measure the
@@ -2119,94 +1935,6 @@ pub(crate) mod tests {
     // verbatim from the original inline builders; the behavior test's
     // value pins + the gates-doc printed numbers gate the motion).
     // `benchmarks/bandvis_dst_activity_2026-08-02.md`. ---
-
-    /// Smooth diagonal gradient ramp (sRGB codes 32..224).
-    fn bv_ramp(w: usize, h: usize) -> Vec<[u8; 3]> {
-        (0..w * h)
-            .map(|i| {
-                let (x, y) = (i % w, i / w);
-                let v = 32.0 + 192.0 * (x + y) as f32 / (w + h - 2) as f32;
-                let v = v as u8;
-                [v, v, v]
-            })
-            .collect()
-    }
-
-    /// Mid-tread posterize to `bits` (the gates-doc ladder operator).
-    fn bv_posterize(px: &[[u8; 3]], bits: u32) -> Vec<[u8; 3]> {
-        let mask = !((1u16 << (8 - bits)) - 1) as u8;
-        let half = ((1u16 << (8 - bits)) / 2) as u8;
-        px.iter()
-            .map(|&[r, g, b]| [(r & mask) | half, (g & mask) | half, (b & mask) | half])
-            .collect()
-    }
-
-    /// 4-bit ordered-Bayer (4×4) dither of the diagonal ramp.
-    fn bv_bayer_dither(w: usize, h: usize) -> Vec<[u8; 3]> {
-        let bayer = [
-            [0u8, 8, 2, 10],
-            [12, 4, 14, 6],
-            [3, 11, 1, 9],
-            [15, 7, 13, 5],
-        ];
-        (0..w * h)
-            .map(|i| {
-                let (x, y) = (i % w, i / w);
-                let v = 32.0 + 192.0 * (x + y) as f32 / (w + h - 2) as f32;
-                let t = (bayer[y % 4][x % 4] as f32 + 0.5) / 16.0;
-                let step = 16.0; // 4-bit quantization step
-                let q = ((v / step + t - 0.5).floor() * step + step / 2.0).clamp(0.0, 255.0) as u8;
-                [q, q, q]
-            })
-            .collect()
-    }
-
-    /// 4-bit hash-noise (TPDF-class) dither of the diagonal ramp.
-    fn bv_noise_dither(w: usize, h: usize) -> Vec<[u8; 3]> {
-        (0..w * h)
-            .map(|i| {
-                let (x, y) = (i % w, i / w);
-                let v = 32.0 + 192.0 * (x + y) as f32 / (w + h - 2) as f32;
-                let mut hsh = (x as u32)
-                    .wrapping_mul(0x9E37_79B9)
-                    .wrapping_add((y as u32).wrapping_mul(0x85EB_CA6B));
-                hsh ^= hsh >> 15;
-                hsh = hsh.wrapping_mul(0x2C1B_3C6D);
-                hsh ^= hsh >> 13;
-                let t = ((hsh & 0xFFFF) as f32 + 0.5) / 65536.0;
-                let step = 16.0;
-                let q = ((v / step + t - 0.5).floor() * step + step / 2.0).clamp(0.0, 255.0) as u8;
-                [q, q, q]
-            })
-            .collect()
-    }
-
-    /// ±16-code hash-textured version of `ramp` (the b2 source fixture).
-    fn bv_textured_ramp(ramp: &[[u8; 3]]) -> Vec<[u8; 3]> {
-        ramp.iter()
-            .enumerate()
-            .map(|(i, &[v, _, _])| {
-                let mut hsh = (i as u32).wrapping_mul(0x27D4_EB2F);
-                hsh ^= hsh >> 15;
-                let n = ((hsh & 0x1F) as i16) - 16; // ±16 codes texture
-                let t = (v as i16 + n).clamp(0, 255) as u8;
-                [t, t, t]
-            })
-            .collect()
-    }
-
-    /// ±6-code 8-px DC-lattice overlay on `ramp` (the V3(c) fixture).
-    fn bv_blocky(ramp: &[[u8; 3]], w: usize) -> Vec<[u8; 3]> {
-        ramp.iter()
-            .enumerate()
-            .map(|(i, &[v, _, _])| {
-                let (x, y) = (i % w, i / w);
-                let dc = if ((x / 8) + (y / 8)) % 2 == 0 { 6 } else { -6 };
-                let q = (v as i16 + dc).clamp(0, 255) as u8;
-                [q, q, q]
-            })
-            .collect()
-    }
 
     // ========================================================================
     // CSFW gates (chunk-3 tier-1: luminance-weighted GLOBAL_* twins)

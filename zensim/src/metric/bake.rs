@@ -158,26 +158,8 @@ mod revision_contract_tests {
     // Everything that scores PIXELS through a bake needs `feature-regime-v2`:
     // `bake_declaring` fixes a v2 extraction requirement, so `BakeScorer::new`
     // refuses it without the feature and the pixel-path tests are gated.
-    use crate::ssim_form::run_at_revision;
-    use crate::{RgbSlice, ZensimError};
-
-    fn pair(w: usize, h: usize) -> (Vec<[u8; 3]>, Vec<[u8; 3]>) {
-        let mut src = vec![[200u8, 190, 180]; w * h];
-        let mut dst = vec![[200u8, 190, 180]; w * h];
-        for y in 0..h {
-            for x in 0..w {
-                let i = y * w + x;
-                if (x / 5 + y / 7) % 3 == 0 {
-                    src[i] = [30, 40, 50];
-                }
-                let t = ((x * 7 + y * 11) % 5) as i32 - 2;
-                for c in 0..3 {
-                    dst[i][c] = (src[i][c] as i32 + t * 3).clamp(0, 255) as u8;
-                }
-            }
-        }
-        (src, dst)
-    }
+    
+    
 
     /// The premise the mismatch test below rests on, asserted rather than
     /// assumed: revisions 2 and 3 select the SAME luminance form. A refusal
