@@ -2933,7 +2933,6 @@ pub(crate) type XybPyramidLevel = ([Vec<f32>; 3], usize, usize);
 
 pub struct PrecomputedReference {
     pub(crate) formula_revision: crate::feature_defs::FormulaRevision,
-    pub(crate) sampling: Option<crate::sampling::Sampling>,
     pub(crate) scales: Vec<([Vec<f32>; 3], usize, usize)>,
     // INVARIANT: scales[i].0[0..3].len() == scales[i].1 * scales[i].2
     // (padded_width × height per plane). Enforced at construction.
@@ -3096,7 +3095,6 @@ impl PrecomputedReference {
 
         Self {
             formula_revision: revision,
-            sampling: None,
             scales,
             ref_width: 0,
             ref_height: 0,

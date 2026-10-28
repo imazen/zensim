@@ -23,7 +23,6 @@ impl<'a> BakeScorer<'a> {
         metadata: Arc<ScoreMetadata>,
     ) -> Result<Self, ZensimError> {
         crate::feature_layout::formula_revision(model)?;
-        crate::sampling::Sampling::from_model(model)?;
         // A derived-input bake declares its read set, not one id per input;
         // `metadata` already validated its entries against that read set and
         // the caller width (`derived_inputs::from_model`).

@@ -1006,14 +1006,13 @@ impl Zensim {
     /// ~14×w×h×4 B). Call [`Zensim::with_max_pixels`] to tighten it, or
     /// `with_max_pixels(usize::MAX)` to opt out for trusted input.
     pub fn new(profile: ZensimProfile) -> Self {
-        let fast_by_default = false;
         Self {
             profile,
             parallel: true,
             max_pixels: Some(120_000_000),
             stop: None,
-            fold_engine: fast_by_default,
-            skip_unread_pools: fast_by_default,
+            fold_engine: false,
+            skip_unread_pools: false,
         }
     }
 
@@ -1854,11 +1853,6 @@ pub(crate) fn validate_ref_match(
     precomputed: &crate::streaming::PrecomputedReference,
     distorted: &impl ImageSource,
 ) -> Result<(), ZensimError> {
-    if precomputed.sampling.is_some() {
-        return Err(ZensimError::ModelLoadFailed {
-            reason: "sampling-bound cache requires its BakeScorer surface",
-        });
-    }
     validate_ref_dimensions(precomputed, distorted)
 }
 
@@ -2842,13 +2836,6 @@ fn forward_one_bake_with_codec(
     codec_hint: Option<&str>,
 ) -> Result<f64, ZensimError> {
     let model = cached_profile_model(bytes)?;
-    // Legacy profiles do not bind their front end/reference cache to this
-    // contract. Complete sampling candidates must use BakeScorer directly.
-    if model.metadata().get(crate::sampling::KEY).is_some() {
-        return Err(ZensimError::ModelLoadFailed {
-            reason: "sampling-bound bake requires the BakeScorer pixel surface",
-        });
-    }
     let bundle = cached_bake_metadata(bytes, &model)?;
     let mut scorer = BakeScorer::with_metadata(&model, bundle)?;
     scorer.score_features(features, width, height, codec_hint)

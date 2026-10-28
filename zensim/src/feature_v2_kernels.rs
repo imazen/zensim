@@ -891,7 +891,6 @@ pub(crate) struct ComputeSet {
     /// Only basic local SSIM/edge moments and MSE; no peaks or HF ratios.
     pub local_only: bool,
     pub omit_edges: bool,
-    pub sampling: Option<crate::sampling::Sampling>,
     /// v1's masked/IW/soft-peak pool slots — the 13.6 % pass of item E.
     pub v1_pools: V1PoolsMode,
     /// Scales that run the shared masked/IW activity chain in Full mode.
@@ -978,7 +977,6 @@ impl ComputeSet {
             coarse_y_only_scales: 0,
             local_only: false,
             omit_edges: false,
-            sampling: None,
             v1_pools: t.v1_pools,
             v1_full_scales: Self::ALL_SCALES,
             v1_scales: Self::ALL_SCALES,

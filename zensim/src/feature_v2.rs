@@ -3623,27 +3623,6 @@ pub(crate) fn compute_folded_v1_372_streaming_stoppable(
             ..V2NewFeatureToggles::default()
         },
     };
-    if let Some(p) = plan
-        && let Some(sampling) = p.compute.sampling
-    {
-        let dims = sampling.dims(source.width(), source.height());
-        let mut mo = MeanOffsetRows::at_revision(dims[0].0, dims[0].1, toggles.formula_revision);
-        let res = foldapp_streaming_walk(
-            source,
-            distorted,
-            parallel,
-            toggles,
-            crate::feature_v2_stream::FrontEnd::Sdr,
-            scratch,
-            FoldWalkExtras {
-                stop,
-                compute: Some(p.compute),
-                mean_offset: Some(&mut mo),
-                ..Default::default()
-            },
-        );
-        return Ok((res.into_features(), mo.finish()));
-    }
     // Sub-64 reflect-pad BEFORE the walk, exactly as
     // `metric::compute_with_config_inner` does — so both engines' features
     // AND mean_offset are taken over the same padded plane. The two arms are
@@ -3786,10 +3765,8 @@ pub(crate) fn ref_feed_admits(
     distorted: &impl ImageSource,
     plan: Option<&crate::feature_plan::Plan>,
 ) -> bool {
-    if precomputed.sampling.is_some()
-        || plan.is_some_and(|p| {
-            p.compute.sampling.is_some()
-                || (p.compute.v2_blocks && p.compute.formula_revision < FormulaRevision::Rev5)
+    if plan.is_some_and(|p| {
+            (p.compute.v2_blocks && p.compute.formula_revision < FormulaRevision::Rev5)
         })
     {
         return false;
@@ -4088,9 +4065,6 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
         }
     }
 
-    if let Some(sampling) = compute.sampling {
-        dims = sampling.dims(w0, h0);
-    }
     let strip_max_n = dims[0].0 * (STRIP_ROWS + 2 * HALO_P);
     // HOISTED so the strip scratch can be sized to the planes this walk will
     // actually write (fold-footprint lane). Both flags are strip-independent —
@@ -4195,7 +4169,6 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
         stream_pool,
         front_end,
         ref_planes,
-        compute.sampling,
         toggles.formula_revision,
         // `globaff` reads every channel's rows at every scale, so the
         // scale-zero chroma rows stay in the rolling planes.
@@ -4214,7 +4187,6 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
             && !crate::feature_v2_stream::linear_pyramid();
         batch_limit > 0
             && ref_planes.is_none()
-            && compute.sampling.is_none()
             && matches!(front_end, crate::feature_v2_stream::FrontEnd::Sdr)
             && !(ALL_CHANNELS && omit_xb)
             && (0..n_scales).all(|s| compute.scale_dead(s) || compute.at_scale(s).v2_blocks)
@@ -4312,7 +4284,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                     toggles,
                     fold_v1,
                     &mut accums,
-                    ref_planes.filter(|_| compute.sampling.is_none()),
+                    ref_planes.filter(|_| true),
                 );
                 queued = 0;
             }
@@ -4329,8 +4301,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                         &producer,
                         info,
                         ch,
-                        compute.sampling.is_none()
-                            && rev5_cached_window(ref_planes, &info, ch).is_some(),
+                        rev5_cached_window(ref_planes, &info, ch).is_some(),
                     );
                     queued += 1;
                     if queued == batch_limit {
@@ -4340,7 +4311,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                             toggles,
                             fold_v1,
                             &mut accums,
-                            ref_planes.filter(|_| compute.sampling.is_none()),
+                            ref_planes.filter(|_| true),
                         );
                         queued = 0;
                     }
@@ -4602,7 +4573,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
             toggles,
             fold_v1,
             &mut accums,
-            ref_planes.filter(|_| compute.sampling.is_none()),
+            ref_planes.filter(|_| true),
         );
     }
     #[cfg(feature = "threads")]

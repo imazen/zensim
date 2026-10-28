@@ -621,62 +621,9 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
         pool: &mut Vec<Vec<f32>>,
         front_end: FrontEnd,
         ref_planes: Option<&'a [crate::streaming::XybPyramidLevel]>,
-        sampling: Option<crate::sampling::Sampling>,
         revision: crate::feature_defs::FormulaRevision,
         omit_scale0_xb: bool,
     ) -> Self {
-        if let Some(sampling) = sampling {
-            assert!(matches!(front_end, FrontEnd::Sdr));
-            assert!(
-                !linear_pyramid(),
-                "ZENSIM_PYRAMID=linear does not cover sampled walks"
-            );
-            let make_pair = || {
-                [
-                    sampling.pyramid(source, parallel, revision),
-                    sampling.pyramid(distorted, parallel, revision),
-                ]
-            };
-            #[cfg(feature = "threads")]
-            let sampled = if parallel
-                && source.width() * source.height() >= 65_536
-                && rayon::current_num_threads() > 1
-            {
-                let (a, b) = rayon::join(
-                    || sampling.pyramid(source, parallel, revision),
-                    || sampling.pyramid(distorted, parallel, revision),
-                );
-                [a, b]
-            } else {
-                make_pair()
-            };
-            #[cfg(not(feature = "threads"))]
-            let sampled = make_pair();
-            let scales = sampled[0]
-                .iter()
-                .map(|p| ScaleState {
-                    plane_w: p.1,
-                    plane_h: p.2,
-                    next_ks: 0,
-                })
-                .collect();
-            return Self {
-                source,
-                distorted,
-                sampled: Some(sampled),
-                omit_scale0_xb: false,
-                planes: std::array::from_fn(|_| std::array::from_fn(|_| Vec::new())),
-                scales,
-                parallel,
-                front_end,
-                max_held_rows: vec![0; crate::NUM_SCALES],
-                ref_planes: None,
-                advance_rows: 0,
-                revision,
-                lin: None,
-                lin_buf: Vec::new(),
-            };
-        }
         Self::new_inner(
             source,
             distorted,
@@ -1562,7 +1509,6 @@ mod tests {
                         false,
                         &mut spool,
                         FrontEnd::Sdr,
-                        None,
                         None,
                         revision,
                         omit,

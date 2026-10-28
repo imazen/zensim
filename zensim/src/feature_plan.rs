@@ -287,7 +287,6 @@ impl Plan {
             coarse_y_only_scales: 0,
             local_only: false,
             omit_edges: false,
-            sampling: None,
             v1_pools,
             v1_full_scales: if v1_pools == V1PoolsMode::Full {
                 let weighted = crate::feature_defs::family_slots(ComputeToken::Masked, ns)
@@ -471,7 +470,6 @@ impl Plan {
         // The globaff LAYOUT flag follows the width; the computation follows
         // the request (it is cheap, but a wide layout must not imply it).
         compute.full_res_xb = requested.full_res_xb || !compute.allows_full_res_y_subset();
-        compute.sampling = requested.sampling;
         compute.coarse_y_only_scales = if (!compute.v2_blocks || compute.chroma_local_families())
             && compute.free_extras == V1FreeExtras::Off
             && compute.v1_pools != V1PoolsMode::Full
@@ -540,18 +538,6 @@ impl Plan {
         // runs again against it.
         if let Some(extra) = rev5_unsupported(&want, walk_width, revision) {
             return Err(PlanError::UnsupportedAtRev5 { extra });
-        }
-        let sampling =
-            crate::sampling::Sampling::from_model(model).map_err(|_| PlanError::UnreadableBake)?;
-        if let Some(sampling) = sampling {
-            if !sampling.is_direct()
-                && (!plan.compute.allows_full_res_y_subset()
-                    || !matches!(plan.compute.v1_pools, V1PoolsMode::Off | V1PoolsMode::Peaks)
-                    || (sampling.keep_y && plan.compute.full_res_xb))
-            {
-                return Err(PlanError::UnreadableBake);
-            }
-            plan.compute.sampling = Some(sampling);
         }
         // **The SERVING-plan footprint policy, applied to both branches.**
         // `fold_engine::pools_mode_for_need` owns the rule that `Off` is never
@@ -722,7 +708,6 @@ impl Plan {
             coarse_y_only_scales: a.coarse_y_only_scales & b.coarse_y_only_scales,
             local_only: a.local_only && b.local_only,
             omit_edges: a.omit_edges && b.omit_edges,
-            sampling: a.sampling,
             v1_pools: pools_union(a.v1_pools, b.v1_pools),
             v1_full_scales: if pools_union(a.v1_pools, b.v1_pools) == V1PoolsMode::Full {
                 a.full_pool_scales() | b.full_pool_scales()

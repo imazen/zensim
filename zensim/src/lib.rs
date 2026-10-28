@@ -232,7 +232,6 @@ mod metric;
 pub(crate) mod mlp;
 mod pool;
 pub mod profile;
-mod sampling;
 pub(crate) mod score_math;
 mod simd_ops;
 pub mod source;
