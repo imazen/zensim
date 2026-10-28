@@ -5,12 +5,14 @@
 //! from on 2026-10-28). Run both on the same machine and compare:
 //!
 //! ```text
-//! cargo run --release -p zensim --features training --example split_parity_check > slim.tsv
+//! cargo run --release -p zensim --features training,classification --example split_parity_check > slim.tsv
 //! ```
 //!
-//! The pairs come from `split_parity/pairs.rs`, a byte-identical copy of the research file.
+//! The pairs come from `split_parity/pairs.rs` and the extra input surfaces from
+//! `split_parity/surfaces.rs`, byte-identical copies of the research files.
 
 include!("split_parity/pairs.rs");
+include!("split_parity/surfaces.rs");
 
 use zensim::{DiffmapOptions, RgbSlice, Zensim, ZensimProfile, ZensimScratch};
 
@@ -45,7 +47,8 @@ fn main() {
     let line = |surface: &str, profile: &str, pair: &str, value: String| {
         println!("{surface}\t{profile}\t{pair}\t{value}")
     };
-    for pair in &split_parity_pairs() {
+    let pairs = split_parity_pairs();
+    for pair in &pairs {
         let src = RgbSlice::new(bytemuck::cast_slice(&pair.src), pair.width, pair.height);
         let dst = RgbSlice::new(bytemuck::cast_slice(&pair.dst), pair.width, pair.height);
         for (pname, profile) in &profiles {
@@ -102,4 +105,5 @@ fn main() {
             line("compute_all_features", pname, &pair.id, v);
         }
     }
+    extra_surfaces(&profiles, &pairs, &line);
 }
