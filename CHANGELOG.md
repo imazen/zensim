@@ -7,6 +7,11 @@
      Persist across patch releases. Only clear when the breaking release ships. -->
 _(none currently queued)_
 
+## Workspace
+
+- The repository continues the published crates from 0.2.7; development history after 0.2.7 moved to
+  [imazen/zensimx](https://github.com/imazen/zensimx) (2026-10-28).
+
 ## zensim
 
 ### [0.2.7] - 2026-04-27

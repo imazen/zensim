@@ -1,5 +1,9 @@
 # zensim [![CI](https://img.shields.io/github/actions/workflow/status/imazen/zensim/ci.yml?style=flat-square)](https://github.com/imazen/zensim/actions/workflows/ci.yml) [![crates.io](https://img.shields.io/crates/v/zensim?style=flat-square)](https://crates.io/crates/zensim) [![lib.rs](https://img.shields.io/crates/v/zensim?style=flat-square&label=lib.rs&color=blue)](https://lib.rs/crates/zensim) [![docs.rs](https://img.shields.io/docsrs/zensim?style=flat-square)](https://docs.rs/zensim) [![license](https://img.shields.io/crates/l/zensim?style=flat-square)](https://github.com/imazen/zensim#license)
 
+> **Repository history.** This repository continues the published `zensim` crate from 0.2.7.
+> The research, training and evaluation history written after 0.2.7 lives in
+> [imazen/zensimx](https://github.com/imazen/zensimx).
+
 Perceptual image similarity in 22 ms at 1080p. 18x faster than C++ SSIMULACRA2 at 4K.
 
 Built on the same psychovisual foundations as SSIMULACRA2 and butteraugli — multi-scale SSIM, edge artifacts, detail loss, and high-frequency features in XYB color space — but with trained weights, fused SIMD kernels, and multi-threaded computation.
