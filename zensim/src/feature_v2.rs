@@ -234,19 +234,9 @@ pub(crate) enum RingForm {
 
 impl RingForm {}
 
-/// **The ring form for this process**, read once.
-///
-/// `ZENSIM_RING_FORM=hpm` selects [`RingForm::HighPassMu`]; unset or `raw`
-/// keeps [`RingForm::Raw`]. Any other value panics, so a typo can never
-/// measure the wrong arm silently.
+/// The ring form: the raw error product (revision 6's high-pass form is not shipped).
 pub(crate) fn active_ring_form() -> RingForm {
-    use std::sync::OnceLock;
-    static FORM: OnceLock<RingForm> = OnceLock::new();
-    *FORM.get_or_init(|| match std::env::var("ZENSIM_RING_FORM").as_deref() {
-        Err(_) | Ok("raw") => RingForm::Raw,
-        Ok("hpm") => RingForm::HighPassMu,
-        Ok(other) => panic!("ZENSIM_RING_FORM={other:?}: expected \"raw\" or \"hpm\""),
-    })
+    RingForm::Raw
 }
 
 #[cfg(test)]
@@ -893,9 +883,7 @@ fn tail_edges() -> &'static TailEdges {
 const DIAG_BINS: usize = 64;
 
 fn rev4_diag_enabled() -> bool {
-    use std::sync::OnceLock;
-    static D: OnceLock<bool> = OnceLock::new();
-    *D.get_or_init(|| std::env::var_os("ZENSIM_REV4_DIAG").is_some())
+    false
 }
 
 /// Diag bin for the C3 maps (range [0, 1]): 16 log bins per decade over
@@ -2727,15 +2715,6 @@ fn fold_v1_one_band(
 /// from `raw`, which is the memory-traffic shape (see that type's doc).
 /// SelfBlur requires `pools` (the band-local H buffer lives in the band's
 /// [`FoldPoolScratch`]) and is refused otherwise.
-///
-/// RAII closer for the [`crate::fold_timing::Phase::FoldWall`] span, so the
-/// early `return` in the parallel arm still records it. Diagnostic only.
-struct FoldTimingGuard(Option<std::time::Instant>);
-impl Drop for FoldTimingGuard {
-    fn drop(&mut self) {
-        crate::fold_timing::stop(self.0.take(), crate::fold_timing::Phase::FoldWall, 0);
-    }
-}
 
 #[allow(clippy::too_many_arguments)]
 fn fold_v1_basic_bands(
@@ -2759,8 +2738,6 @@ fn fold_v1_basic_bands(
         "FoldHSource::SelfBlur needs the band pool scratch for its H buffer"
     );
     debug_assert_eq!(rows.start % V1_BAND_ROWS, 0, "strips are 32-row aligned");
-    let __t_fold = crate::fold_timing::start();
-    let __fold_guard = FoldTimingGuard(__t_fold);
     // Band starts, in order. Bands are INDEPENDENT: each reads a clamped
     // window of the shared planes and produces its own sums, so the only
     // cross-band coupling is the accumulation itself.
@@ -2835,7 +2812,6 @@ fn fold_v1_basic_bands(
                     .map(|(chunk, ps)| {
                         let mut out = Vec::with_capacity(chunk.len());
                         for &b0 in chunk {
-                            let __t = crate::fold_timing::start();
                             let mut local = V1BasicSums::at_revision(free.revision());
                             fold_v1_one_band(
                                 b0,
@@ -2850,7 +2826,6 @@ fn fold_v1_basic_bands(
                                 Some((&mut *ps, work)),
                                 free,
                             );
-                            crate::fold_timing::stop(__t, crate::fold_timing::Phase::BandBusy, 0);
                             out.push(local);
                         }
                         out
@@ -2866,7 +2841,6 @@ fn fold_v1_basic_bands(
             None => starts
                 .par_iter()
                 .map(|&b0| {
-                    let __t = crate::fold_timing::start();
                     let mut local = V1BasicSums::at_revision(free.revision());
                     fold_v1_one_band(
                         b0,
@@ -2881,7 +2855,6 @@ fn fold_v1_basic_bands(
                         None,
                         free,
                     );
-                    crate::fold_timing::stop(__t, crate::fold_timing::Phase::BandBusy, 0);
                     local
                 })
                 .collect(),
@@ -3373,7 +3346,6 @@ fn rev5_job_scratch(n: usize) -> ScratchV2Strip {
     ] {
         plane.resize(n, 0.0);
     }
-    crate::fold_timing::work(crate::fold_timing::Work::ScratchZeroElements, 9 * n);
     scratch
 }
 
@@ -3414,7 +3386,6 @@ fn rev5_job_blur(
         ..
     } = scratch;
     let src = source.unwrap_or(&src_wide[..n]);
-    let start = crate::fold_timing::start();
     // The moments in one pass where both blurs run their per-output trees:
     // the horizontal planes then live a column panel at a time in the first
     // rows of `mu1_h`..`s12_h` instead of filling them. Only pools of eight or
@@ -3456,8 +3427,6 @@ fn rev5_job_blur(
             revision,
         );
     }
-    crate::fold_timing::stop(start, crate::fold_timing::Phase::BlurHWall, info.scale);
-    let start = crate::fold_timing::start();
     if !fused {
         for (horizontal, vertical) in [
             (&mu1_h[..n], &mut mu1[..n]),
@@ -3505,9 +3474,6 @@ fn rev5_job_blur(
             revision,
         );
     }
-    crate::fold_timing::work(crate::fold_timing::Work::ActivityChain, 1);
-    crate::fold_timing::work(crate::fold_timing::Work::V2Cell, 1);
-    crate::fold_timing::stop(start, crate::fold_timing::Phase::PhaseAV2Planes, info.scale);
 }
 
 /// One queued strip job's work: phase A into its own planes, phase B into its
@@ -3524,7 +3490,6 @@ fn rev5_execute_job(
     retain: bool,
     reference: Option<&[crate::streaming::XybPyramidLevel]>,
 ) {
-    let busy = crate::fold_timing::start();
     let info = &job.info;
     let scale = info.scale;
     let local = compute.at_scale(scale);
@@ -3590,7 +3555,6 @@ fn rev5_execute_job(
             &mut job.result,
             &mut job.bands,
         );
-        crate::fold_timing::stop(busy, crate::fold_timing::Phase::BBusy, scale);
         return;
     }
     rev5_job_blur(
@@ -3649,7 +3613,6 @@ fn rev5_execute_job(
             );
         }
     }
-    crate::fold_timing::stop(busy, crate::fold_timing::Phase::BBusy, scale);
 }
 
 /// Add one executed strip job's partials to the walk's totals. Jobs merge
@@ -4190,7 +4153,6 @@ fn rev5_run_jobs(
     reference: Option<&[crate::streaming::XybPyramidLevel]>,
 ) {
     use rayon::prelude::*;
-    let wall = crate::fold_timing::start();
     let retain = retention.is_some();
     let outputs = retention.map(|r| r.job_sinks(jobs));
     let execute = |job: &mut Rev5StripJob, output: Option<RetainedRows<'_>>| {
@@ -4203,7 +4165,6 @@ fn rev5_run_jobs(
     } else {
         jobs.par_iter_mut().for_each(|job| execute(job, None));
     }
-    crate::fold_timing::stop(wall, crate::fold_timing::Phase::BWall, 0);
     // Every cell's kernel partial is merged once, in the producer's order.
     // Do not replace this loop with a parallel/tree reduction.
     for job in jobs.iter() {
@@ -4719,7 +4680,6 @@ fn stream_phase_a<S: ImageSource, D: ImageSource>(
     // and serve as its temps (the same reuse the bs2 fill below makes —
     // which runs after and overwrites them again, so ordering here is
     // load-bearing: act-dst BEFORE bs2).
-    let __t_pap = crate::fold_timing::start();
     if want_act_dst {
         if activity_dst.len() < n_wide {
             activity_dst.resize(n_wide, 0.0);
@@ -4751,11 +4711,6 @@ fn stream_phase_a<S: ImageSource, D: ImageSource>(
             BLUR_RADIUS,
         );
     }
-    crate::fold_timing::stop(
-        __t_pap,
-        crate::fold_timing::Phase::PhaseAAppendPlanes,
-        info.scale,
-    );
 }
 
 /// Phase B of one (strip, channel): the materialized walk's kernel set
@@ -4826,7 +4781,6 @@ fn stream_phase_b(
         let s12_strip = &scr.s12[off..off + strip_n];
         let act_strip = &scr.activity[off..off + strip_n];
 
-        let __t_dense = crate::fold_timing::start();
         // REV4 C3/C4-noise hook — `None` when both are off (the
         // `transducer_bank`-shaped invariant branch inside the kernel).
         let cell = &mut acc.rev4[scale];
@@ -4857,7 +4811,6 @@ fn stream_phase_b(
             r4d,
             toggles.formula_revision,
         );
-        crate::fold_timing::stop(__t_dense, crate::fold_timing::Phase::DenseKernel, scale);
         acc.dense[scale].accumulate(&d);
         let mut retained_grad = GradientAccum::default();
 
@@ -4892,7 +4845,6 @@ fn stream_phase_b(
             } else {
                 None
             };
-            let __t_grad = crate::fold_timing::start();
             let g = gradient_block_kernel_at_revision(
                 &src_win[g_off..g_off + g_n],
                 &dst_win[g_off..g_off + g_n],
@@ -4906,7 +4858,6 @@ fn stream_phase_b(
                 r4w.gmsbank,
                 toggles.formula_revision,
             );
-            crate::fold_timing::stop(__t_grad, crate::fold_timing::Phase::GradKernel, scale);
             acc.grad[scale].accumulate(&g);
             if toggles.gradient_features {
                 retained_grad = g;
@@ -4922,7 +4873,6 @@ fn stream_phase_b(
         // phase-A activity plane covers the halo rows, which is exactly
         // what `gridblk_strip_wide`'s contract requires).
         if r4w.gridblk_period >= 2 {
-            let __t_r4 = crate::fold_timing::start();
             gridblk_strip_wide(
                 &src_win[..n_wide],
                 &dst_win[..n_wide],
@@ -4934,7 +4884,6 @@ fn stream_phase_b(
                 r4w.gridblk_period,
                 &mut acc.rev4[scale].grid,
             );
-            crate::fold_timing::stop(__t_r4, crate::fold_timing::Phase::Rev4Kernel, scale);
         }
     }
 
@@ -4963,7 +4912,6 @@ fn stream_phase_b(
         let ssq_strip = &scr.ssq[off..off + strip_n];
         let act_strip = &scr.activity[off..off + strip_n];
         let hl = append2.map(|p| p.hl_bins).unwrap_or(false) && cross.is_some();
-        let __t_app = crate::fold_timing::start();
         let a = append_block_kernel(
             src_strip,
             dst_strip,
@@ -4978,7 +4926,6 @@ fn stream_phase_b(
             width,
             strip_h,
         );
-        crate::fold_timing::stop(__t_app, crate::fold_timing::Phase::AppendKernel, scale);
         acc.app[scale].accumulate(&a);
 
         // CSFW pass accumulates only on (Y, csfw_block on) — a separate
@@ -4986,7 +4933,6 @@ fn stream_phase_b(
         // every other path never dispatches it. `cross.is_some()` is the
         // Y-channel discriminant, same as the BANDVIS gate above.
         if let Some(cp) = csfw.filter(|_| cross.is_some()) {
-            let __t_csfw = crate::fold_timing::start();
             let c = csfw_block_kernel(
                 src_strip,
                 dst_strip,
@@ -4996,14 +4942,12 @@ fn stream_phase_b(
                 strip_h,
                 toggles.formula_revision,
             );
-            crate::fold_timing::stop(__t_csfw, crate::fold_timing::Phase::CsfwKernel, scale);
             acc.csfw[scale].accumulate(&c);
         }
     }
 
     if v2_blocks && toggles.blockiness {
         let (sum_v, sum_h) = &mut acc.block[scale];
-        let __t_blk = crate::fold_timing::start();
         blockiness_sparse_strip_wide(
             &src_win[..n_wide],
             &dst_win[..n_wide],
@@ -5014,7 +4958,6 @@ fn stream_phase_b(
             sum_v,
             sum_h,
         );
-        crate::fold_timing::stop(__t_blk, crate::fold_timing::Phase::BlockKernel, scale);
     }
 }
 
@@ -6181,7 +6124,6 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
         (batch_limit > 0 && retention.is_none() && ref_planes.is_none() && !block_walk)
             .then(|| Rev5Pipeline::new(compute, fold_v1, batch_limit, core::mem::take(rev5_jobs)));
 
-    let __t_walk = crate::fold_timing::start();
     #[cfg(feature = "threads")]
     if block_walk {
         rev5_block_walk::<S, D, ALL_CHANNELS>(
@@ -6210,10 +6152,8 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
         if stop.is_some_and(|token| token.check().is_err()) {
             break;
         }
-        let __t_prod = crate::fold_timing::start();
         let next = producer.next_strip();
         let Some(info) = next else {
-            crate::fold_timing::stop(__t_prod, crate::fold_timing::Phase::Producer, 0);
             break;
         };
         let scale = info.scale;
@@ -6247,7 +6187,6 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
             blockiness: local.blockiness,
             ..toggles
         };
-        crate::fold_timing::stop(__t_prod, crate::fold_timing::Phase::Producer, scale);
         // A declared-ID plan that reads no v1-era slot and runs no v2-era work at this scale skips its strips whole
         // (the producer has already carried the pyramid through them). Only the pre-Rev5 scale-0 side channel keeps
         // them.
@@ -6338,7 +6277,6 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
             && compute.formula_revision < FormulaRevision::Rev5
             && let Some(mo) = mean_offset.as_deref_mut()
         {
-            let __t_mo = crate::fold_timing::start();
             let y1 = info.y0 + info.strip_h;
             let src: [&[f32]; 3] = core::array::from_fn(|ch| {
                 producer.rows(crate::feature_v2_stream::Side::Source, ch, 0, info.y0, y1)
@@ -6353,7 +6291,6 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                 )
             });
             mo.add_strip(info.y0, info.strip_h, info.plane_w, src, dst, parallel);
-            crate::fold_timing::stop(__t_mo, crate::fold_timing::Phase::MeanOffset, scale);
         }
 
         // REV4 C4: the strip's ±1-px dilated dst-Y edge mask — built once
@@ -6433,7 +6370,6 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
         #[cfg(feature = "threads")]
         if fuse_channels && retention.is_some() {
             use rayon::prelude::*;
-            let __t_f = crate::fold_timing::start();
             let outputs: [Option<RetainedRows<'_>>; 3] = if let Some(ret) = retention.as_deref_mut()
             {
                 let sinks = ret.row_sinks().nth(scale).unwrap();
@@ -6458,7 +6394,6 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                     if !ALL_CHANNELS && !compute.channel_active(scale, ch) {
                         return;
                     }
-                    let __t = crate::fold_timing::start();
                     if rayon::current_num_threads() == 1
                         && retained_core_admits(&local)
                         && let Some(output) = output.as_mut()
@@ -6476,7 +6411,6 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                                 free: local.free_work(ch, scale),
                             },
                         );
-                        crate::fold_timing::stop(__t, crate::fold_timing::Phase::BBusy, scale);
                         return;
                     }
                     if self_blur {
@@ -6519,16 +6453,13 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                         local.rev4_work(scale, ch, bleed_mask, chroma_strip),
                         acc,
                     );
-                    crate::fold_timing::stop(__t, crate::fold_timing::Phase::BBusy, scale);
                 });
-            crate::fold_timing::stop(__t_f, crate::fold_timing::Phase::BWall, scale);
             continue;
         }
 
         #[cfg(feature = "threads")]
         if fuse_channels {
             use rayon::prelude::*;
-            let __t_f = crate::fold_timing::start();
             scratch_strips
                 .par_iter_mut()
                 .zip(accums.par_iter_mut())
@@ -6537,7 +6468,6 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                     if !ALL_CHANNELS && !compute.channel_active(scale, ch) {
                         return;
                     }
-                    let __t = crate::fold_timing::start();
                     if self_blur {
                         // Phase A is skipped whole; only the wide-window
                         // gather it also performs is still needed.
@@ -6575,9 +6505,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                         local.rev4_work(scale, ch, bleed_mask, chroma_strip),
                         acc,
                     );
-                    crate::fold_timing::stop(__t, crate::fold_timing::Phase::BBusy, scale);
                 });
-            crate::fold_timing::stop(__t_f, crate::fold_timing::Phase::BWall, scale);
             continue;
         }
 
@@ -6589,7 +6517,6 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
             // done. Values are identical to the serial order (pure
             // kernels on identical inputs); only cache locality differs,
             // and parallel wall is not the 1-thread gate path.
-            let __t_a = crate::fold_timing::start();
             scratch_strips
                 .par_iter_mut()
                 .enumerate()
@@ -6597,7 +6524,6 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                     if !ALL_CHANNELS && !compute.channel_active(scale, ch) {
                         return;
                     }
-                    let __t = crate::fold_timing::start();
                     stream_phase_a(
                         &producer,
                         &info,
@@ -6609,10 +6535,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                         scr,
                         compute.formula_revision,
                     );
-                    crate::fold_timing::stop(__t, crate::fold_timing::Phase::ABusy, scale);
                 });
-            crate::fold_timing::stop(__t_a, crate::fold_timing::Phase::AWall, scale);
-            let __t_between = crate::fold_timing::start();
             let scratches: &[ScratchV2Strip; 3] = scratch_strips;
             // Retention hooks (appendix N): serial copies between the two
             // fan-outs — pure reads of the phase-A scratches + windows.
@@ -6632,13 +6555,10 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                     );
                 }
             }
-            crate::fold_timing::stop(__t_between, crate::fold_timing::Phase::Between, scale);
-            let __t_b = crate::fold_timing::start();
             accums.par_iter_mut().enumerate().for_each(|(ch, acc)| {
                 if !ALL_CHANNELS && !compute.channel_active(scale, ch) {
                     return;
                 }
-                let __t = crate::fold_timing::start();
                 let (src_win, dst_win) =
                     stream_windows_shared(&producer, &info, ch, &scratches[ch]);
                 let cross = if ch == 1 && append_cell_active(false, ch, scale) {
@@ -6670,9 +6590,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                     local.rev4_work(scale, ch, bleed_mask, chroma_strip),
                     acc,
                 );
-                crate::fold_timing::stop(__t, crate::fold_timing::Phase::BBusy, scale);
             });
-            crate::fold_timing::stop(__t_b, crate::fold_timing::Phase::BWall, scale);
             true
         } else {
             false
@@ -6812,9 +6730,6 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
         *rev5_jobs = core::mem::take(&mut pipe.free);
     }
 
-    if let Some(t) = __t_walk {
-        crate::fold_timing::walk_done(t.elapsed().as_nanos() as u64);
-    }
     producer.recycle(stream_pool);
     if let Some(ret) = retention.as_deref_mut() {
         for (ch, acc) in accums.iter_mut().enumerate() {

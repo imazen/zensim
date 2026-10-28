@@ -179,13 +179,7 @@ impl RootForm {
 /// one era on two different selectors is worse than one honest limitation.
 #[inline]
 pub(crate) fn active_root_form() -> RootForm {
-    use std::sync::OnceLock;
-    static FORM: OnceLock<RootForm> = OnceLock::new();
-    *FORM.get_or_init(|| match std::env::var("ZENSIM_ROOT_FORM").as_deref() {
-        Ok("libm") => RootForm::LibmPowf,
-        Ok("sqrt") => RootForm::NestedSqrt,
-        _ => RootForm::for_revision(crate::ssim_form::active_revision()),
-    })
+    RootForm::for_revision(crate::ssim_form::active_revision())
 }
 
 /// The pooled-root operations, as a method chain so a call site reads the
@@ -368,13 +362,7 @@ impl PowForm {
 /// forms need, and it should be done for all three at once or not at all.
 #[inline]
 pub fn active_pow_form() -> PowForm {
-    use std::sync::OnceLock;
-    static FORM: OnceLock<PowForm> = OnceLock::new();
-    *FORM.get_or_init(|| match std::env::var("ZENSIM_POW_FORM").as_deref() {
-        Ok("libm") => PowForm::LibmPowf,
-        Ok("pure") => PowForm::PureRust,
-        _ => PowForm::for_revision(crate::ssim_form::active_revision()),
-    })
+    PowForm::for_revision(crate::ssim_form::active_revision())
 }
 
 /// The score path's transcendentals, as a method chain so a call site reads

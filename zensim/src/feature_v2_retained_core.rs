@@ -63,7 +63,6 @@ pub(super) fn rev5_blur_into_retained(
     pyr_src.copy_from_slice(&src[off..off + core_n]);
     pyr_dst.copy_from_slice(&dst[off..off + core_n]);
 
-    let start = crate::fold_timing::start();
     fused_blur_h_ssim_banded(
         src,
         dst,
@@ -76,8 +75,6 @@ pub(super) fn rev5_blur_into_retained(
         false,
         FormulaRevision::Rev5,
     );
-    crate::fold_timing::stop(start, crate::fold_timing::Phase::BlurHWall, info.scale);
-    let start = crate::fold_timing::start();
 
     // The activity chain needs mean-reference halo values. Its core lives
     // only in the final buffer; the two halo intervals remain in scratch.
@@ -116,13 +113,9 @@ pub(super) fn rev5_blur_into_retained(
     crate::blur::box_blur_v_local_rows(&mu2_h[..n], act, width, height, first..end);
     // Five logical vertical planes; the mean-reference plane is partitioned
     // into two scratch halos and the retained core.
-    crate::fold_timing::work(crate::fold_timing::Work::VerticalPlane, 5);
-    crate::fold_timing::work(crate::fold_timing::Work::ActivityChain, 1);
-    crate::fold_timing::work(crate::fold_timing::Work::V2Cell, 1);
     if let Some(sd) = &mut output.basic {
         incant!(retain_basic_sd(m1, m2, sq, err, sd), [v4x, v4, v3, scalar]);
     }
-    crate::fold_timing::stop(start, crate::fold_timing::Phase::PhaseAV2Planes, info.scale);
 }
 
 #[inline(never)]
@@ -138,7 +131,6 @@ pub(super) fn rev5_retained_phase_b(
     let n = width * info.strip_h;
     let off = HALO_P * width;
     let [m1, m2, sq, err, act] = planes;
-    let start = crate::fold_timing::start();
     let d = dense_block_kernel_at_revision(
         &raw[0][off..off + n],
         &raw[1][off..off + n],
@@ -153,11 +145,9 @@ pub(super) fn rev5_retained_phase_b(
         None,
         work.toggles.formula_revision,
     );
-    crate::fold_timing::stop(start, crate::fold_timing::Phase::DenseKernel, info.scale);
     acc.dense[info.scale].accumulate(&d);
     let mut gradient = GradientAccum::default();
     if work.toggles.gradient_features {
-        let start = crate::fold_timing::start();
         let g_off = (HALO_P - 1) * width;
         let g_n = width * (info.strip_h + 2);
         gradient = gradient_block_kernel_at_revision(
@@ -173,7 +163,6 @@ pub(super) fn rev5_retained_phase_b(
             false,
             work.toggles.formula_revision,
         );
-        crate::fold_timing::stop(start, crate::fold_timing::Phase::GradKernel, info.scale);
         acc.grad[info.scale].accumulate(&gradient);
     }
     if let Some(strips) = &mut acc.retained_strips

@@ -1098,8 +1098,6 @@ impl ComputeSet {
             self.v1_pools = V1PoolsMode::Peaks;
         }
         self.v1_full_scales = Self::ALL_SCALES;
-        if !self.formula_revision.computes_globaff() {
-        }
         self.free_extras = V1FreeExtras::Off;
     }
 
@@ -1134,7 +1132,6 @@ impl ComputeSet {
     pub(crate) fn free_work(&self, ch: usize, scale: usize) -> crate::fused::FreeExtrasWork {
         if self.formula_revision >= FormulaRevision::Rev5 && scale == 0 && ch != 1 {
             // Count actual scale-zero chroma consumers, regardless of plan intent.
-            crate::fold_timing::work(crate::fold_timing::Work::Scale0XbCell, 1);
         }
         let bounded_err = self.bounded_err();
         crate::fused::FreeExtrasWork {
@@ -1428,10 +1425,6 @@ impl ScratchV2Strip {
     fn new_for(max_n: usize, needs: StripPlaneNeeds) -> Self {
         let hn = if needs.h { max_n } else { 0 };
         let vn = if needs.v2 { max_n } else { 0 };
-        crate::fold_timing::work(
-            crate::fold_timing::Work::ScratchZeroElements,
-            2 * max_n + 4 * hn + 8 * vn,
-        );
         Self {
             src_wide: vec![0.0f32; max_n],
             dst_wide: vec![0.0f32; max_n],
@@ -1751,7 +1744,6 @@ fn fused_blur_h_ssim_banded(
             .zip(s12_h.par_chunks_mut(n))
             .enumerate()
             .for_each(|(b, (((m1, m2), sq), s12))| {
-                let __t = crate::fold_timing::start();
                 let y0 = b * H_BLUR_BAND_ROWS;
                 let rows = m1.len() / width;
                 let lo = y0 * width;
@@ -1772,7 +1764,6 @@ fn fused_blur_h_ssim_banded(
                     BLUR_RADIUS,
                     revision,
                 );
-                crate::fold_timing::stop(__t, crate::fold_timing::Phase::BlurBandBusy, 0);
             });
         return;
     }
@@ -1816,16 +1807,12 @@ fn run_blur_pass_inner(
     t_scale: usize,
     revision: FormulaRevision,
 ) {
-    if revision >= FormulaRevision::Rev5 && want_v2 {
-        crate::fold_timing::work(crate::fold_timing::Work::V2Cell, 1);
-    }
 
     let n = width * height_local;
     let mu1_h = &mut mu1_h[..n];
     let mu2_h = &mut mu2_h[..n];
     let ssq_h = &mut ssq_h[..n];
     let s12_h = &mut s12_h[..n];
-    let __t_h = crate::fold_timing::start();
     fused_blur_h_ssim_banded(
         src,
         dst,
@@ -1838,7 +1825,6 @@ fn run_blur_pass_inner(
         parallel,
         revision,
     );
-    crate::fold_timing::stop(__t_h, crate::fold_timing::Phase::BlurHWall, 0);
 
     // BLOCK-SKIPPING: everything below this line feeds v2-era kernels ONLY.
     // `fold_v1_basic_bands` reads the H-blurred planes above and computes its
@@ -1849,7 +1835,6 @@ fn run_blur_pass_inner(
         return;
     }
 
-    let __t_pa = crate::fold_timing::start();
     let mu1 = &mut mu1[..n];
     crate::blur::box_blur_v_from_copy_at_revision(
         mu1_h,
@@ -1887,7 +1872,6 @@ fn run_blur_pass_inner(
         revision,
     );
 
-    crate::fold_timing::work(crate::fold_timing::Work::ActivityChain, 1);
     let abs_src = &mut abs_src[..n];
     crate::simd_ops::abs_diff_into(src, mu1, abs_src);
     let activity = &mut activity[..n];
@@ -1900,7 +1884,6 @@ fn run_blur_pass_inner(
         BLUR_RADIUS,
         revision,
     );
-    crate::fold_timing::stop(__t_pa, crate::fold_timing::Phase::PhaseAV2Planes, t_scale);
 }
 
 // ============================================================================
@@ -2585,11 +2568,7 @@ fn dense_block_kernel_pools_scalar(
 /// their comparison is not silently turned into an identity by the switch.
 #[inline]
 fn era2_dense_enabled() -> bool {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    // ERA-2 DEFAULT (2026-08-31): ON. `ZENSIM_ERA2_DENSE=0` restores era-1's
-    // per-row f64 reduction for measurement only.
-    *ON.get_or_init(|| std::env::var("ZENSIM_ERA2_DENSE").as_deref() != Ok("0"))
+    true
 }
 
 #[allow(clippy::too_many_arguments)]

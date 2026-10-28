@@ -5364,12 +5364,6 @@ fn fused_vblur_ssim_local<P: crate::featcanon::Pool>(
     // already resolved to `Local` by the caller.
     _mode: crate::featcanon::Mode,
 ) -> StripChannelAccum {
-    if radius > 0 {
-        crate::fold_timing::work(crate::fold_timing::Work::VerticalPlane, 4);
-    }
-    if !free.local_only && !free.omit_peaks {
-        crate::fold_timing::work(crate::fold_timing::Work::PeakBand, 1);
-    }
     let form = free.luma_form();
     // Revision 7: the v1 edge ratio without cancellation.
     let stable7 = free.revision().stable_forms();
@@ -5592,14 +5586,6 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
         r,
     };
     let local = P::LANES == 16;
-    if local {
-        if radius > 0 {
-            crate::fold_timing::work(crate::fold_timing::Work::VerticalPlane, 4);
-        }
-        if !free.local_only && !free.omit_peaks {
-            crate::fold_timing::work(crate::fold_timing::Work::PeakBand, 1);
-        }
-    }
     let mut win = if local {
         VWin::Local
     } else {

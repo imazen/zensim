@@ -115,7 +115,6 @@ pub(crate) fn box_blur_v_from_copy_at_revision(
     radius: usize,
     revision: crate::feature_defs::FormulaRevision,
 ) {
-    crate::fold_timing::work(crate::fold_timing::Work::VerticalPlane, 1);
     if matches!(
         crate::featcanon::canon_blur_axis_for(crate::featcanon::mode(revision), revision),
         crate::featcanon::BlurMode::Local
@@ -3194,29 +3193,10 @@ fn h_tile_2in2out(
     });
 }
 
-/// Column-tile width for the fused H blur; 0 disables tiling.
-///
-/// **It lives on the ENTRY, not on selected call sites, and that is
-/// load-bearing.** Tiling only phase A left the v1 reference path untiled, and
-/// running the suite with the tile forced on failed exactly four cross-path
-/// gates — `folded720_v1_basic_matches_v1_path`,
-/// `folded720_v1_pools_match_v1_path`,
-/// `prepared_ref_with_moments_bit_identical_to_pair_path` and
-/// `v1_372_bit_exact_to_fold_at_every_width` — because the fold read tiled H
-/// planes while v1 read untiled ones. Every caller of this entry now tiles
-/// identically, so those gates hold under the tile instead of needing a
-/// re-pin. (The tile boundaries are a pure function of `(width, tile)`, and
-/// the H blur is row-local, so band shape cannot make two callers disagree.)
+/// The H-blur column-tile width: [`H_TILE_WIDTH`]. It is semantics, not a tuning knob.
 #[inline]
 pub(crate) fn h_blur_tile_width() -> usize {
-    use std::sync::OnceLock;
-    static N: OnceLock<usize> = OnceLock::new();
-    *N.get_or_init(|| {
-        std::env::var("ZENSIM_H_TILE")
-            .ok()
-            .and_then(|v| v.parse::<usize>().ok())
-            .unwrap_or(H_TILE_WIDTH)
-    })
+    H_TILE_WIDTH
 }
 
 /// Default column-tile width for the H blur. **ERA-2 DEFAULT (2026-08-31).**
@@ -6796,7 +6776,6 @@ pub(crate) fn fused_blur_hv_ssim_at_revision(
         return false;
     }
     let err = revision_h >= crate::feature_defs::FormulaRevision::Rev3;
-    crate::fold_timing::work(crate::fold_timing::Work::VerticalPlane, 4);
     #[cfg(all(target_arch = "x86_64", feature = "avx512"))]
     if let Some(token) = <archmage::X64V4xToken as archmage::SimdToken>::summon() {
         fused_blur_hv_local11_wide_v4x(
@@ -7007,7 +6986,6 @@ pub(crate) fn activity_at_revision(
     if radius != 5 || !local {
         return false;
     }
-    crate::fold_timing::work(crate::fold_timing::Work::VerticalPlane, 1);
     #[cfg(all(target_arch = "x86_64", feature = "avx512"))]
     if let Some(token) = <archmage::X64V4xToken as archmage::SimdToken>::summon() {
         activity_local11_wide_v4x(token, src, mu, output, width, height, hbuf, row);
@@ -8762,145 +8740,6 @@ mod tests {
             &[],
         );
         (state, acc)
-    }
-
-    #[test]
-    fn rev3_ssim_pixel_adjoint_matches_fused_directional_differences() {
-        if !crate::ssim_form::run_at_revision(
-            "3",
-            "blur::tests::rev3_ssim_pixel_adjoint_matches_fused_directional_differences",
-            "SSIM-ADJOINT-RAN",
-        ) {
-            return;
-        }
-        assert_eq!(
-            crate::ssim_form::active_luma_form(),
-            crate::ssim_form::SsimLumaForm::Clamp
-        );
-        let mut checks = 0;
-        let mut max_error = 0.0_f64;
-        let mut max_normalized = 0.0_f64;
-        for (w, h) in [(8, 8), (17, 9), (65, 97)] {
-            let n = w * h;
-            let a: Vec<_> = (0..n)
-                .map(|i| {
-                    let sign = if (i % w + i / w) % 2 == 0 { 1.0 } else { -1.0 };
-                    sign * (0.3 + 0.03 * (i % 7) as f32)
-                })
-                .collect();
-            let (identity, _) = adjoint_probe_ssim_state(&a, &a, w, h);
-            assert!(identity[4].iter().all(|v| *v == 0.0));
-            for i in 0..n {
-                assert_eq!(
-                    crate::ssim_form::probe_rev3_ssim_partials(
-                        identity[0][i],
-                        identity[1][i],
-                        identity[2][i],
-                        identity[3][i]
-                    ),
-                    [0.0; 3]
-                );
-            }
-            for (factor, offset) in [(0.75, 0.05), (1.2, -0.1), (0.9, 1.5)] {
-                let d: Vec<_> = a
-                    .iter()
-                    .enumerate()
-                    .map(|(i, v)| factor * v + offset + 0.015 * ((i * 11) % 7) as f32)
-                    .collect();
-                let (state, acc) = adjoint_probe_ssim_state(&a, &d, w, h);
-                let partials: Vec<_> = (0..n)
-                    .map(|i| {
-                        crate::ssim_form::probe_rev3_ssim_partials(
-                            state[0][i],
-                            state[1][i],
-                            state[2][i],
-                            state[3][i],
-                        )
-                    })
-                    .collect();
-                for p in [1, 2, 4, 8] {
-                    let pool = |acc: &crate::fused::StripChannelAccum| {
-                        let sum = match p {
-                            1 => acc.ssim_d,
-                            2 => acc.ssim_d2,
-                            4 => acc.ssim_d4,
-                            8 => acc.ssim_d8,
-                            _ => unreachable!(),
-                        };
-                        (sum / n as f64).powf(1.0 / f64::from(p))
-                    };
-                    let root = pool(&acc);
-                    let fields: [Vec<f32>; 3] = std::array::from_fn(|k| {
-                        (0..n)
-                            .map(|i| {
-                                (root.powi(1 - p) * f64::from(state[4][i]).powi(p - 1) / n as f64
-                                    * partials[i][k]) as f32
-                            })
-                            .collect()
-                    });
-                    let transposes = fields.map(|f| adjoint_probe_transpose(&f, w, h));
-                    let gradient: Vec<_> = (0..n)
-                        .map(|i| {
-                            f64::from(transposes[0][i])
-                                + 2.0 * f64::from(d[i]) * f64::from(transposes[1][i])
-                                + 2.0 * f64::from(d[i] - a[i]) * f64::from(transposes[2][i])
-                        })
-                        .collect();
-                    for rect in [
-                        [0, 0, w, h],
-                        [0, 0, 4, 4],
-                        [w / 3, h / 3, 2 * w / 3, 2 * h / 3],
-                    ] {
-                        let direction: Vec<_> = (0..n)
-                            .map(|i| {
-                                if i % w >= rect[0]
-                                    && i % w < rect[2]
-                                    && i / w >= rect[1]
-                                    && i / w < rect[3]
-                                {
-                                    ((i * 11 + i / w * 29) % 31) as f32 / 15.0 - 1.0
-                                } else {
-                                    0.0
-                                }
-                            })
-                            .collect();
-                        let predicted: f64 = gradient
-                            .iter()
-                            .zip(&direction)
-                            .map(|(g, v)| g * f64::from(*v))
-                            .sum();
-                        for epsilon in [0.001, 0.0005] {
-                            let plus: Vec<_> = d
-                                .iter()
-                                .zip(&direction)
-                                .map(|(d, v)| d + epsilon * v)
-                                .collect();
-                            let minus: Vec<_> = d
-                                .iter()
-                                .zip(&direction)
-                                .map(|(d, v)| d - epsilon * v)
-                                .collect();
-                            let observed = (pool(&adjoint_probe_ssim_state(&a, &plus, w, h).1)
-                                - pool(&adjoint_probe_ssim_state(&a, &minus, w, h).1))
-                                / (2.0 * f64::from(epsilon));
-                            let error = (observed - predicted).abs();
-                            let tolerance =
-                                2e-5_f64.max(0.01 * observed.abs().max(predicted.abs()));
-                            max_error = max_error.max(error);
-                            max_normalized = max_normalized.max(error / tolerance);
-                            assert!(
-                                error <= tolerance,
-                                "SSIM {w}x{h} factor={factor} offset={offset} p={p} rect={rect:?} eps={epsilon}: predicted={predicted} observed={observed}"
-                            );
-                            checks += 1;
-                        }
-                    }
-                }
-            }
-        }
-        println!(
-            "SSIM-ADJOINT-RAN checks={checks} max_abs_error={max_error:.9e} max_fraction_of_tolerance={max_normalized:.9e}"
-        );
     }
 
     /// `box_spread_sum_preserving` must conserve total mass EXACTLY (to f64

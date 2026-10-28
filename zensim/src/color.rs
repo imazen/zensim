@@ -2750,30 +2750,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn opsin_leaf_follows_the_passed_revision_in_a_rev3_process() {
-        if !crate::ssim_form::run_at_revision(
-            "3",
-            "color::tests::opsin_leaf_follows_the_passed_revision_in_a_rev3_process",
-            "OPSIN-LEAF-RAN",
-        ) {
-            return;
-        }
-        opsin_leaf_follows_the_passed_revision();
-    }
-
-    #[test]
-    fn opsin_leaf_follows_the_passed_revision_in_a_rev4_process() {
-        if !crate::ssim_form::run_at_revision(
-            "4",
-            "color::tests::opsin_leaf_follows_the_passed_revision_in_a_rev4_process",
-            "OPSIN-LEAF-RAN",
-        ) {
-            return;
-        }
-        opsin_leaf_follows_the_passed_revision();
-    }
-
     /// Scalar tier: a pixel gets the same bits in a full 8-pixel chunk and in the
     /// remainder (2026-09-25 fix). Calls the scalar variants directly, so it runs on
     /// every host, not only where dispatch lands on scalar. `mul_add` is unfused on

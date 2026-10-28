@@ -223,7 +223,6 @@ pub(crate) mod feature_v2;
 pub(crate) mod feature_v2_blocks;
 pub(crate) mod feature_v2_stream;
 pub(crate) mod fold_engine;
-pub(crate) mod fold_timing;
 mod fused;
 pub(crate) mod globaff;
 mod gmsbank_constants;

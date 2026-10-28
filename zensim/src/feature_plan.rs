@@ -923,38 +923,6 @@ pub(crate) fn bake_read_slots(model: &crate::mlp::Model) -> Option<SlotSet> {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn declared_difference_plan_omits_reference_fragility_and_union_restores_it() {
-        if !crate::ssim_form::run_at_revision(
-            "5",
-            "feature_plan::tests::declared_difference_plan_omits_reference_fragility_and_union_restores_it",
-            "MAPPERF-SUBSET-PLAN-RAN",
-        ) {
-            return;
-        }
-        use super::*;
-        let ns = crate::NUM_SCALES;
-        let all = crate::feature_defs::family_slots(ComputeToken::Basic, ns)
-            .union(&crate::feature_defs::family_slots(ComputeToken::V2, ns));
-        let reference = SlotSet::from_slots(all.iter_slots().filter(|&id| {
-            crate::feature_defs::def_at(id, ns).is_some_and(|d| d.signal.name == "pjnd_fragility")
-        }));
-        let difference =
-            SlotSet::from_slots(all.iter_slots().filter(|id| !reference.contains(*id)));
-        let complete = Plan::derive(&all, 720).unwrap();
-        let narrow = Plan::derive(&difference, 720).unwrap();
-        assert!(narrow.compute.omit_pjnd_fragility);
-        assert!(!complete.compute.omit_pjnd_fragility);
-        assert!(narrow.emit.covers(&difference));
-        assert!(narrow.emit.intersect(&reference).is_empty());
-        assert_eq!(narrow.emit.union(&reference), complete.emit);
-        assert_eq!(
-            Plan::widened_to_identity(&narrow, 944).compute,
-            narrow.compute
-        );
-        assert_eq!(narrow.union(&complete).compute, complete.compute);
-        println!("MAPPERF-SUBSET-PLAN-RAN");
-    }
 
     #[test]
     fn fullres_y_subset_plan_restores_chroma_for_any_consumer() {

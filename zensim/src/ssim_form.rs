@@ -996,121 +996,16 @@ impl SsimLumaForm {
 /// machinery around it is inert while it still reads `Rev1`.
 pub(crate) const SHIPPED_REVISION: FormulaRevision = FormulaRevision::Rev1;
 
-/// **The revision switch — one owner, read once per process.**
-///
-/// Modelled on [`crate::feature_v2`]'s `era2_dense_enabled`, deliberately and
-/// for its stated reason: *"a switch that some call sites honour and others do
-/// not is the same defect"*. Every SSIM kernel reads this ONCE, above its
-/// loop, and passes the result down; no call site chooses its own form.
-///
-/// `ZENSIM_FORMULA_REV=1`, `=2` and `=3` pin revisions 1, 2 and 3, so a
-/// research extraction can reproduce any era's semantics from one binary
-/// (phase 3's G3.2). Anything else — including unset — is
-/// [`SHIPPED_REVISION`]. The accepted values are the SAME BYTE LENGTH on
-/// purpose: this repo has measured an environment block's size shifting a
-/// binary's layout by ~10 % at 2304²
-/// (`benchmarks/era2_perf_break_2026-08-31.md` §22.5), so an A/B that varies
-/// the value must not vary the length.
-pub(crate) fn active_revision() -> FormulaRevision {
-    use std::sync::OnceLock;
-    static REV: OnceLock<FormulaRevision> = OnceLock::new();
-    *REV.get_or_init(|| match std::env::var("ZENSIM_FORMULA_REV").as_deref() {
-        Ok("1") => FormulaRevision::Rev1,
-        Ok("2") => FormulaRevision::Rev2,
-        Ok("3") => FormulaRevision::Rev3,
-        Ok("4") => FormulaRevision::Rev4,
-        Ok("5") => FormulaRevision::Rev5,
-        Ok("6") => FormulaRevision::Rev6,
-        Ok("7") => FormulaRevision::Rev7,
-        _ => SHIPPED_REVISION,
-    })
+/// The revision a computation without a declared revision runs at: always
+/// [`SHIPPED_REVISION`]. A bake that declares its revision selects it per call.
+pub(crate) const fn active_revision() -> FormulaRevision {
+    SHIPPED_REVISION
 }
 
 /// Explicit research cross-revision replay keeps using the process kernels.
 /// Normal model-bound requests never consult mutable thread/global overrides.
 pub(crate) fn effective_revision(revision: FormulaRevision) -> FormulaRevision {
     revision
-}
-
-#[cfg(test)]
-/// Run one `#[test]` body under an explicit `ZENSIM_FORMULA_REV`.
-///
-/// `ssim_form::active_revision` is a `OnceLock`, so a revision cannot be
-/// changed inside a running process and a revision-specific control has
-/// to own its own process. Returns `true` when this process is ALREADY at
-/// `rev` (run the body); otherwise it re-executes THIS test binary with
-/// the variable set, running exactly this one test, and fails if the
-/// child fails.
-///
-/// This is not a skip: the assertions always execute, once, in the
-/// process that can see them. The parent proves the child really ran the
-/// body by requiring `sentinel` on its stdout — without that, a filter
-/// that matched nothing would exit 0 and the control would pass
-/// vacuously.
-pub(crate) fn run_at_revision(rev: &str, test_path: &str, sentinel: &str) -> bool {
-    if std::env::var("ZENSIM_FORMULA_REV").as_deref() == Ok(rev) {
-        return true;
-    }
-    let exe = std::env::current_exe().expect("test binary path");
-    let out = std::process::Command::new(exe)
-        .args([test_path, "--exact", "--nocapture", "--test-threads=1"])
-        .env("ZENSIM_FORMULA_REV", rev)
-        .output()
-        .expect("re-exec the test binary");
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(
-        out.status.success(),
-        "{test_path} failed at ZENSIM_FORMULA_REV={rev}\n--- stdout ---\n{stdout}\n--- stderr ---\n{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    assert!(
-        stdout.contains(sentinel),
-        "{test_path} exited 0 at ZENSIM_FORMULA_REV={rev} but never reached its body \
-         (sentinel {sentinel:?} absent) — the control did not run\n{stdout}"
-    );
-    false
-}
-
-#[cfg(test)]
-/// Re-run an EXISTING set of tests under a different `ZENSIM_FORMULA_REV`.
-///
-/// The companion of [`run_at_revision`] for controls whose body already
-/// exists and is already exercised at the shipped revision: rather than
-/// copying a 200-line parity test, run the same one again in a process
-/// pinned to `rev`. `expect` is the number of tests the filter must match —
-/// a filter that silently stops matching would otherwise turn the control
-/// into a no-op that still exits 0.
-pub(crate) fn rerun_tests_at_revision(rev: &str, filter: &str, expect: usize) {
-    if std::env::var("ZENSIM_FORMULA_REV").as_deref() == Ok(rev) {
-        return; // the child is running the real tests; nothing to re-spawn
-    }
-    let exe = std::env::current_exe().expect("test binary path");
-    let out = std::process::Command::new(exe)
-        .args([filter, "--nocapture", "--test-threads=1"])
-        .env("ZENSIM_FORMULA_REV", rev)
-        .output()
-        .expect("re-exec the test binary");
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(
-        out.status.success(),
-        "`{filter}` failed at ZENSIM_FORMULA_REV={rev}\n--- stdout ---\n{stdout}\n--- stderr ---\n{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    let ran = stdout
-        .lines()
-        .find_map(|l| {
-            l.strip_prefix("test result: ok. ")?
-                .split(' ')
-                .next()?
-                .parse::<usize>()
-                .ok()
-        })
-        .unwrap_or(0);
-    assert_eq!(
-        ran, expect,
-        "`{filter}` matched {ran} tests at ZENSIM_FORMULA_REV={rev}, expected {expect} — \
-         the control is not running what it claims\n{stdout}"
-    );
 }
 
 /// Refuse, EXPLICITLY, any route the active revision does not serve.
@@ -1173,59 +1068,13 @@ pub(crate) fn refuse_rev4_mix(requested: FormulaRevision) -> Result<(), crate::Z
     Ok(())
 }
 
-/// Warn, once per process, that a pinned research revision is producing a
-/// score from a built-in profile's revision-1 coefficients.
-///
-/// Silent when nothing is pinned, which is every shipping path — the check is
-/// one `OnceLock` read and one comparison against a constant.
-///
-/// This is NOT a refusal. The same entry that scores also emits the features a
-/// research extraction exists to collect, so refusing would break extraction to
-/// protect a number the caller may not be reading. Making it visible is the
-/// most that can be done here; the enforceable contract is `BakeScorer`'s,
-/// where a bake declares its own revision.
-#[inline]
-pub(crate) fn warn_pinned_revision_scoring_once() {
-    if active_revision() == SHIPPED_REVISION {
-        return;
-    }
-    use std::sync::Once;
-    static ONCE: Once = Once::new();
-    ONCE.call_once(|| {
-        eprintln!(
-            "zensim: ZENSIM_FORMULA_REV pins {:?} pixels, but a built-in \
-             profile's bake is revision-1 coefficients. Its FEATURES are the \
-             pinned revision; its SCORE prices them with weights fit against \
-             another extractor and is not a served score. Use BakeScorer with \
-             a bake that declares its revision to get an enforced match.",
-            active_revision()
-        );
-    });
-}
-
 /// The luminance form the active revision selects.
 ///
 /// Call this ONCE per kernel invocation, above the pixel loop — it reads a
 /// `OnceLock`, which LLVM cannot hoist out of a loop for you.
 #[inline]
 pub(crate) fn active_luma_form() -> SsimLumaForm {
-    use std::sync::OnceLock;
-    static FORM: OnceLock<SsimLumaForm> = OnceLock::new();
-    *FORM.get_or_init(|| {
-        // `ZENSIM_SSIM_LUMA` is a MEASUREMENT override and nothing else. R6
-        // has to fit the monotone linear class against all four luminance
-        // arms on ONE set of pixels, from one binary, or the comparison is
-        // confounded by a rebuild (this repo has measured a rebuild alone
-        // moving a 2304^2 timing ~10 %). No shipping path sets it; the
-        // revision is what a shipping path selects.
-        match std::env::var("ZENSIM_SSIM_LUMA").as_deref() {
-            Ok("ssim2") => SsimLumaForm::Ssim2Legacy,
-            Ok("c1") => SsimLumaForm::SsimLumaC1,
-            Ok("lorentz") => SsimLumaForm::Lorentz,
-            Ok("clamp") => SsimLumaForm::Clamp,
-            _ => SsimLumaForm::for_revision(active_revision()),
-        }
-    })
+    SsimLumaForm::for_revision(active_revision())
 }
 
 /// Hoisted splats + the selected form, built once per kernel invocation.

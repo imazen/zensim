@@ -300,16 +300,7 @@ impl HfGainForm {
 /// `ZENSIM_FORMULA_REV` that [`crate::ssim_form::active_revision`] owns.
 #[inline]
 pub(crate) fn active_gain_form() -> HfGainForm {
-    use std::sync::OnceLock;
-    static FORM: OnceLock<HfGainForm> = OnceLock::new();
-    *FORM.get_or_init(|| match std::env::var("ZENSIM_HF_GAIN").as_deref() {
-        Ok("ratio") => HfGainForm::RatioExcess,
-        Ok("bexcess") => HfGainForm::BoundedExcess,
-        Ok("log1p") => HfGainForm::Log1pExcess,
-        Ok("satexcess") => HfGainForm::SaturatingExcess,
-        Ok("cap") => HfGainForm::CappedExcess,
-        _ => HfGainForm::for_revision(crate::ssim_form::active_revision()),
-    })
+    HfGainForm::for_revision(crate::ssim_form::active_revision())
 }
 
 /// **`contrast_inc` / `hf_energy_gain`** — the one member with an arm.

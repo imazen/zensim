@@ -2443,15 +2443,6 @@ pub(crate) fn apply_mlp_scoring_with_codec(
     let Some(loader) = params.mlp_bytes else {
         return Ok(());
     };
-    // A built-in profile's bake declares no revision, so it IS revision 1.
-    // `ZENSIM_FORMULA_REV` pins the PIXELS, not the coefficients — pinning a
-    // research revision and reading a profile score therefore prices revision-1
-    // weights against another era's features. `BakeScorer` refuses that
-    // outright; this path cannot, because the same call also produces the
-    // features a research extraction is there to collect. So it says so, once.
-    if config_from_params(params, false).formula_revision.is_none() {
-        crate::ssim_form::warn_pinned_revision_scoring_once();
-    }
     // **Score-disposition guard (D9).** A bake carrying
     // `zentrain.output_calibration_spline` emits an already-calibrated
     // 0-100 score. Scoring it with `skip_score_mapping == false` applies

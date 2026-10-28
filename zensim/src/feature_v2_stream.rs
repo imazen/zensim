@@ -43,20 +43,9 @@ use crate::feature_v2::gather_strip_halo;
 use crate::feature_v2::{HALO_P, STRIP_ROWS, reflect_101};
 use crate::source::{ImageSource, PixelFormat, SubsetView};
 
-/// Research toggle (`ZENSIM_PYRAMID=linear`): scales 1–3 from 2×2 averages of
-/// linear RGB, each level converted to positive XYB (HaarXYB's pyramid),
-/// instead of 2×2 averages of XYB. Scale 0 and every default path are
-/// unchanged; only the streaming and block producers take it, and the
-/// materialized pyramid builders refuse it. Unset or `xyb` keeps the default;
-/// any other value panics. Exploration record:
-/// `benchmarks/byconstruction_2026-10-22.md`, "Coarse scales in linear light".
+/// Scales 1–3 always come from 2×2 averages of XYB (the linear-light pyramid is research only).
 pub(crate) fn linear_pyramid() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| match std::env::var("ZENSIM_PYRAMID").as_deref() {
-        Err(_) | Ok("xyb") => false,
-        Ok("linear") => true,
-        Ok(other) => panic!("ZENSIM_PYRAMID={other:?}: expected \"xyb\" or \"linear\""),
-    })
+    false
 }
 
 /// Rows `y0 .. y0 + n` of an sRGB8 source as planar linear RGB (`out`: three
@@ -262,7 +251,6 @@ impl RollingPlane {
             //
             // Strictly more deterministic, too: this always yields zeros,
             // where `resize` left a prefix of the previous walk's pixels.
-            crate::fold_timing::work(crate::fold_timing::Work::ScratchZeroElements, need);
             buf = vec![0.0; need];
         }
         Self {
@@ -953,9 +941,6 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
         }
         let n_new = self.advance_rows.min(h0 - hi0);
 
-        if !self.omit_scale0_xb {
-            crate::fold_timing::work(crate::fold_timing::Work::Scale0XbStoredRows, 4 * n_new);
-        }
         // --- Scale-0 conversion, both sides. ---
         //
         // MT (fold-MT lane): the two sides write DISJOINT plane sets and read
@@ -967,7 +952,6 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
         // pool ([`advance_rows_for`]); two sides in parallel double that.
         // The HDR route keeps the serial loop — it shares one `hdr_row`
         // scratch, and a second buffer is not this lane's measurement.
-        let __t_conv = crate::fold_timing::start();
         if self.omit_scale0_xb {
             let width = self.scales[0].plane_w;
             let source = self.source;
@@ -1107,7 +1091,6 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
                 }
             }
         }
-        crate::fold_timing::stop(__t_conv, crate::fold_timing::Phase::ProdConvert, 0);
 
         // `ZENSIM_PYRAMID=linear`: the same rows in linear RGB, the parents of
         // every coarse level.
@@ -1138,7 +1121,6 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
         // consumes rows scale `s-1` produced in this same call. So the fan-out
         // is 6-way per scale, which is a pure schedule change: no value is
         // summed across the boundary, no byte moves.
-        let __t_ds = crate::fold_timing::start();
         if let Some(lin) = self.lin.as_deref_mut() {
             // Each coarse level: 2×2 averages of the parent's linear rows (the
             // XYB cascade's `downscale_2x_into` and row targets), then positive
@@ -1179,7 +1161,6 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
                     );
                 }
             }
-            crate::fold_timing::stop(__t_ds, crate::fold_timing::Phase::ProdDownscale, 0);
             for (scale, held) in self.max_held_rows.iter_mut().enumerate() {
                 let p = &self.planes[0][0][scale];
                 *held = (*held).max(p.hi - p.lo);
@@ -1241,8 +1222,6 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
             }
             chans.iter_mut().for_each(one);
         }
-
-        crate::fold_timing::stop(__t_ds, crate::fold_timing::Phase::ProdDownscale, 0);
 
         for (scale, held) in self.max_held_rows.iter_mut().enumerate() {
             let p = &self.planes[0][0][scale];
@@ -1400,101 +1379,6 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
 mod tests {
     use super::*;
     use crate::source::RgbSlice;
-
-    #[test]
-    fn rev5_downscaled_chroma_matches_full_conversion() {
-        // Tier switches affect the whole process. Isolate them from the
-        // ordinary parallel suite, whose two-pass parity tests need a fixed tier.
-        if std::env::var("REV5_CHROMA_CHILD").as_deref() != Ok("1") {
-            let out = std::process::Command::new(std::env::current_exe().unwrap())
-                .args([
-                    "feature_v2_stream::tests::rev5_downscaled_chroma_matches_full_conversion",
-                    "--exact",
-                    "--nocapture",
-                ])
-                .env("REV5_CHROMA_CHILD", "1")
-                .env("ZENSIM_FORMULA_REV", "5")
-                .output()
-                .unwrap();
-            assert!(
-                out.status.success(),
-                "{}",
-                String::from_utf8_lossy(&out.stderr)
-            );
-            assert!(String::from_utf8_lossy(&out.stdout).contains("REV5-CHROMA-PASS"));
-            return;
-        }
-        use crate::feature_defs::FormulaRevision;
-        let _guard = archmage::testing::lock_token_testing();
-        let _ = archmage::testing::for_each_token_permutation(
-            archmage::testing::CompileTimePolicy::Warn,
-            |_| {
-                for (w, h) in [
-                    (64, 64),
-                    (97, 63),
-                    (64, 129),
-                    (97, 193),
-                    (257, 257),
-                    (257, 289),
-                ] {
-                    let pixels = textured_image(w, h, 71);
-                    let image = RgbSlice::new(&pixels, w, h);
-                    let cached_planes = materialize(&image);
-                    for (cached, parallel) in
-                        [(false, false), (true, false), (false, true), (true, true)]
-                    {
-                        let feed = cached.then_some(cached_planes.as_slice());
-                        let (mut pool_a, mut pool_b) = (Vec::new(), Vec::new());
-                        let mut a = StripPlaneProducer::new_with_ref_feed(
-                            &image,
-                            &image,
-                            parallel,
-                            &mut pool_a,
-                            FrontEnd::Sdr,
-                            feed,
-                            None,
-                            FormulaRevision::Rev5,
-                            false,
-                        );
-                        let mut b = StripPlaneProducer::new_with_ref_feed(
-                            &image,
-                            &image,
-                            parallel,
-                            &mut pool_b,
-                            FrontEnd::Sdr,
-                            feed,
-                            None,
-                            FormulaRevision::Rev5,
-                            true,
-                        );
-                        while let Some(ia) = a.next_strip() {
-                            let ib = b.next_strip().unwrap();
-                            assert_eq!(
-                                (ia.scale, ia.y0, ia.strip_h),
-                                (ib.scale, ib.y0, ib.strip_h)
-                            );
-                            for ch in 0..3 {
-                                if ia.scale == 0 && ch != 1 {
-                                    continue;
-                                }
-                                for side in [Side::Source, Side::Distorted] {
-                                    assert_eq!(
-                                        a.rows(side, ch, ia.scale, ia.y0, ia.y0 + ia.strip_h),
-                                        b.rows(side, ch, ib.scale, ib.y0, ib.y0 + ib.strip_h),
-                                        "{w}x{h} scale={} ch={ch}",
-                                        ia.scale
-                                    );
-                                }
-                            }
-                        }
-                        assert!(b.next_strip().is_none());
-                        assert_eq!(b.planes[0][0][0].buf.len(), 2 * w);
-                    }
-                }
-            },
-        );
-        println!("REV5-CHROMA-PASS");
-    }
 
     /// Deterministic textured content (same family as feature_v2's tests).
     fn textured_image(w: usize, h: usize, seed: u32) -> Vec<[u8; 3]> {
@@ -1667,190 +1551,6 @@ mod tests {
                             g.0, g.1, g.2, g.3
                         );
                     }
-                }
-            }
-        }
-    }
-
-    /// THE C1 gate: every emitted strip's wide window — both sides, all
-    /// 3 channels — is byte-equal to `gather_strip_halo` run against the
-    /// materialized planes; interior strips' zero-copy windows equal the
-    /// filled ones; every kernel strip of every scale is emitted exactly
-    /// once, ascending per scale; capacity budget holds.
-    /// `ZENSIM_PYRAMID=linear` (a child process, the toggle being read once
-    /// per process): every strip window of both producers, both sides, every
-    /// channel and scale, bit for bit against the whole-image form (scale 0
-    /// as the default conversion; each coarse level the 2×2 average of the
-    /// parent level's linear RGB, converted to positive XYB in one call), at
-    /// revisions 5 and 7, with the walk's scale-0 chroma omission requested
-    /// and refused. Negative control: the coarse levels differ from the
-    /// XYB-averaged pyramid.
-    #[cfg(feature = "threads")]
-    #[test]
-    fn linear_pyramid_producers_match_the_whole_image_form() {
-        if std::env::var("ZENSIM_PYRAMID").as_deref() != Ok("linear") {
-            let output = std::process::Command::new(std::env::current_exe().unwrap())
-                .args([
-                    "feature_v2_stream::tests::linear_pyramid_producers_match_the_whole_image_form",
-                    "--exact",
-                ])
-                .env("ZENSIM_PYRAMID", "linear")
-                .output()
-                .unwrap();
-            assert!(
-                output.status.success(),
-                "{}\n{}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
-            );
-            assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
-            return;
-        }
-        use crate::feature_defs::FormulaRevision;
-        use crate::feature_v2_blocks::{BlockPool, CHUNK_ROWS, gather_window, produce_chunk};
-        use std::sync::Arc;
-        assert!(linear_pyramid());
-        let whole = |img: &RgbSlice<'_>, revision| {
-            let (mut w, mut h) = (img.width(), img.height());
-            let mut out = vec![(
-                crate::streaming::convert_source_to_xyb(img, w, false, revision),
-                w,
-                h,
-            )];
-            let mut lin: [Vec<f32>; 3] = std::array::from_fn(|_| vec![0.0; w * h]);
-            for y in 0..h {
-                let row: &[[u8; 3]] = bytemuck::cast_slice(&img.row_bytes(y)[..w * 3]);
-                for (x, p) in row.iter().enumerate() {
-                    for ch in 0..3 {
-                        lin[ch][y * w + x] = crate::color::srgb_u8_to_linear(p[ch]);
-                    }
-                }
-            }
-            for _ in 1..crate::NUM_SCALES {
-                let (nw, nh) = (w / 2, h / 2);
-                let next: [Vec<f32>; 3] = std::array::from_fn(|ch| {
-                    let mut v = vec![0.0; nw * nh];
-                    crate::blur::downscale_2x_into(&lin[ch], w, &mut v, nw, nh);
-                    v
-                });
-                let pixels: Vec<[f32; 3]> = (0..nw * nh)
-                    .map(|i| [next[0][i], next[1][i], next[2][i]])
-                    .collect();
-                let mut xyb: [Vec<f32>; 3] = std::array::from_fn(|_| vec![0.0; nw * nh]);
-                {
-                    let [x, y, b] = &mut xyb;
-                    crate::color::linear_to_positive_xyb_planar_into(&pixels, x, y, b, revision);
-                }
-                out.push((xyb, nw, nh));
-                (lin, w, h) = (next, nw, nh);
-            }
-            out
-        };
-        let cases = [
-            (96usize, 64usize),
-            (127, 93),
-            (208, 144),
-            (96, 1030),
-            (320, 517),
-            (77, 300),
-        ];
-        for revision in [FormulaRevision::Rev5, FormulaRevision::Rev7] {
-            for (w, h) in cases {
-                let src = textured_image(w, h, 11);
-                let dst = distort(&src);
-                let s_img = RgbSlice::new(&src, w, h);
-                let d_img = RgbSlice::new(&dst, w, h);
-                let expected = [whole(&s_img, revision), whole(&d_img, revision)];
-                // Negative control: averaging XYB instead gives other levels.
-                let mut avg = expected[1][0].0.clone();
-                for (scale, (planes, cw, chh)) in expected[1].iter().enumerate().skip(1) {
-                    let pw = w >> (scale - 1);
-                    avg = std::array::from_fn(|ch| {
-                        let mut v = vec![0.0; cw * chh];
-                        crate::blur::downscale_2x_into(&avg[ch], pw, &mut v, *cw, *chh);
-                        v
-                    });
-                    assert_ne!(*planes, avg, "{w}x{h} scale {scale}");
-                }
-                let dims: Vec<(usize, usize)> =
-                    (0..crate::NUM_SCALES).map(|s| (w >> s, h >> s)).collect();
-                let pool = Arc::new(BlockPool::default());
-                let chunks: Vec<[crate::feature_v2_blocks::ChunkPlanes; 2]> = (0..h
-                    .div_ceil(CHUNK_ROWS))
-                    .map(|k| {
-                        [
-                            produce_chunk(&s_img, k, &dims, false, revision, &pool),
-                            produce_chunk(&d_img, k, &dims, false, revision, &pool),
-                        ]
-                    })
-                    .collect();
-                for omit in [false, true] {
-                    let mut spool = Vec::new();
-                    let mut prod = StripPlaneProducer::new_with_ref_feed(
-                        &s_img,
-                        &d_img,
-                        false,
-                        &mut spool,
-                        FrontEnd::Sdr,
-                        None,
-                        None,
-                        revision,
-                        omit,
-                    );
-                    let (mut wide, mut wide_ref, mut wide_blk) =
-                        (Vec::new(), Vec::new(), Vec::new());
-                    let mut strips = 0;
-                    while let Some(info) = prod.next_strip() {
-                        strips += 1;
-                        let n_wide = info.plane_w * info.wide_h();
-                        wide.resize(n_wide, 0.0);
-                        wide_ref.resize(n_wide, 0.0);
-                        wide_blk.resize(n_wide, 0.0);
-                        for (side, si) in [(Side::Source, 0), (Side::Distorted, 1)] {
-                            let (planes, pw, ph) = &expected[si][info.scale];
-                            assert_eq!((*pw, *ph), (info.plane_w, info.plane_h));
-                            for ch in 0..3 {
-                                gather_strip_halo(
-                                    &planes[ch],
-                                    *pw,
-                                    *ph,
-                                    info.y0,
-                                    info.wide_h(),
-                                    HALO_P,
-                                    &mut wide_ref,
-                                );
-                                prod.fill_wide(side, ch, &info, &mut wide);
-                                let blocks: Vec<_> = chunks
-                                    .iter()
-                                    .filter_map(|c| c[si][ch][info.scale].clone())
-                                    .collect();
-                                gather_window(&blocks, &info, &mut wide_blk);
-                                for i in 0..n_wide {
-                                    let at = || {
-                                        format!(
-                                            "{revision:?} omit={omit} {w}x{h} scale {} y0={} \
-                                             side {side:?} ch {ch} idx {i}",
-                                            info.scale, info.y0
-                                        )
-                                    };
-                                    assert_eq!(
-                                        wide[i].to_bits(),
-                                        wide_ref[i].to_bits(),
-                                        "{}",
-                                        at()
-                                    );
-                                    assert_eq!(
-                                        wide_blk[i].to_bits(),
-                                        wide_ref[i].to_bits(),
-                                        "{}",
-                                        at()
-                                    );
-                                }
-                            }
-                        }
-                    }
-                    assert!(strips > 0);
-                    prod.recycle(&mut spool);
                 }
             }
         }
