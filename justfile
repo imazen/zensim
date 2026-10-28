@@ -11,3 +11,10 @@ test:
 
 clippy:
     cargo clippy --offline --workspace --all-targets --all-features -- -D warnings
+
+
+path-test:
+    cargo test --offline -p zensim --test cross_path --features training,classification,zenpixels -- --test-threads=1
+
+path-audit *args:
+    cargo run --offline --release -p zensim --example path_audit --features training,classification -- {{args}}

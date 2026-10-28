@@ -59,6 +59,7 @@ enough = { workspace = true }
 zenresize = { git = "https://github.com/imazen/zenresize", rev = "e3975fb9d6d6b7baa96038a0eb8e27febb37c012", default-features = false, features = ["std"] }
 
 [dev-dependencies]
+zenbench = { workspace = true }
 image = { workspace = true }
 # Builds synthetic bakes for the layout tests; stripped from the published manifest.
 zenpredict-bake = { git = "https://github.com/imazen/zenanalyze", rev = "f0903489300aea240ffae2e3f1359f8f2b9a0ba4" }

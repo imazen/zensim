@@ -31,5 +31,5 @@ enough = { version = "0.4.2", default-features = false, features = ["std"] }
 zenpredict = { version = "0.2.0", git = "https://github.com/imazen/zenanalyze", rev = "f0903489300aea240ffae2e3f1359f8f2b9a0ba4" }
 zenpixels = { version = ">=0.2.10, <0.4.0", default-features = false }
 codec-corpus = "1.0.3"
-zenbench = "0.1.2"
+zenbench = { version = "0.1.11", default-features = false }
 zenresize = { version = "0.2.1", default-features = false, features = ["std"] }
