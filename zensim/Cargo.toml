@@ -1,15 +1,25 @@
 [package]
 name = "zensim"
-version = "0.2.7"
+version = "0.3.0"
 edition = "2024"
 description = "Fast psychovisual image similarity metric"
 repository = "https://github.com/imazen/zensim"
 license = "MIT OR Apache-2.0"
 readme = "../README.md"
-rust-version = "1.89.0"
+rust-version = "1.93.0"
 keywords = ["image", "quality", "ssim", "perceptual", "similarity"]
 categories = ["multimedia::images", "computer-vision"]
-exclude = ["benches/", "tests/", "CLAUDE.md", "CONTEXT-HANDOFF.md", "FEEDBACK.md", ".claude/", ".superwork/", ".zenbench/", "copter-report/", ".github/", "Cross.toml", "justfile", "Cargo.toml.original.txt", "fuzz/"]
+# Source plus the bakes `profile.rs` embeds. Every `include_bytes!("../weights/…")`
+# in `src/` must be listed here or the published crate does not compile.
+include = [
+    "src/**/*.rs",
+    "weights/v47_strict_qat_native_byid_2026-09-06.bin",
+    "weights/rev7_general_h128_2026-10-27.bin",
+    "weights/rev7_codec_h128_2026-10-27.bin",
+]
+
+[package.metadata.docs.rs]
+all-features = true
 
 [features]
 default = ["avx512", "imgref", "threads"]
@@ -17,8 +27,8 @@ avx512 = ["archmage/avx512", "magetypes/avx512"]
 ## Enable multi-threaded computation via rayon. Disable for wasm or single-threaded use.
 threads = ["dep:rayon"]
 ## Exposes training/research API: ZensimConfig, score_from_features, WEIGHTS,
-## FEATURES_PER_SCALE. These items control metric internals (blur kernel,
-## scale count) whose outputs are incomparable with the default trained weights.
+## FEATURES_PER_SCALE. These items control metric internals (blur kernel, scale
+## count) whose outputs are incomparable with the default trained weights.
 training = []
 ## Exposes classification API: classify(), ClassifiedResult, ErrorClassification,
 ## DeltaStats, AlphaStratifiedStats. Used by zensim-regress for regression testing.
@@ -30,22 +40,23 @@ imgref = ["dep:imgref", "dep:rgb"]
 ## color primaries. Handles RGBX/BGRX (automatic opaque) and premultiplied
 ## alpha (un-premultiplied on the fly).
 zenpixels = ["dep:zenpixels"]
-## Enable high-quality downscale filters (Mitchell, Lanczos) for pyramid construction.
-## Uses zenresize for resampling — training/research feature.
-## Commented out: zenresize not yet published to crates.io.
-# zenresize = ["dep:zenresize"]
 
 [dependencies]
 archmage = { workspace = true }
 bytemuck = { workspace = true }
 magetypes = { workspace = true }
+libm = { workspace = true }
 rayon = { workspace = true, optional = true }
 thiserror = { workspace = true }
 linear-srgb = { workspace = true }
 imgref = { workspace = true, optional = true }
 rgb = { workspace = true, optional = true }
-zenpixels = { version = "0.2.10", optional = true, default-features = false }
-# zenresize = { workspace = true, optional = true }  # re-enable when published
+zenpixels = { version = ">=0.2.11, <0.4.0", default-features = false, features = ["std"], optional = true }
+# MLP runtime for the trained profiles (ZNPR v3 bakes).
+zenpredict = { workspace = true }
+# Cooperative cancellation: `Zensim::with_stop`, `ZensimError::Cancelled`.
+enough = { workspace = true }
+zenresize = { git = "https://github.com/imazen/zenresize", rev = "e3975fb9d6d6b7baa96038a0eb8e27febb37c012", default-features = false, features = ["std"] }
 
 [dev-dependencies]
 image = { workspace = true }
@@ -58,4 +69,4 @@ too_many_arguments = "allow"
 
 [lints.rust.unexpected_cfgs]
 level = "warn"
-check-cfg = ['cfg(feature, values("zenresize", "training", "imgref", "classification", "zenpixels", "threads"))']  # zenresize kept in check-cfg for gated code
+check-cfg = ['cfg(feature, values("training", "imgref", "classification", "zenpixels", "threads"))']

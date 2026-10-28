@@ -59,6 +59,7 @@ pub enum DiffmapWeighting {
     /// Custom weights `[X, Y, B]`. Automatically normalized to sum to 1.0.
     /// All values must be non-negative.
     Custom([f32; 3]),
+
 }
 
 impl Default for DiffmapWeighting {
@@ -129,6 +130,7 @@ pub struct DiffmapOptions {
     ///
     /// Default: `false`.
     pub include_hf: bool,
+
 }
 
 impl From<DiffmapWeighting> for DiffmapOptions {
@@ -342,6 +344,37 @@ fn trained_multiscale_weights(
     };
 
     (per_scale, blend)
+}
+
+/// Reflect(mirror)-pad linear-f32 RGB planes up to at least `MIN_PYRAMID_DIM`
+/// per dim, returning tightly-packed `(planes, padded_width, padded_height)`.
+/// The planar-f32 analogue of `crate::metric::reflect_pad_to_min`; keeps the
+/// original image in the top-left so the diffmap can be trimmed back.
+fn reflect_pad_planes_f32(
+    planes: [&[f32]; 3],
+    w: usize,
+    h: usize,
+    stride: usize,
+) -> ([Vec<f32>; 3], usize, usize) {
+    use crate::metric::{MIN_PYRAMID_DIM, reflect_index};
+    let (bw, bh) = (w.max(MIN_PYRAMID_DIM), h.max(MIN_PYRAMID_DIM));
+    let mut out = [
+        vec![0f32; bw * bh],
+        vec![0f32; bw * bh],
+        vec![0f32; bw * bh],
+    ];
+    for y in 0..bh {
+        let sy = reflect_index(y, h);
+        for x in 0..bw {
+            let sx = reflect_index(x, w);
+            let si = sy * stride + sx;
+            let di = y * bw + x;
+            out[0][di] = planes[0][si];
+            out[1][di] = planes[1][si];
+            out[2][di] = planes[2][si];
+        }
+    }
+    (out, bw, bh)
 }
 
 /// Apply contrast masking to the diffmap using source luminance variance.
@@ -604,7 +637,7 @@ impl crate::metric::Zensim {
     ///
     /// # Errors
     ///
-    /// Returns [`ZensimError::ImageTooSmall`] if dimensions < 8×8.
+    /// Returns [`ZensimError::ImageTooSmall`] if either dimension is zero.
     pub fn compute_with_ref_and_diffmap(
         &self,
         precomputed: &PrecomputedReference,
@@ -613,13 +646,22 @@ impl crate::metric::Zensim {
     ) -> Result<DiffmapResult, ZensimError> {
         let options = options.into();
         let params = self.profile().params();
-        if distorted.width() < 8 || distorted.height() < 8 {
+        if distorted.width() == 0 || distorted.height() == 0 {
             return Err(ZensimError::ImageTooSmall);
         }
+        crate::metric::validate_ref_match(precomputed, distorted)?;
+        crate::metric::check_within_max_pixels(
+            distorted.width(),
+            distorted.height(),
+            self.max_pixels(),
+        )?;
 
         let width = distorted.width();
         let height = distorted.height();
+        self.check_stop()?;
         let config = config_from_params(params, self.parallel());
+        crate::metric::check_profile_route(params, &config)?;
+        crate::metric::validate_cached_revision(precomputed, config.revision())?;
         let (per_scale_ch, scale_blend) = options.weighting.resolve_multiscale(
             params.weights,
             config.num_scales,
@@ -627,47 +669,124 @@ impl crate::metric::Zensim {
             options.include_hf,
         );
 
+        let guided = false;
+
         // Fused: compute the full zensim score AND the multi-scale diffmap in a
         // single pipeline. Each scale's SSIM error is collected, then coarser
         // scales are upsampled and blended with trained scale weights.
-        let (result, diffmap_padded, padded_width) =
-            crate::streaming::compute_zensim_streaming_with_ref_and_diffmap(
-                precomputed,
-                distorted,
-                &config,
-                params.weights,
-                &per_scale_ch,
-                &scale_blend,
-            );
-        let result = result.with_profile(self.profile());
+        // Sub-64px distorted is reflect-padded to align with the (padded)
+        // reference pyramid; the reflect-pad keeps the original image in the
+        // top-left, so the diffmap trim below recovers it via `width`/`height`.
+        let (result, mut diffmap_padded, padded_width) =
+            if width < crate::metric::MIN_PYRAMID_DIM || height < crate::metric::MIN_PYRAMID_DIM {
+                let d = crate::metric::reflect_pad_to_min(distorted);
+                crate::streaming::compute_zensim_streaming_with_ref_and_diffmap(
+                    precomputed,
+                    &d,
+                    &config,
+                    params.weights,
+                    &per_scale_ch,
+                    &scale_blend,
+                    guided,
+                    self.stop_ref(),
+                )
+            } else {
+                crate::streaming::compute_zensim_streaming_with_ref_and_diffmap(
+                    precomputed,
+                    distorted,
+                    &config,
+                    params.weights,
+                    &per_scale_ch,
+                    &scale_blend,
+                    guided,
+                    self.stop_ref(),
+                )
+            };
+        self.check_stop()?;
+        let mut result = result.with_profile(self.profile());
+        // Apply the profile's REAL scoring (bake forward + spline), exactly as
+        // `compute()` does. FIX 2026-07-18: this path previously returned the
+        // legacy V0_2 dot-product score for EVERY profile (apply_mlp_scoring
+        // was never called), so encoder closed loops steering on
+        // `DiffmapResult::score()` were tracking V0_2 — not the shipped
+        // metric. Two paths scoring the same pair differently is a bug per the
+        // parity contract; no-op for linear-weight legacy profiles
+        // (`mlp_bytes: None` early-returns).
+        if config.revision() >= crate::feature_defs::FormulaRevision::Rev5
+            && crate::fold_engine::score_plan(params, &config, true)
+                .is_some_and(|p| p.compute.v2_blocks)
+        {
+            // The legacy weighted map still has its documented basic-plane
+            // meaning; the complete candidate score and vector come from its
+            // canonical reference-fed fold, including every v2 read.
+            result = self.compute_with_ref(precomputed, distorted)?;
+        }
+        let already_scored = config.revision() >= crate::feature_defs::FormulaRevision::Rev5
+            && crate::fold_engine::score_plan(params, &config, true)
+                .is_some_and(|p| p.compute.v2_blocks);
+        if !already_scored {
+            crate::metric::apply_mlp_scoring_with_codec(
+                &mut result,
+                params,
+                width as u32,
+                height as u32,
+                None,
+            )?;
+        }
 
-        // Trim padded-width diffmap to actual width
-        let mut diffmap = if padded_width == width {
-            diffmap_padded
+        // `precomputed.scales[0]` is `(padded_width, comp_h)`. For a ≥64px
+        // distorted `comp_h == height` (original flow: trim to logical width,
+        // then mask). For a reflect-padded sub-64px distorted the diffmap is
+        // computed at the padded reference dims, so mask + sqrt there (the
+        // masking reads the ref Y-plane at scale 0) then trim the original
+        // top-left width×height (reflect-pad keeps the original there).
+        let comp_h = precomputed.scales[0].2;
+        let diffmap = if comp_h == height {
+            let mut diffmap = if padded_width == width {
+                diffmap_padded
+            } else {
+                let mut out = Vec::with_capacity(width * height);
+                for y in 0..height {
+                    out.extend_from_slice(
+                        &diffmap_padded[y * padded_width..y * padded_width + width],
+                    );
+                }
+                out
+            };
+            if let Some(strength) = options.masking_strength {
+                apply_contrast_masking(
+                    &mut diffmap,
+                    precomputed,
+                    width,
+                    height,
+                    padded_width,
+                    strength,
+                );
+            }
+            if options.sqrt {
+                sqrt_inplace(&mut diffmap);
+            }
+            diffmap
         } else {
+            if let Some(strength) = options.masking_strength {
+                apply_contrast_masking(
+                    &mut diffmap_padded,
+                    precomputed,
+                    padded_width,
+                    comp_h,
+                    padded_width,
+                    strength,
+                );
+            }
+            if options.sqrt {
+                sqrt_inplace(&mut diffmap_padded);
+            }
             let mut out = Vec::with_capacity(width * height);
             for y in 0..height {
                 out.extend_from_slice(&diffmap_padded[y * padded_width..y * padded_width + width]);
             }
             out
         };
-
-        // Post-processing: contrast masking
-        if let Some(strength) = options.masking_strength {
-            apply_contrast_masking(
-                &mut diffmap,
-                precomputed,
-                width,
-                height,
-                padded_width,
-                strength,
-            );
-        }
-
-        // Post-processing: sqrt for distance-like calibration
-        if options.sqrt {
-            sqrt_inplace(&mut diffmap);
-        }
 
         Ok(DiffmapResult {
             result,
@@ -689,7 +808,14 @@ impl crate::metric::Zensim {
     ///
     /// # Errors
     ///
-    /// Returns [`ZensimError::ImageTooSmall`] if dimensions < 8×8.
+    /// Returns [`ZensimError::ImageTooSmall`] if either dimension is zero.
+    /// Returns [`ZensimError::DimensionMismatch`] if `width` / `height`
+    /// differ from the precomputed reference's recorded dimensions.
+    /// Returns [`ZensimError::ImageTooLarge`] if `width × height` exceeds
+    /// the configured `max_pixels` cap or if `stride × height` overflows
+    /// `usize`. Returns [`ZensimError::InvalidStride`] if `stride < width`.
+    /// Returns [`ZensimError::InvalidDataLength`] if any plane is shorter
+    /// than `stride × height`.
     pub fn compute_with_ref_and_diffmap_linear_planar(
         &self,
         precomputed: &PrecomputedReference,
@@ -701,11 +827,31 @@ impl crate::metric::Zensim {
     ) -> Result<DiffmapResult, ZensimError> {
         let options = options.into();
         let params = self.profile().params();
-        if width < 8 || height < 8 {
+        if width == 0 || height == 0 {
             return Err(ZensimError::ImageTooSmall);
         }
+        if precomputed.width() != width || precomputed.height() != height {
+            return Err(ZensimError::DimensionMismatch);
+        }
+        crate::metric::check_within_max_pixels(width, height, self.max_pixels())?;
+        if stride < width {
+            return Err(ZensimError::InvalidStride);
+        }
+        // `stride * height` must fit in usize; reject overflow up front so
+        // downstream `y * stride + x` arithmetic cannot wrap on 32-bit.
+        let row_capacity = stride
+            .checked_mul(height)
+            .ok_or(ZensimError::ImageTooLarge)?;
+        for plane in &planes {
+            if plane.len() < row_capacity {
+                return Err(ZensimError::InvalidDataLength);
+            }
+        }
 
+        self.check_stop()?;
         let config = config_from_params(params, self.parallel());
+        crate::metric::check_profile_route(params, &config)?;
+        crate::metric::validate_cached_revision(precomputed, config.revision())?;
         let (per_scale_ch, scale_blend) = options.weighting.resolve_multiscale(
             params.weights,
             config.num_scales,
@@ -713,48 +859,142 @@ impl crate::metric::Zensim {
             options.include_hf,
         );
 
-        let padded_width = crate::blur::simd_padded_width(width);
-        let (result, diffmap_padded, _) =
-            crate::streaming::compute_zensim_streaming_with_ref_and_diffmap_linear_planar(
-                precomputed,
-                planes,
+        let guided = false;
+
+        // Sub-64px planes are reflect-padded to the pyramid minimum (matching
+        // the also-padded reference). The reflect-pad keeps the original in the
+        // top-left, recovered by the trim below.
+        let (result, mut diffmap_padded, padded_width) =
+            if width < crate::metric::MIN_PYRAMID_DIM || height < crate::metric::MIN_PYRAMID_DIM {
+                let (pp, pw, ph) = reflect_pad_planes_f32(planes, width, height, stride);
+                let padded_width = crate::blur::pyramid_plane_stride(pw);
+                let (result, dm, _) =
+                    crate::streaming::compute_zensim_streaming_with_ref_and_diffmap_linear_planar(
+                        precomputed,
+                        [&pp[0], &pp[1], &pp[2]],
+                        pw,
+                        ph,
+                        pw,
+                        &config,
+                        params.weights,
+                        &per_scale_ch,
+                        &scale_blend,
+                        guided,
+                        self.stop_ref(),
+                    );
+                (result, dm, padded_width)
+            } else {
+                let padded_width = crate::blur::pyramid_plane_stride(width);
+                let (result, dm, _) =
+                    crate::streaming::compute_zensim_streaming_with_ref_and_diffmap_linear_planar(
+                        precomputed,
+                        planes,
+                        width,
+                        height,
+                        stride,
+                        &config,
+                        params.weights,
+                        &per_scale_ch,
+                        &scale_blend,
+                        guided,
+                        self.stop_ref(),
+                    );
+                (result, dm, padded_width)
+            };
+        self.check_stop()?;
+        let mut result = result.with_profile(self.profile());
+        // Same real-scoring fix as `compute_with_ref_and_diffmap` (2026-07-18):
+        // apply the profile's bake forward + spline; no-op for legacy profiles.
+        if config.revision() >= crate::feature_defs::FormulaRevision::Rev5
+            && crate::fold_engine::score_plan(params, &config, true)
+                .is_some_and(|p| p.compute.v2_blocks)
+        {
+            // This legacy planar entry has no ImageSource view. Preserve its
+            // explicit linear-sRGB/opaque semantics for the canonical owner.
+            let pixels: Vec<[f32; 4]> = (0..height)
+                .flat_map(|y| {
+                    (0..width).map(move |x| {
+                        [
+                            planes[0][y * stride + x],
+                            planes[1][y * stride + x],
+                            planes[2][y * stride + x],
+                            1.0,
+                        ]
+                    })
+                })
+                .collect();
+            let image = crate::source::StridedBytes::with_alpha_mode(
+                bytemuck::cast_slice(&pixels),
                 width,
                 height,
-                stride,
-                &config,
-                params.weights,
-                &per_scale_ch,
-                &scale_blend,
+                width * 16,
+                crate::source::PixelFormat::LinearF32Rgba,
+                crate::source::AlphaMode::Opaque,
             );
-        let result = result.with_profile(self.profile());
+            result = self.compute_with_ref(precomputed, &image)?;
+        }
+        let already_scored = config.revision() >= crate::feature_defs::FormulaRevision::Rev5
+            && crate::fold_engine::score_plan(params, &config, true)
+                .is_some_and(|p| p.compute.v2_blocks);
+        if !already_scored {
+            crate::metric::apply_mlp_scoring_with_codec(
+                &mut result,
+                params,
+                width as u32,
+                height as u32,
+                None,
+            )?;
+        }
 
-        // Trim padded-width diffmap to actual width
-        let mut diffmap = if padded_width == width {
-            diffmap_padded
+        // Mask + sqrt at the compute dims, then trim to the original (same
+        // padded-vs-original branch as the RGB `compute_with_ref_and_diffmap`).
+        let comp_h = precomputed.scales[0].2;
+        let diffmap = if comp_h == height {
+            let mut diffmap = if padded_width == width {
+                diffmap_padded
+            } else {
+                let mut out = Vec::with_capacity(width * height);
+                for y in 0..height {
+                    out.extend_from_slice(
+                        &diffmap_padded[y * padded_width..y * padded_width + width],
+                    );
+                }
+                out
+            };
+            if let Some(strength) = options.masking_strength {
+                apply_contrast_masking(
+                    &mut diffmap,
+                    precomputed,
+                    width,
+                    height,
+                    padded_width,
+                    strength,
+                );
+            }
+            if options.sqrt {
+                sqrt_inplace(&mut diffmap);
+            }
+            diffmap
         } else {
+            if let Some(strength) = options.masking_strength {
+                apply_contrast_masking(
+                    &mut diffmap_padded,
+                    precomputed,
+                    padded_width,
+                    comp_h,
+                    padded_width,
+                    strength,
+                );
+            }
+            if options.sqrt {
+                sqrt_inplace(&mut diffmap_padded);
+            }
             let mut out = Vec::with_capacity(width * height);
             for y in 0..height {
                 out.extend_from_slice(&diffmap_padded[y * padded_width..y * padded_width + width]);
             }
             out
         };
-
-        // Post-processing: contrast masking
-        if let Some(strength) = options.masking_strength {
-            apply_contrast_masking(
-                &mut diffmap,
-                precomputed,
-                width,
-                height,
-                padded_width,
-                strength,
-            );
-        }
-
-        // Post-processing: sqrt for distance-like calibration
-        if options.sqrt {
-            sqrt_inplace(&mut diffmap);
-        }
 
         Ok(DiffmapResult {
             result,
@@ -773,6 +1013,17 @@ impl crate::metric::Zensim {
     /// # Errors
     ///
     /// Returns [`ZensimError`] if dimensions are mismatched or too small.
+    ///
+    /// # Identity
+    ///
+    /// A byte-identical pair returns exactly what
+    /// [`Zensim::compute`](crate::Zensim::compute) returns — 100 — with an
+    /// all-zero map. The
+    /// [`compute_with_ref_and_diffmap`](Self::compute_with_ref_and_diffmap)
+    /// form cannot make that call: a [`PrecomputedReference`] holds an XYB
+    /// pyramid, not the source pixels, so there is nothing for the identity
+    /// owner to compare against and a perfect copy is scored through the model
+    /// like any other pair.
     pub fn compute_with_diffmap(
         &self,
         source: &impl ImageSource,
@@ -780,6 +1031,26 @@ impl crate::metric::Zensim {
         options: impl Into<DiffmapOptions>,
     ) -> Result<DiffmapResult, ZensimError> {
         validate_pair(source, distorted)?;
+        // ONE identity owner for every entry that holds both images
+        // (`metric::images_byte_identical` -> `identical_result_at`, reached
+        // through `compute`). Before 2026-09-18 this path had none, so a
+        // perfect copy scored the model's forward on an all-zero feature row —
+        // 96.2017 for `B` at 900x675 — while `compute` returned exactly 100 on
+        // the same pair. Delegating to `compute` cannot drift from it, and
+        // `compute` short-circuits before any walk, so nothing is recomputed.
+        // `validate_pair` above has already refused HDR-declared input, so this
+        // never diverts an HDR pair away from that refusal. The map is exactly
+        // zero, which `sqrt` and contrast masking both preserve.
+        if crate::metric::images_byte_identical(source, distorted) {
+            let (width, height) = (distorted.width(), distorted.height());
+            let _ = options.into();
+            return Ok(DiffmapResult {
+                result: self.compute(source, distorted)?,
+                diffmap: vec![0.0; width * height],
+                width,
+                height,
+            });
+        }
         let precomputed = self.precompute_reference(source)?;
         self.compute_with_ref_and_diffmap(&precomputed, distorted, options)
     }
@@ -790,12 +1061,208 @@ mod tests {
     use super::DiffmapWeighting;
     use crate::{RgbSlice, ZensimProfile};
 
+    /// Deterministic non-flat synthetic content: structured enough that every
+    /// scale of the pyramid sees real signal (a flat field makes the identity
+    /// question vacuous — every SSIM term is already saturated).
+    fn synth(w: usize, h: usize) -> Vec<[u8; 3]> {
+        (0..w * h)
+            .map(|i| {
+                let x = (i % w) as u32;
+                let y = (i / w) as u32;
+                [
+                    ((x * 7 + y * 13) % 251) as u8,
+                    ((x * x + y * 3 + (x ^ y)) % 241) as u8,
+                    (((x ^ y) * 5 + 17 + y * y) % 239) as u8,
+                ]
+            })
+            .collect()
+    }
+
+    /// The identity contract: on a byte-identical pair EVERY score-returning
+    /// entry must return the same number [`crate::Zensim::compute`] does —
+    /// exactly 100, from the one identity owner
+    /// (`metric::images_byte_identical` → `metric::identical_result_at`),
+    /// never the model's forward on an all-zero feature row (~96.2 for `B`).
+    ///
+    /// Entries that take a [`crate::PrecomputedReference`] instead of the
+    /// source image are NOT in this list and cannot be: the reference holds
+    /// an XYB pyramid, not the source pixels, so there is nothing for the
+    /// identity owner to compare the distorted image against. They are
+    /// covered by `identity_is_undecidable_without_the_source` below, which
+    /// pins that limitation rather than hiding it.
+    #[test]
+    fn identity_agrees_across_every_scoring_entry() {
+        let mut failures: Vec<String> = Vec::new();
+        for &(w, h) in &[(37usize, 29usize), (64usize, 64usize), (129usize, 128usize)] {
+            let px = synth(w, h);
+            let img = RgbSlice::new(&px, w, h);
+            let z = crate::Zensim::new(ZensimProfile::BHdr);
+            let baseline = z.compute(&img, &img).unwrap().score();
+            assert_eq!(baseline, 100.0, "compute must certify identity at {w}x{h}");
+
+            #[allow(unused_mut)]
+            let mut got: Vec<(&'static str, f64)> = vec![
+                (
+                    "compute_with_codec_hint",
+                    z.compute_with_codec_hint(&img, &img, None).unwrap().score(),
+                ),
+                (
+                    "compute_extended_features",
+                    z.compute_extended_features(&img, &img).unwrap().score(),
+                ),
+                (
+                    "compute_streaming_strips_default",
+                    z.compute_streaming_strips_default(&img, &img)
+                        .unwrap()
+                        .score(),
+                ),
+                (
+                    "compute_with_diffmap",
+                    z.compute_with_diffmap(&img, &img, DiffmapWeighting::default())
+                        .unwrap()
+                        .score(),
+                ),
+            ];
+            #[cfg(feature = "training")]
+            got.push((
+                "compute_all_features",
+                z.compute_all_features(&img, &img).unwrap().score(),
+            ));
+
+            for (name, score) in got {
+                if score != baseline {
+                    failures.push(format!("{w}x{h} {name}: {score} != compute {baseline}"));
+                }
+            }
+
+            // The diffmap itself must be exactly zero, not "small".
+            let dm = z
+                .compute_with_diffmap(&img, &img, DiffmapWeighting::default())
+                .unwrap();
+            if dm.diffmap().iter().any(|v| *v != 0.0) {
+                let max = dm.diffmap().iter().copied().fold(0.0f32, f32::max);
+                failures.push(format!("{w}x{h} compute_with_diffmap map max {max} != 0"));
+            }
+        }
+        assert!(
+            failures.is_empty(),
+            "entry points disagreeing with compute on an identical pair:\n{}",
+            failures.join("\n")
+        );
+    }
+
+    /// The reference-cached family takes an XYB pyramid, not the source
+    /// pixels, so it cannot invoke the identity owner. This pins that these
+    /// entries score the pair through the model (a finite, non-100 number)
+    /// rather than silently claiming identity by some second, weaker test
+    /// (a zero feature row is not evidence of identical pixels).
+    #[test]
+    fn identity_is_undecidable_without_the_source() {
+        let (w, h) = (129usize, 128usize);
+        let px = synth(w, h);
+        let img = RgbSlice::new(&px, w, h);
+        let z = crate::Zensim::new(ZensimProfile::BHdr);
+        let pre = z.precompute_reference(&img).unwrap();
+        let mut scratch = crate::ZensimScratch::default();
+
+        let mut scores: Vec<(&'static str, f64)> = vec![
+            (
+                "compute_with_ref",
+                z.compute_with_ref(&pre, &img).unwrap().score(),
+            ),
+            (
+                "compute_with_ref_into",
+                z.compute_with_ref_into(&pre, &img, &mut scratch)
+                    .unwrap()
+                    .score(),
+            ),
+            (
+                "compute_with_ref_streaming_strips_default",
+                z.compute_with_ref_streaming_strips_default(&pre, &img)
+                    .unwrap()
+                    .score(),
+            ),
+            (
+                "compute_with_ref_and_diffmap",
+                z.compute_with_ref_and_diffmap(&pre, &img, DiffmapWeighting::default())
+                    .unwrap()
+                    .score(),
+            ),
+        ];
+        // The planar entry has the same shape: a linear-f32 reference cache,
+        // no source pixels to compare against.
+        let planes: [Vec<f32>; 3] = core::array::from_fn(|c| {
+            px.iter()
+                .map(|p| f32::from(p[c]) / 255.0)
+                .collect::<Vec<f32>>()
+        });
+        let planar_ref = z
+            .precompute_reference_linear_planar([&planes[0], &planes[1], &planes[2]], w, h, w)
+            .unwrap();
+        scores.push((
+            "compute_with_ref_and_diffmap_linear_planar",
+            z.compute_with_ref_and_diffmap_linear_planar(
+                &planar_ref,
+                [&planes[0], &planes[1], &planes[2]],
+                w,
+                h,
+                w,
+                DiffmapWeighting::default(),
+            )
+            .unwrap()
+            .score(),
+        ));
+
+        for (name, score) in scores {
+            assert!(score.is_finite(), "{name} must still produce a score");
+            assert_ne!(
+                score, 100.0,
+                "{name} now certifies identity — the limitation is gone, move it \
+                 into identity_agrees_across_every_scoring_entry"
+            );
+        }
+    }
+
+    /// Near-identity must NOT be short-circuited: a single 1-LSB pixel change
+    /// still runs the model, and the two paths agree to the cross-path
+    /// tolerance the strip parity tests use (`rel < 1e-10`).
+    #[test]
+    fn one_lsb_difference_is_not_short_circuited() {
+        let (w, h) = (129usize, 128usize);
+        let src_px = synth(w, h);
+        let mut dst_px = src_px.clone();
+        dst_px[(h / 2) * w + w / 2][1] = dst_px[(h / 2) * w + w / 2][1].wrapping_add(1);
+        let src = RgbSlice::new(&src_px, w, h);
+        let dst = RgbSlice::new(&dst_px, w, h);
+        let z = crate::Zensim::new(ZensimProfile::B);
+
+        let scalar = z.compute(&src, &dst).unwrap().score();
+        assert_ne!(
+            scalar, 100.0,
+            "a 1-LSB difference must go through the model, not the identity owner"
+        );
+        let dm = z
+            .compute_with_diffmap(&src, &dst, DiffmapWeighting::default())
+            .unwrap();
+        assert_ne!(dm.score(), 100.0, "diffmap path must not short-circuit");
+        let rel = (scalar - dm.score()).abs() / scalar.abs().max(1e-12);
+        assert!(
+            rel < 1e-10,
+            "compute {scalar} vs compute_with_diffmap {} (rel {rel})",
+            dm.score()
+        );
+        assert!(
+            dm.diffmap().iter().any(|v| *v > 0.0),
+            "a real difference must leave mass in the map"
+        );
+    }
+
     #[test]
     fn test_diffmap_identical_images() {
         let pixels: Vec<[u8; 3]> = (0..64)
             .map(|i| [i as u8 * 4, 128, 255 - i as u8 * 4])
             .collect();
-        let z = crate::Zensim::new(ZensimProfile::latest());
+        let z = crate::Zensim::new(ZensimProfile::B);
         let src = RgbSlice::new(&pixels, 8, 8);
         let result = z
             .compute_with_diffmap(&src, &src, DiffmapWeighting::default())
@@ -826,7 +1293,7 @@ mod tests {
             }
         }
 
-        let z = crate::Zensim::new(ZensimProfile::latest());
+        let z = crate::Zensim::new(ZensimProfile::B);
         let src = RgbSlice::new(&src_pixels, 16, 16);
         let dst = RgbSlice::new(&dst_pixels, 16, 16);
         let result = z
@@ -880,7 +1347,7 @@ mod tests {
             })
             .collect();
 
-        let z = crate::Zensim::new(ZensimProfile::latest());
+        let z = crate::Zensim::new(ZensimProfile::B);
         let src = RgbSlice::new(&src_pixels, 16, 16);
         let dst = RgbSlice::new(&dst_pixels, 16, 16);
 
@@ -898,9 +1365,7 @@ mod tests {
                 super::DiffmapOptions {
                     weighting: DiffmapWeighting::Balanced,
                     masking_strength: Some(4.0),
-                    sqrt: false,
-                    include_edge_mse: false,
-                    include_hf: false,
+                    ..Default::default()
                 },
             )
             .unwrap();
@@ -930,7 +1395,7 @@ mod tests {
             }
         }
 
-        let z = crate::Zensim::new(ZensimProfile::latest());
+        let z = crate::Zensim::new(ZensimProfile::B);
         let src = RgbSlice::new(&src_pixels, 16, 16);
         let dst = RgbSlice::new(&dst_pixels, 16, 16);
 
@@ -945,10 +1410,8 @@ mod tests {
                 &dst,
                 super::DiffmapOptions {
                     weighting: DiffmapWeighting::Balanced,
-                    masking_strength: None,
                     sqrt: true,
-                    include_edge_mse: false,
-                    include_hf: false,
+                    ..Default::default()
                 },
             )
             .unwrap();
@@ -968,7 +1431,7 @@ mod tests {
     #[test]
     fn test_diffmap_weighting_into_options() {
         // Verify backward compatibility: DiffmapWeighting converts to DiffmapOptions
-        let z = crate::Zensim::new(ZensimProfile::latest());
+        let z = crate::Zensim::new(ZensimProfile::B);
         let pixels: Vec<[u8; 3]> = vec![[100, 150, 200]; 8 * 8];
         let src = RgbSlice::new(&pixels, 8, 8);
 
@@ -996,7 +1459,7 @@ mod tests {
             }
         }
 
-        let z = crate::Zensim::new(ZensimProfile::latest());
+        let z = crate::Zensim::new(ZensimProfile::B);
         let src = RgbSlice::new(&src_pixels, 16, 16);
         let dst = RgbSlice::new(&dst_pixels, 16, 16);
 
@@ -1006,10 +1469,8 @@ mod tests {
                 &dst,
                 super::DiffmapOptions {
                     weighting: DiffmapWeighting::Balanced,
-                    masking_strength: None,
-                    sqrt: false,
                     include_edge_mse: true,
-                    include_hf: false,
+                    ..Default::default()
                 },
             )
             .unwrap();
@@ -1050,7 +1511,7 @@ mod tests {
             p[0] = p[0].wrapping_add(40);
         }
 
-        let z = crate::Zensim::new(ZensimProfile::latest());
+        let z = crate::Zensim::new(ZensimProfile::B);
         let src = RgbSlice::new(&src_pixels, 16, 16);
         let dst = RgbSlice::new(&dst_pixels, 16, 16);
 
@@ -1060,10 +1521,8 @@ mod tests {
                 &dst,
                 super::DiffmapOptions {
                     weighting: DiffmapWeighting::Trained,
-                    masking_strength: None,
-                    sqrt: false,
                     include_edge_mse: true,
-                    include_hf: false,
+                    ..Default::default()
                 },
             )
             .unwrap();
@@ -1079,40 +1538,10 @@ mod tests {
         assert!(max > 0.0, "max diffmap value should be > 0");
     }
 
-    #[test]
-    fn test_diffmap_with_precomputed_ref() {
-        let pixels: Vec<[u8; 3]> = (0..256).map(|i| [(i % 256) as u8, 128, 64]).collect();
-        let mut dst = pixels.clone();
-        // Perturb some pixels
-        for p in dst[..32].iter_mut() {
-            p[0] = p[0].wrapping_add(50);
-        }
-
-        let z = crate::Zensim::new(ZensimProfile::latest());
-        let src = RgbSlice::new(&pixels, 16, 16);
-        let dst = RgbSlice::new(&dst, 16, 16);
-
-        let precomputed = z.precompute_reference(&src).unwrap();
-        let result = z
-            .compute_with_ref_and_diffmap(&precomputed, &dst, DiffmapWeighting::Trained)
-            .unwrap();
-
-        assert_eq!(result.width(), 16);
-        assert_eq!(result.height(), 16);
-        // Score should match regular compute
-        let regular = z.compute_with_ref(&precomputed, &dst).unwrap();
-        assert!(
-            (result.score() - regular.score()).abs() < 0.01,
-            "diffmap score {} vs regular score {}",
-            result.score(),
-            regular.score()
-        );
-    }
-
     /// Stress-test diffmap for NaN/Inf with adversarial inputs at realistic sizes.
     #[test]
     fn test_diffmap_no_nan() {
-        let z = crate::Zensim::new(ZensimProfile::latest());
+        let z = crate::Zensim::new(ZensimProfile::B);
         let weightings = [
             DiffmapWeighting::Trained,
             DiffmapWeighting::Balanced,
@@ -1125,21 +1554,19 @@ mod tests {
                 masking_strength: Some(4.0),
                 sqrt: true,
                 include_edge_mse: true,
-                include_hf: false,
+                ..Default::default()
             },
             super::DiffmapOptions {
                 weighting: DiffmapWeighting::Trained,
-                masking_strength: None,
-                sqrt: false,
-                include_edge_mse: false,
                 include_hf: true,
+                ..Default::default()
             },
             super::DiffmapOptions {
-                weighting: DiffmapWeighting::Trained,
                 masking_strength: Some(4.0),
                 sqrt: true,
                 include_edge_mse: true,
                 include_hf: true,
+                ..Default::default()
             },
         ];
         // Adversarial patterns: uniform, solid black, solid white, random-ish,
@@ -1247,4 +1674,5 @@ mod tests {
             }
         }
     }
+
 }
