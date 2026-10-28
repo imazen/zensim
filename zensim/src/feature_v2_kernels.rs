@@ -1670,8 +1670,7 @@ fn gradient_block_kernel_generic<T: F32x8Backend + Copy>(
     bv_delta_lo: f32,
     bv_delta_hi: f32,
 ) -> GradientAccum {
-    // Revision 7's cancellation-free forms, by the process revision.
-    let stable = crate::ssim_form::active_revision().stable_forms();
+    // Only revision 1 reaches this kernel; revisions 5 and 7 use the canonical kernels.
     debug_assert_eq!(src_h.len(), width * (height + 2));
     debug_assert_eq!(dst_h.len(), width * (height + 2));
     debug_assert_eq!(activity.len(), width * height);
@@ -1727,7 +1726,7 @@ fn gradient_block_kernel_generic<T: F32x8Backend + Copy>(
 
         acc.sum_grad_src += grad_src_mag;
         acc.sum_grad_dst += grad_dst_mag;
-        let g = bounded_dissim(grad_src_mag, grad_dst_mag, C_GMS, stable);
+        let g = bounded_dissim(grad_src_mag, grad_dst_mag, C_GMS, false);
         acc.sum_gms += g;
         acc.sum_gms2 += g * g;
 
@@ -1792,7 +1791,7 @@ fn gradient_block_kernel_generic<T: F32x8Backend + Copy>(
 
                 r_gsrc += grad_src_mag;
                 r_gdst += grad_dst_mag;
-                let g = bounded_dissim_v(token, grad_src_mag, grad_dst_mag, c_gms, stable);
+                let g = bounded_dissim_v(token, grad_src_mag, grad_dst_mag, c_gms, false);
                 r_gms += g;
                 r_gms2 += g * g;
 

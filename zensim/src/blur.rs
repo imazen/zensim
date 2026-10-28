@@ -1502,18 +1502,6 @@ pub(crate) fn box_blur_h_into_abs_diff(
     height: usize,
     radius: usize,
 ) {
-    let revision = crate::ssim_form::active_revision();
-    if matches!(
-        crate::featcanon::canon_blur_axis_for(crate::featcanon::mode(revision), revision),
-        crate::featcanon::BlurMode::Local
-    ) {
-        box_blur_h_local(src, out_activity, width, height, radius);
-        for (v, &s) in out_activity.iter_mut().zip(src) {
-            *v = (s - *v).abs();
-        }
-        return;
-    }
-
     let tile = h_blur_tile_width();
     if tile > 0 && width > tile {
         h_tile_1in1out(

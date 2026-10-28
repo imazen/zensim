@@ -165,8 +165,7 @@ impl SsimLumaForm {
 /// machinery around it is inert while it still reads `Rev1`.
 pub(crate) const SHIPPED_REVISION: FormulaRevision = FormulaRevision::Rev1;
 
-/// The revision a computation without a declared revision runs at: always
-/// [`SHIPPED_REVISION`]. A bake that declares its revision selects it per call.
+/// The default for computations without a declared revision.
 pub(crate) const fn active_revision() -> FormulaRevision {
     SHIPPED_REVISION
 }
@@ -228,10 +227,7 @@ pub(crate) const REV4_MIX: &str = "formula revisions 4 and 5 cannot be mixed wit
 /// pre-existing per-route checks and is unchanged.
 // the v2 walk's guard
 pub(crate) fn refuse_rev4_mix(requested: FormulaRevision) -> Result<(), crate::ZensimError> {
-    let process = active_revision();
-    if requested != process
-        && (requested >= FormulaRevision::Rev5 || process >= FormulaRevision::Rev5)
-    {
+    if requested >= FormulaRevision::Rev5 {
         return Err(crate::ZensimError::ModelLoadFailed { reason: REV4_MIX });
     }
     Ok(())
@@ -243,7 +239,7 @@ pub(crate) fn refuse_rev4_mix(requested: FormulaRevision) -> Result<(), crate::Z
 /// `OnceLock`, which LLVM cannot hoist out of a loop for you.
 #[inline]
 pub(crate) fn active_luma_form() -> SsimLumaForm {
-    SsimLumaForm::for_revision(active_revision())
+    SsimLumaForm::Ssim2Legacy
 }
 
 /// Hoisted splats + the selected form, built once per kernel invocation.
@@ -593,7 +589,7 @@ mod tests {
     fn selecting_the_shipped_revision_is_a_no_op() {
         assert_eq!(
             SsimLumaForm::for_revision(SHIPPED_REVISION),
-            SsimLumaForm::for_revision(active_revision()),
+            SsimLumaForm::Ssim2Legacy,
             "the active revision is not the shipped one (is ZENSIM_FORMULA_REV set?)"
         );
         assert!(

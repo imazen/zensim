@@ -203,11 +203,7 @@ fn dense_block_kernel_era2_generic<T: F32x8Backend + Copy>(
     height: usize,
     transducer_bank: bool,
 ) -> DenseAccum {
-    // Revision 3 (issue #61): the `s12` plane is the direct error moment, so
-    // the v2 SSIM signal must read it as such. Hoisted once per call;
-    // loop-invariant, so every call site below unswitches on it.
-    let stable = crate::ssim_form::active_revision().stable_forms();
-    let direct = crate::ssim_form::active_revision() >= crate::feature_defs::FormulaRevision::Rev5;
+    // Only revision 1 reaches this kernel; revisions 5 and 7 use the canonical kernels.
  // the split is chosen by tier; see the entries above
     let zero = V8::<T>::zero_t(token);
     let one = V8::<T>::splat_t(token, 1.0);
@@ -246,11 +242,11 @@ fn dense_block_kernel_era2_generic<T: F32x8Backend + Copy>(
             macro_rules! terms {
                 ($s:expr, $dd:expr, $m1:expr, $m2:expr, $q:expr, $p:expr, $act:expr) => {{
                     let (s, dd, m1, m2, q, p, act) = ($s, $dd, $m1, $m2, $q, $p, $act);
-                    let d = ssim_d_local_v(token, m1, m2, p, q, c1, c2, direct, stable);
+                    let d = ssim_d_local_v(token, m1, m2, p, q, c1, c2, false, false);
                     let d2 = d * d;
                     let diff_src = (s - m1).abs();
                     let diff_dst = (dd - m2).abs();
-                    let edge_dissim = bounded_dissim_v(token, diff_src, diff_dst, c_edge, stable);
+                    let edge_dissim = bounded_dissim_v(token, diff_src, diff_dst, c_edge, false);
                     let gt = diff_dst.simd_gt(diff_src);
                     let lt = diff_dst.simd_lt(diff_src);
                     let art_i = V8::<T>::blend(gt, edge_dissim, zero);

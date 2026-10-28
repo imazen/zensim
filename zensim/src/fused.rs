@@ -303,12 +303,7 @@ impl FreeExtrasWork {
         )
     }
     fn luma_form(self) -> crate::ssim_form::SsimLumaForm {
-        let revision = self.revision();
-        if revision == crate::ssim_form::active_revision() {
-            crate::ssim_form::active_luma_form()
-        } else {
-            crate::ssim_form::SsimLumaForm::for_revision(revision)
-        }
+        crate::ssim_form::SsimLumaForm::for_revision(self.revision())
     }
 }
 

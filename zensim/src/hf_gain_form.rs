@@ -96,14 +96,7 @@ pub(crate) enum HfGainForm {
 impl HfGainForm {
     /// Resolve a per-comparison revision while retaining explicit research defaults.
     pub(crate) fn at_revision(revision: Option<crate::feature_defs::FormulaRevision>) -> Self {
-        let rev = crate::ssim_form::effective_revision(
-            revision.unwrap_or_else(crate::ssim_form::active_revision),
-        );
-        if rev == crate::ssim_form::active_revision() {
-            active_gain_form()
-        } else {
-            Self::for_revision(rev)
-        }
+        Self::for_revision(revision.unwrap_or(FormulaRevision::Rev1))
     }
 
     /// The form a registered revision selects.
@@ -189,22 +182,6 @@ impl HfGainForm {
             Self::SaturatingExcess => "satexcess",
         }
     }
-}
-
-/// **The form the active revision selects.**
-///
-/// Read ONCE per finalize, not per call site — modelled on
-/// [`crate::ssim_form::active_luma_form`] and for its stated reason: *"a switch
-/// that some call sites honour and others do not is the same defect"*.
-///
-/// `ZENSIM_HF_GAIN` is a MEASUREMENT override and nothing else. R6b has to fit
-/// the monotone linear class against every arm on ONE set of pixels from ONE
-/// binary, or the comparison is confounded by a rebuild. No shipping path sets
-/// it; a shipping path selects a REVISION, through the equal-byte-length
-/// `ZENSIM_FORMULA_REV` that [`crate::ssim_form::active_revision`] owns.
-#[inline]
-pub(crate) fn active_gain_form() -> HfGainForm {
-    HfGainForm::for_revision(crate::ssim_form::active_revision())
 }
 
 /// **`contrast_inc` / `hf_energy_gain`** — the one member with an arm.

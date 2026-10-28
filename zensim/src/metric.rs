@@ -1344,8 +1344,7 @@ impl Zensim {
         let params = self.profile.params();
         if distorted.width() == 0
             || distorted.height() == 0
-            || (crate::ssim_form::active_revision() < crate::feature_defs::FormulaRevision::Rev5
-                && (distorted.width() < 8 || distorted.height() < 8))
+            || (distorted.width() < 8 || distorted.height() < 8)
         {
             return Err(ZensimError::ImageTooSmall);
         }

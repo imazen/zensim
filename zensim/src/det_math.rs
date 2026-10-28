@@ -64,7 +64,7 @@
 //! so the two differ by up to one ULP and landing it **moves revision-1
 //! bytes**. That is why it is an era item rather than a plain fix —
 //! [`RootForm::LibmPowf`] stays the default and
-//! [`crate::ssim_form::SHIPPED_REVISION`] stays `Rev1`.
+//! [`crate::ssim_form::active_revision()`] stays `Rev1`.
 //!
 //! # What is in scope here, and what is deliberately NOT
 //!
@@ -120,14 +120,7 @@ pub(crate) enum RootForm {
 impl RootForm {
     /// Resolve a per-comparison revision while retaining explicit research defaults.
     pub(crate) fn at_revision(revision: Option<crate::feature_defs::FormulaRevision>) -> Self {
-        let rev = crate::ssim_form::effective_revision(
-            revision.unwrap_or_else(crate::ssim_form::active_revision),
-        );
-        if rev == crate::ssim_form::active_revision() {
-            active_root_form()
-        } else {
-            Self::for_revision(rev)
-        }
+        Self::for_revision(revision.unwrap_or(FormulaRevision::Rev1))
     }
 
     /// The form a registered revision selects.
@@ -137,44 +130,6 @@ impl RootForm {
             FormulaRevision::Rev5 | FormulaRevision::Rev7 => Self::NestedSqrt,
         }
     }
-}
-
-/// The root form the active revision selects.
-///
-/// Call this ONCE per finalize call, above any loop — it reads a `OnceLock`,
-/// which LLVM cannot hoist for you. (These finalizers run once per
-/// `(scale, channel)`, not per pixel, so the read is free either way; the
-/// discipline is the same one [`crate::ssim_form::active_luma_form`]
-/// documents.)
-///
-/// `ZENSIM_ROOT_FORM` is a MEASUREMENT override and nothing else: the R6b
-/// lane has already extracted `ZENSIM_FORMULA_REV=2` tables from a build
-/// that predates this module, and `ZENSIM_ROOT_FORM=libm` is how it
-/// reproduces them. No shipping path sets it. The two accepted values are
-/// the SAME BYTE LENGTH on purpose — this repo has measured an environment
-/// block's size shifting a binary's layout by ~10 % at 2304²
-/// (`benchmarks/era2_perf_break_2026-08-31.md` §22.5), so an A/B that varies
-/// the value must not vary the length.
-///
-/// # ★ It is a PROCESS switch, not a per-bake one — stated, not papered over
-///
-/// `V2NewFeatureToggles::formula_revision` lets a **bake** declare its
-/// revision, and `zensim/tests/per_bake_revision.rs` pins the coexistence
-/// property that makes revision 2 shippable without refitting Profile C. That
-/// mechanism reaches revision 2's `paired_global_contrast` half, because that
-/// half is a *finaliser parameter* and threads per walk.
-///
-/// This form does **not** thread that way, for exactly the reason
-/// `ssim_form::active_luma_form` does not: it is read inside walks whose
-/// dispatch does not carry the toggles. So a bake that declares `Rev2` today
-/// gets rev2's global-contrast arithmetic and **the process's root form** —
-/// `LibmPowf` unless `ZENSIM_FORMULA_REV=2` or `ZENSIM_ROOT_FORM=sqrt` is set.
-/// Making it per-request is the same kernel-dispatch change the luma form
-/// needs, and it should be done for both at once or not at all: two halves of
-/// one era on two different selectors is worse than one honest limitation.
-#[inline]
-pub(crate) fn active_root_form() -> RootForm {
-    RootForm::for_revision(crate::ssim_form::active_revision())
 }
 
 /// The pooled-root operations, as a method chain so a call site reads the
@@ -352,7 +307,7 @@ impl PowForm {
 /// forms need, and it should be done for all three at once or not at all.
 #[inline]
 pub fn active_pow_form() -> PowForm {
-    PowForm::for_revision(crate::ssim_form::active_revision())
+    PowForm::for_revision(FormulaRevision::Rev1)
 }
 
 /// The score path's transcendentals, as a method chain so a call site reads
