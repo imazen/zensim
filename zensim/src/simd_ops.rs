@@ -2024,17 +2024,6 @@ pub(crate) fn ssim_channel_inline_both(
     )
 }
 
-/// Weighted masked + IW pools over a RETAINED per-pixel SSIM signal.
-///
-/// The [`crate::feature_defs::FormulaRevision::Rev3`] counterpart of
-/// [`ssim_channel_inline_both`]: the dissimilarity is no longer re-derived
-/// from `(mu1, mu2, ssq, s12)` here, because under Rev3 the ONE canonical
-/// value was already formed by [`crate::ssim_form::stable_ssim_plane`] and
-/// retained. Reductions, weights and accumulation order are the legacy
-/// reducer's, so the only difference between the two is where `d_raw` comes
-/// from — which is exactly the property the parity controls assert.
-///
-/// `signal` and `activity` are matching contiguous inner-band pixels.
 pub(crate) fn ssim_signal_inline_both(
     signal: &[f32],
     activity: &[f32],
@@ -2048,8 +2037,6 @@ pub(crate) fn ssim_signal_inline_both(
     )
 }
 
-/// Masked-only pool over a retained Rev3 SSIM signal — the
-/// [`ssim_channel_inline_mask`] counterpart.
 pub(crate) fn ssim_signal_inline_mask(
     signal: &[f32],
     activity: &[f32],
@@ -2062,8 +2049,6 @@ pub(crate) fn ssim_signal_inline_mask(
     )
 }
 
-/// IW-only pool over a retained Rev3 SSIM signal — the
-/// [`ssim_channel_iw_inline`] counterpart.
 pub(crate) fn ssim_signal_iw_inline(
     signal: &[f32],
     activity: &[f32],
@@ -2362,16 +2347,6 @@ fn ssim_channel_inline_mask_inner(
 
     (sum_d, sum_d4, sum_d2)
 }
-
-// --- Rev3 retained-signal pools ---
-//
-// One canonical `d_raw` per pixel, formed once by
-// `ssim_form::stable_ssim_plane` and retained, replaces the per-pool
-// re-derivation from `(mu1, mu2, ssq, s12)`. Everything downstream of
-// `d_raw` — the inline mask/IW weights, the `.max(0)` floor, the d/d2/d4
-// tiers and the f64 accumulation order — is copied unchanged from the
-// legacy reducers above, so a parity test that feeds the legacy `d_raw`
-// through these is exact, and the only measured difference is the signal.
 
 #[magetypes(v4, v3, neon, wasm128, scalar)]
 fn ssim_signal_inline_both_inner(
@@ -2733,23 +2708,10 @@ mod tests {
         (mu1, mu2, sum_sq, s12, mask_a, mask_b)
     }
 
-    /// Activity plane for the Rev3 pool controls: `mask_a` is already a
-    /// smooth `[0.5, 1.0]` ramp, which is exactly the shape `activity` takes.
     fn mk_activity(n: usize) -> Vec<f32> {
         (0..n).map(|i| 0.75 * (i as f32) / (n as f32)).collect()
     }
 
-    /// **The Rev3 pool contract, stated as a test.** Feed the legacy reducer
-    /// and its retained-signal counterpart the SAME `d_raw` and they must
-    /// agree — because the ONLY thing Rev3 changes is where `d_raw` comes
-    /// from, never the weights, the floor, the tiers or the accumulation.
-    ///
-    /// `d_raw` is taken from `ssim_dissim_raw_scalar`, the very expression
-    /// the legacy reducer's scalar tail uses, so any disagreement beyond
-    /// SIMD-vs-scalar rounding of that one expression is a defect in the new
-    /// reducers. The bound is relative and tight; the residual is the
-    /// `mul_add` contraction difference between the vector and scalar
-    /// spellings of `ssim_dissim`, not a difference in pooling.
     #[test]
     fn retained_signal_pools_agree_with_the_legacy_pools_on_the_same_d_raw() {
         let form = crate::ssim_form::active_luma_form();

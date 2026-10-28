@@ -1756,10 +1756,7 @@ pub(crate) fn validate_pair(
     Ok(())
 }
 
-/// [`validate_pair`]'s dimension/zero checks WITHOUT the HDR refusal —
-/// for the folded/append streaming entries, which ROUTE declared-HDR
-/// pairs to the PU front-end instead of refusing them (HDR_PLAN chunk 2).
-/// Every other entry keeps [`validate_pair`]'s refusal.
+/// Validate matching, nonzero image dimensions.
 pub(crate) fn validate_pair_dims(
     source: &impl ImageSource,
     distorted: &impl ImageSource,
@@ -2681,35 +2678,7 @@ fn forward_model_with_codec(
     let tanh_pin_scale = bundle.tanh_pin_scale;
     let output_spline = bundle.output_spline.as_deref();
 
-    // **LAYOUT — resolved ONCE, before any head branches.** A bake declaring a
-    // DENSE feature set reads its ids at packed positions, so the caller's
-    // identity-laid-out vector must be GATHERED rather than sliced.
-    // `declared_layout` returns the identity layout for a bake with no id, an
-    // unreproducible id, or a `zentrain.feature_set_id` whose slot count
-    // differs from the declared width — for those, `feats` IS `features` and
-    // nothing below changes by a bit.
-    //
-    // **Not `#[cfg]`-conditional, and must never become so again.** The
-    // shipped `A`, `B`, `BHdr` and `D` bakes have been dense since `cb2f412d`;
-    // while this was gated on `feature-regime-v2`, a build without that
-    // feature fell through to `prep_bake_input_f32`'s PREFIX branch and served
-    // every one of them the wrong features with no error — MEASURED at up to
-    // 261 zensim points and a sign flip on `D`
-    // (`benchmarks/dense_serving_ungate_2026-09-06.md`).
-    //
-    // **Hoisted above the min-max branch on purpose.** It used to sit below,
-    // so a dense bake carrying a min-max head hit that branch's
-    // `features.len() != n` guard and was REFUSED — loud, so never a wrong
-    // number, but also not servable, and a second head added below the gather
-    // would have inherited the same hazard silently. No shipped profile has a
-    // min-max head, so this moves no shipped byte — which is also why the
-    // dense × min-max combination is UNTESTED: it has no artifact to test
-    // against. What is proven is that the identity path is unchanged (every
-    // gate below, plus `serving`'s pinned scores). Gated by
-    // `feature_layout::tests::every_shipped_bake_resolves_to_its_own_declared_width`,
-    // by `serving::tests::every_shipped_profile_scores_its_pinned_value` (which
-    // runs under EVERY feature permutation, which is the point), and end to end
-    // by `dense_layout_round_trip` + `scripts/serving_matrix.sh`.
+    // Resolve dense slot gathering before selecting a model head.
     let feats: &[f64] = if layout.is_identity() {
         features
     } else {
@@ -2871,11 +2840,8 @@ fn finish_network_output(
     })
 }
 
-/// Append `(log2(pixels), log2(min_dim), log2(max_dim), signed
-/// log2(max/min))` to a feature vector. Mirrors the trainer-side
-/// `append_size_axes` in `zensim-validate/src/main.rs` so a model
-/// trained with `--mlp-size-axes` produces the same input layout
-/// at runtime.
+/// Extend features with log2 pixel count, minimum dimension, maximum dimension,
+/// and signed aspect ratio, in the order expected by the model.
 fn append_mlp_size_axes(features: &mut Vec<f64>, width: u32, height: u32) {
     if width == 0 || height == 0 {
         features.extend_from_slice(&[0.0, 0.0, 0.0, 0.0]);

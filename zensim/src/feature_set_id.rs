@@ -1,68 +1,8 @@
-//! **Feature-set identifiers** — the replacement for naming feature sets by a
-//! count.
+//! Feature-set identifiers: compute families, extractor era, and a hash of the slot IDs.
 //!
-//! Design + rationale + the alias table: [`docs/FEATURE_SET_IDS.md`]. Registry:
-//! `benchmarks/feature_sets_registry.json`.
-//!
-//! A count answers ONE question (how wide is the vector?) and has repeatedly
-//! been read as three. "944" has named six different feature sets in this repo
-//! — two extractor eras of the same compute set, an all-pools variant whose
-//! `f156..371` is LIVE where the others are structural zeros, a carriers
-//! variant, and two free-set arms that share only `f0..227` with any of them.
-//! "156+free" names 156 basic + 109 free slots inside a 944-wide vector.
-//! `--regime 944` silently mis-scores a 372 bake that reads `f156..371`
-//! (shipped `B`: CID22 0.3862 against its true 0.8764).
-//!
-//! An id has three parts, plus an OPTIONAL fourth:
-//!
-//! ```text
-//!   basic+peaks+moments/era2r4#a1b2c3d4          <- canonical, layout-free
-//!   basic+peaks+moments@w944/era2r4#a1b2c3d4     <- legacy alias, still parses
-//!   └─COMPUTE──────────┘ └LAYOUT┘ └ERA─┘ └hash8┘
-//! ```
-//!
-//! * **COMPUTE** — which slot families are actually populated
-//!   ([`ComputeToken`]), `+`-joined in registry order.
-//! * **ERA** — the registered extractor-era token. Load-bearing because the
-//!   shift between eras is model-specific, not a constant offset
-//!   (`benchmarks/eval372_current_root_2026-08-30.md`).
-//! * **`#hash8`** — 8 lowercase hex of [`slots_hash8`] over the sorted,
-//!   de-duplicated slot-id list. The NAME is a handle; the HASH is the
-//!   identity, so two sets with the same name and different slot lists cannot
-//!   collide.
-//! * **LAYOUT** (optional, `@w<N>`) — the emitted vector width. **Not part of
-//!   the identity**: two ids that differ only here are EQUAL, hash equal, and
-//!   name the same set.
-//!
-//! ## Why the layout left the identity (2026-09-06)
-//!
-//! The layout is the WIRE SHAPE, not the feature set, and with a dense wire it
-//! carries nothing the hash does not. It also lied inside a refusal surface:
-//! the cruft purge measured a densified shipped `B` and its wide twin as
-//! `basic+peaks+masked+iw@w95/unknown#9403d2a7` and
-//! `…@w372/unknown#9403d2a7` — the same compute tokens and the SAME slots hash
-//! — so `feature_set::check` reported a `LayoutDiffers` mismatch on every
-//! dense-bake/wide-table pair, for a difference that cannot make a read
-//! unsound. The width now belongs to the ARTIFACT
-//! (`zensim_validate::feature_set::FeatureSetRef::layout`), where a shortfall
-//! is a real finding.
-//!
-//! It is still ACCEPTED, and every `@w<N>` string ever written still parses,
-//! because it remains a **reconstruction aid**: [`crate::feature_layout`]
-//! rebuilds a registered set from its compute tokens, and a SPARSE id's set is
-//! the family union CLIPPED to its width, so knowing the width turns a search
-//! over candidate widths into a single check. Identity is the hash; the width
-//! is a hint about how to reproduce it.
-//!
-//! ## Substrate: `zenanalyze-api`, reused not paralleled
-//!
-//! The FROZEN `zenanalyze-api` contract already owns per-feature identity as
-//! `name@hex8` with charset `[a-z0-9_]+`, 8 strictly-lowercase hex digits, and
-//! a mandatory 64→32 fold `(h >> 32) ^ (h & 0xffff_ffff)`
-//! (`NamedFeature::fold_hash`). All four decisions are reused verbatim here.
-//! A feature-set id is a COARSER handle than a `NamedFeature` — a whole vector
-//! at a width and an era the API crate deliberately does not model — so it
-//! lives here and the API crate is untouched.
+//! The optional `@w<N>` layout width helps reconstruct a sparse set, but does not
+//! participate in identity. Families render in registry order; slot hashes use
+//! sorted, deduplicated IDs.
 
 use core::fmt;
 

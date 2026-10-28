@@ -14,12 +14,9 @@ pub(crate) struct ScaleBuffers {
     pub sigma1_sq: Vec<f32>,
     pub sigma12: Vec<f32>,
     pub temp_blur: Vec<f32>,
-    /// Rev3 signal retained across activity scratch reuse; lazy band allocation.
     pub stable_sd: Vec<f32>,
     /// Local contrast masking weights (when masking enabled).
     pub mask: Vec<f32>,
-    /// Fused v1-extension activity planes (revision 3): `|src - H(src)|`
-    /// and its H blur, the plane the V sweep V-blurs into the activity.
     pub act_tmp: Vec<f32>,
     pub act_h: Vec<f32>,
 }

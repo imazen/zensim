@@ -152,10 +152,7 @@ pub fn srgb_to_positive_xyb_planar_into(
     );
 }
 
-/// [`srgb_to_positive_xyb_planar_into`] for a computation at `revision`:
-/// the tier-dispatched production kernel through Rev3, the canonical body
-/// ([`srgb_xyb_canon`]) at Rev4. The public form above stays production-only —
-/// it is a bench export with no revision to honour.
+/// Convert sRGB to positive XYB using the requested revision.
 pub(crate) fn srgb_to_positive_xyb_planar_into_at_revision(
     pixels: &[[u8; 3]],
     x_out: &mut [f32],
@@ -1744,18 +1741,8 @@ fn srgb_to_xyb_planar_inner_v3(
 // Linear RGB → positive XYB conversion
 // ---------------------------------------------------------------------------
 
-/// Convert interleaved linear f32 RGB to planar positive XYB.
-///
-/// Input: `&[[f32; 3]]` — linear-light RGB values (typically in [0.0, 1.0]).
-/// Output: 3 planes (X, Y, B) each of length `pixels.len()`, already positive-shifted.
-///
-/// This is the same opsin matrix + cube root + positive shift as the sRGB u8 path,
-/// but skips the sRGB LUT linearization step. Results are identical for the same
-/// linear RGB values (within floating-point precision).
-///
-/// `revision` is the computation's formula revision: Rev4 runs the canonical
-/// body ([`linear_xyb_canon`]), every earlier revision the tier-dispatched
-/// kernels below.
+/// Convert interleaved linear RGB to three positive XYB planes.
+/// Each output plane must have the same length as the input.
 pub fn linear_to_positive_xyb_planar_into(
     pixels: &[[f32; 3]],
     x_out: &mut [f32],
@@ -2711,8 +2698,6 @@ mod rev4vec_tests {
                 }
             })
             .collect();
-        // Both cube roots: `cbrt_midp` (revisions 4-6) and revision 7's
-        // `cbrt_newton`.
         for cbrt7 in [false, true] {
             let (mut xe, mut ye, mut be) = (vec![0f32; n], vec![0f32; n], vec![0f32; n]);
             srgb_xyb_canon_body(&px, &mut xe, &mut ye, &mut be, cbrt7);

@@ -129,11 +129,6 @@ impl Layout {
         self.slot_at.get(pos).copied().flatten()
     }
 
-    /// Every id this layout carries.
-    // Consumers (`feature_plan`, `research`) are `feature-regime-v2`-gated; the
-    // LAYOUT itself is not, because the shipped dense bakes it serves are not
-    // (2026-09-06 ungate). Scoped so a genuinely-dead accessor still shows up
-    // on a default build.
     pub(crate) fn ids(&self) -> SlotSet {
         SlotSet::from_slots(self.slot_at.iter().flatten().map(|&id| usize::from(id)))
     }
@@ -200,10 +195,6 @@ impl Layout {
 /// [`tests::every_shipped_bake_resolves_to_an_identity_layout`] pins that.
 pub(crate) fn declared_layout(model: &crate::mlp::Model) -> Layout {
     let width = model.caller_input_width();
-    // THE declaration, preferred over every inference: an explicit ascending
-    // id list. A family-token id can only name a FAMILY UNION, so it cannot
-    // express a read set like Profile D's 28 basic slots; `feature_ids` can,
-    // and it is what the cruft purge stamps onto every densified bake.
     if let Some(slots) = declared_ids(model)
         && slots.len() == width
     {

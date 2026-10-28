@@ -139,10 +139,8 @@ impl DerivedInputs {
         self.gather_width
     }
 
-    /// The declared feature ids the LIVE model inputs read: a live `in` reads
-    /// its id, a live `product` reads both factors. `declared` is the bake's
-    /// ascending declared id list; `live` is indexed by model input.
-    /// Only the feature planner (`feature-regime-v2`) asks.
+    /// Return declared feature slots read by live model inputs, including both
+    /// factors of each live product. `live` is indexed by model input.
     pub(crate) fn read_slots(&self, declared: &[usize], live: &[bool]) -> Option<SlotSet> {
         if live.len() != self.inputs.len() || declared.len() != self.gather_width {
             return None;

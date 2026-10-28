@@ -471,16 +471,6 @@ mod skip_policy_tests {
 
     use crate::feature_v2::V1PoolsMode;
 
-    /// **The `Off` is never served policy applies to the ID-SPACE branch too.**
-    ///
-    /// `pools_mode_for_need` documents (with a measured footprint argument)
-    /// that `Off` is never the right answer for a SERVED v1 walk: it costs the
-    /// same arithmetic as `Peaks` and grows the hot set by disabling the
-    /// band-local self-blur. `Plan::for_bake` routes through that owner;
-    /// `Plan::derive_with_layout` derives from touched families and will
-    /// happily return `Off`. Nothing reached that branch until shipped `D`
-    /// declared its 28 basic ids — at which point D's emitted vector went from
-    /// real values at `f156..227` to zeros, score unmoved, footprint worse.
     #[test]
     fn a_dense_basic_only_bake_is_served_peaks_not_off() {
         let ids: Vec<usize> = (0..8).map(|i| i * 3).collect();
