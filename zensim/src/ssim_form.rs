@@ -1218,24 +1218,6 @@ pub(crate) fn refuse_rev4_mix(requested: FormulaRevision) -> Result<(), crate::Z
     Ok(())
 }
 
-/// **Refuse the 256-row strips entries at Rev4** (REV4SERVE).
-///
-/// `compute_streaming_strips` / `compute_with_ref_streaming_strips` merge
-/// per-strip `ScaleAccumulators` — an epsilon-equivalent but NOT
-/// bit-identical summation tree relative to the fold walk's 128-row
-/// kernel strips (their own doc: "within f64 machine epsilon"). At Rev4
-/// the contract is bit-for-bit vs `research::extract`, so the strips
-/// entries refuse rather than serve off-canon bits. Below Rev4 the
-/// epsilon-equivalence contract is unchanged.
-pub(crate) fn refuse_rev4_strips(requested: FormulaRevision) -> Result<(), crate::ZensimError> {
-    if effective_revision(requested) >= FormulaRevision::Rev4 {
-        return Err(crate::ZensimError::ModelLoadFailed {
-            reason: "the 256-row strips walk merges per-strip accumulators — epsilon-equivalent, not bit-canonical: at formula revision 4 use the buffered or fold entries",
-        });
-    }
-    Ok(())
-}
-
 /// Warn, once per process, that a pinned research revision is producing a
 /// score from a built-in profile's revision-1 coefficients.
 ///

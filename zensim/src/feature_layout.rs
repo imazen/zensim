@@ -129,31 +129,9 @@ impl Layout {
         self.slot_at.len()
     }
 
-    /// A stable name for manifests and messages (`w944`, `dense265`).
-    // Consumers (`feature_plan`, `research`) are `feature-regime-v2`-gated; the
-    // LAYOUT itself is not, because the shipped dense bakes it serves are not
-    // (2026-09-06 ungate). Scoped so a genuinely-dead accessor still shows up
-    // on a default build.
-    pub(crate) fn name(&self) -> &str {
-        &self.name
-    }
-
     /// The feature id at `pos`, or `None` for a declared gap.
     pub(crate) fn slot_at(&self, pos: usize) -> Option<u16> {
         self.slot_at.get(pos).copied().flatten()
-    }
-
-    /// The position of feature `id`, or `None` when this layout does not
-    /// carry it.
-    // Consumers (`feature_plan`, `research`) are `feature-regime-v2`-gated; the
-    // LAYOUT itself is not, because the shipped dense bakes it serves are not
-    // (2026-09-06 ungate). Scoped so a genuinely-dead accessor still shows up
-    // on a default build.
-    pub(crate) fn pos_of(&self, id: u16) -> Option<usize> {
-        self.by_id
-            .binary_search_by_key(&id, |&(i, _)| i)
-            .ok()
-            .map(|k| self.by_id[k].1 as usize)
     }
 
     /// Every id this layout carries.
@@ -206,62 +184,6 @@ impl Layout {
             });
         }
     }
-}
-
-/// The slot set a registered [`FeatureSetId`] names, or `None` when this build
-/// cannot reproduce it.
-///
-/// The id carries COMPUTE tokens, a WIDTH, an era and a slot hash; the slots
-/// follow from the registry. **The width means two different things depending
-/// on the layout, and the HASH is what decides which** — which is exactly the
-/// job the identity layer exists to do:
-///
-/// * for a SPARSE (identity) layout the width is also the clip: a
-///   `basic+peaks+moments@w944` id names the 265 slots of those families that
-///   fall below 944, laid out at their own indices with 679 structural fills;
-/// * for a DENSE layout the width is the PACKED count: the same 265 slots,
-///   at consecutive positions, so the id reads `…@w265` — and clipping the
-///   family union to 265 would reconstruct a completely different set.
-///
-/// So both readings are tried and the recorded `slots_hash8` picks the one
-/// the id actually names. An id neither reading reproduces describes a set
-/// this build does not have, and saying so is the point.
-// Consumers (`feature_plan::Plan`, `research`) are `feature-regime-v2`-gated;
-// see `Layout::name`'s note.
-pub(crate) fn slots_of(id: &FeatureSetId) -> Option<SlotSet> {
-    let ns = crate::NUM_SCALES;
-    let mut union = SlotSet::from_slots([]);
-    for t in id.compute().iter() {
-        union = union.union(&crate::feature_defs::family_slots(t, ns));
-    }
-    if id.compute().has_palette() {
-        union = union.union(&crate::feature_defs::family_slots(
-            crate::feature_defs::Family::Palette,
-            ns,
-        ));
-    }
-    let dense = union.clipped_to(crate::feature_defs::full_width(ns));
-    // The SPARSE reading needs a clip width. A legacy `@w<N>` id names it; the
-    // canonical layout-free form does not, so try every width any registered
-    // producer set has used. The hash decides — this list only bounds the
-    // search, and an id whose clip width is not on it is reported
-    // unreproducible rather than guessed at.
-    let candidates: &[usize] = match id.layout_width() {
-        Some(w) => &[w],
-        None => crate::feature_defs::REGISTERED_LAYOUT_WIDTHS,
-    };
-    for &w in candidates {
-        let sparse = union.clipped_to(w);
-        if sparse.hash8() == id.slots_hash() {
-            return Some(sparse);
-        }
-    }
-    // The DENSE reading. The recorded width is NOT re-checked here: it is not
-    // part of the identity, the hash already pins the exact slot list, and the
-    // one caller that needs "this set has as many members as the bake asks
-    // for" ([`declared_layout`]) applies that filter itself against the BAKE's
-    // width, which is the number that actually matters.
-    (dense.hash8() == id.slots_hash()).then_some(dense)
 }
 
 /// The layout a loaded bake DECLARES.

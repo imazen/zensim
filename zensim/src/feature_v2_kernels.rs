@@ -562,116 +562,10 @@ pub struct ZensimV2Result {
 }
 
 impl ZensimV2Result {
-    pub fn features(&self) -> &[f64] {
-        &self.features
-    }
     pub fn into_features(self) -> Vec<f64> {
         self.features
     }
-    pub fn n_scales(&self) -> usize {
-        self.n_scales
-    }
-    pub fn regime(&self) -> FeatureRegime {
-        self.regime
-    }
-    /// Which of `f156..372` hold v1's LIVE pool values (the
-    /// [`V2NewFeatureToggles::v1_pools`] regimes) rather than the folded
-    /// walk's structural zeros. Same layout width either way — this is the
-    /// regime-purity marker for that block.
-    pub fn v1_pools(&self) -> V1PoolsMode {
-        self.v1_pools
-    }
-    /// `v1_pools() != Off`.
-    pub fn v1_pools_live(&self) -> bool {
-        self.v1_pools != V1PoolsMode::Off
-    }
-    /// Explicit-regime named view over this result's features.
-    ///
-    /// For [`FeatureRegime::Folded720`] results the view covers the v2
-    /// block (the vector's tail); the v1 basic block has no v2-named
-    /// accessors and is read positionally (`features()[0..156]`).
-    pub fn view(&self) -> FeatureViewV2<'_> {
-        let v2_len = self.n_scales * 3 * FEATURES_PER_CHANNEL_V2_TOTAL;
-        let v2_block = match self.regime {
-            FeatureRegime::Folded720 => &self.features[self.features.len() - v2_len..],
-            FeatureRegime::Folded720Append => {
-                let append_len = self.n_scales * 3 * FEATURES_PER_CHANNEL_APPEND;
-                let end = self.features.len() - append_len;
-                &self.features[end - v2_len..end]
-            }
-            FeatureRegime::Folded720Append2 => {
-                let tail = self.n_scales * (3 * FEATURES_PER_CHANNEL_APPEND + APPEND2_PER_SCALE);
-                let end = self.features.len() - tail;
-                &self.features[end - v2_len..end]
-            }
-            FeatureRegime::Folded720Csfw => {
-                let tail = self.n_scales
-                    * (3 * FEATURES_PER_CHANNEL_APPEND + APPEND2_PER_SCALE + CSFW_PER_SCALE);
-                let end = self.features.len() - tail;
-                &self.features[end - v2_len..end]
-            }
-            // Both 1322 and 1502 retain the same fixed v2 block at f372.
-            FeatureRegime::Folded720Rev4 => &self.features[372..372 + v2_len],
-            _ => &self.features[..],
-        };
-        FeatureViewV2::new(v2_block, self.n_scales)
-            .expect("compute_v2_features always emits the v2-total layout for its own n_scales")
-    }
 
-    /// The f720+ append block (`n_scales × 3 × 17` slots, layout
-    /// `scale*(3*17) + ch*17 + local` with [`idx_append`] locals), or
-    /// `None` for regimes without one.
-    pub fn append_features(&self) -> Option<&[f64]> {
-        match self.regime {
-            FeatureRegime::Folded720Append => {
-                let append_len = self.n_scales * 3 * FEATURES_PER_CHANNEL_APPEND;
-                Some(&self.features[self.features.len() - append_len..])
-            }
-            FeatureRegime::Folded720Append2 => {
-                let append_len = self.n_scales * 3 * FEATURES_PER_CHANNEL_APPEND;
-                let start = self.features.len() - append_len - self.n_scales * APPEND2_PER_SCALE;
-                Some(&self.features[start..start + append_len])
-            }
-            FeatureRegime::Folded720Csfw => {
-                let append_len = self.n_scales * 3 * FEATURES_PER_CHANNEL_APPEND;
-                let start = self.features.len()
-                    - append_len
-                    - self.n_scales * (APPEND2_PER_SCALE + CSFW_PER_SCALE);
-                Some(&self.features[start..start + append_len])
-            }
-            _ => None,
-        }
-    }
-
-    /// The f924+ append2 slots (`n_scales × APPEND2_PER_SCALE`), when the
-    /// result carries them ([`FeatureRegime::Folded720Append2`],
-    /// [`FeatureRegime::Folded720Csfw`], or
-    pub fn append2_features(&self) -> Option<&[f64]> {
-        match self.regime {
-            FeatureRegime::Folded720Append2 => {
-                let len = self.n_scales * APPEND2_PER_SCALE;
-                Some(&self.features[self.features.len() - len..])
-            }
-            FeatureRegime::Folded720Csfw => {
-                let len = self.n_scales * APPEND2_PER_SCALE;
-                let start = self.features.len() - len - self.n_scales * CSFW_PER_SCALE;
-                Some(&self.features[start..start + len])
-            }
-            _ => None,
-        }
-    }
-
-    /// The f944+ CSFW slots (`n_scales × CSFW_PER_SCALE`), when the
-    /// result carries them ([`FeatureRegime::Folded720Csfw`] or
-    pub fn csfw_features(&self) -> Option<&[f64]> {
-        match self.regime {
-            FeatureRegime::Folded720Csfw => {
-                let len = self.n_scales * CSFW_PER_SCALE;
-                Some(&self.features[self.features.len() - len..])
-            }
-            _ => None,
-        }
-    }
 }
 
 /// Named, explicit-regime view over a v2 feature vector. Unlike v1's
@@ -684,113 +578,7 @@ pub struct FeatureViewV2<'a> {
 }
 
 impl<'a> FeatureViewV2<'a> {
-    pub fn new(features: &'a [f64], n_scales: usize) -> Option<Self> {
-        let expected = n_scales * 3 * FEATURES_PER_CHANNEL_V2_TOTAL;
-        if features.len() != expected {
-            return None;
-        }
-        Some(Self { features, n_scales })
-    }
 
-    pub fn n_scales(&self) -> usize {
-        self.n_scales
-    }
-
-    #[inline]
-    fn at(&self, scale: usize, ch: usize, local: usize) -> f64 {
-        self.features
-            [scale * 3 * FEATURES_PER_CHANNEL_V2_TOTAL + ch * FEATURES_PER_CHANNEL_V2_TOTAL + local]
-    }
-
-    pub fn ssim_mean(&self, scale: usize, ch: usize) -> f64 {
-        self.at(scale, ch, idx::SSIM_MEAN)
-    }
-    pub fn ssim_dev2(&self, scale: usize, ch: usize) -> f64 {
-        self.at(scale, ch, idx::SSIM_DEV2)
-    }
-    pub fn ssim_dev4(&self, scale: usize, ch: usize) -> f64 {
-        self.at(scale, ch, idx::SSIM_DEV4)
-    }
-    pub fn art(&self, scale: usize, ch: usize) -> f64 {
-        self.at(scale, ch, idx::ART)
-    }
-    pub fn det(&self, scale: usize, ch: usize) -> f64 {
-        self.at(scale, ch, idx::DET)
-    }
-    pub fn mse(&self, scale: usize, ch: usize) -> f64 {
-        self.at(scale, ch, idx::MSE)
-    }
-    pub fn hf_gain(&self, scale: usize, ch: usize) -> f64 {
-        self.at(scale, ch, idx::HF_GAIN)
-    }
-    pub fn hf_loss(&self, scale: usize, ch: usize) -> f64 {
-        self.at(scale, ch, idx::HF_LOSS)
-    }
-    pub fn hf_mag_loss(&self, scale: usize, ch: usize) -> f64 {
-        self.at(scale, ch, idx::HF_MAG_LOSS)
-    }
-    pub fn ssim_soft_peak(&self, scale: usize, ch: usize) -> f64 {
-        self.at(scale, ch, idx::SSIM_SOFT_PEAK)
-    }
-    pub fn art_soft_peak(&self, scale: usize, ch: usize) -> f64 {
-        self.at(scale, ch, idx::ART_SOFT_PEAK)
-    }
-    pub fn det_soft_peak(&self, scale: usize, ch: usize) -> f64 {
-        self.at(scale, ch, idx::DET_SOFT_PEAK)
-    }
-    pub fn masked_ssim(&self, scale: usize, ch: usize) -> f64 {
-        self.at(scale, ch, idx::MASKED_SSIM)
-    }
-    pub fn masked_art(&self, scale: usize, ch: usize) -> f64 {
-        self.at(scale, ch, idx::MASKED_ART)
-    }
-    pub fn masked_det(&self, scale: usize, ch: usize) -> f64 {
-        self.at(scale, ch, idx::MASKED_DET)
-    }
-    pub fn masked_mse(&self, scale: usize, ch: usize) -> f64 {
-        self.at(scale, ch, idx::MASKED_MSE)
-    }
-    pub fn iw_ssim(&self, scale: usize, ch: usize) -> f64 {
-        self.at(scale, ch, idx::IW_SSIM)
-    }
-    pub fn iw_art(&self, scale: usize, ch: usize) -> f64 {
-        self.at(scale, ch, idx::IW_ART)
-    }
-    pub fn iw_det(&self, scale: usize, ch: usize) -> f64 {
-        self.at(scale, ch, idx::IW_DET)
-    }
-    pub fn iw_mse(&self, scale: usize, ch: usize) -> f64 {
-        self.at(scale, ch, idx::IW_MSE)
-    }
-    pub fn pjnd_transducer(&self, scale: usize, ch: usize) -> f64 {
-        self.at(scale, ch, idx::PJND_TRANSDUCER)
-    }
-    pub fn pjnd_fragility(&self, scale: usize, ch: usize) -> f64 {
-        self.at(scale, ch, idx::PJND_FRAGILITY)
-    }
-    /// Gradient-magnitude similarity (candidate 1). On `ch=0` (X) or
-    /// `ch=2` (B) this doubles as chroma-edge similarity (candidate 3).
-    pub fn gms(&self, scale: usize, ch: usize) -> f64 {
-        self.at(scale, ch, idx::GMS)
-    }
-    pub fn pjnd_transducer_low_k(&self, scale: usize, ch: usize) -> f64 {
-        self.at(scale, ch, idx::PJND_TRANSDUCER_LOW_K)
-    }
-    pub fn pjnd_transducer_high_k(&self, scale: usize, ch: usize) -> f64 {
-        self.at(scale, ch, idx::PJND_TRANSDUCER_HIGH_K)
-    }
-    pub fn blockiness(&self, scale: usize, ch: usize) -> f64 {
-        self.at(scale, ch, idx::BLOCKINESS)
-    }
-    pub fn ringing(&self, scale: usize, ch: usize) -> f64 {
-        self.at(scale, ch, idx::RINGING)
-    }
-    pub fn banding(&self, scale: usize, ch: usize) -> f64 {
-        self.at(scale, ch, idx::BANDING)
-    }
-    pub fn edge_width_change(&self, scale: usize, ch: usize) -> f64 {
-        self.at(scale, ch, idx::EDGE_WIDTH_CHANGE)
-    }
 }
 
 // ============================================================================
@@ -1237,41 +1025,7 @@ pub(crate) fn class_c_slot_indices(n_scales: usize) -> Vec<usize> {
     v
 }
 impl V2NewFeatureToggles {
-    /// The **feature-set id** an extraction with these toggles PRODUCES —
-    /// `<compute>@w<layout>/<era>#<slots-hash8>`, the string an extractor
-    /// stamps into its output table's `_MANIFEST.json`
-    /// (`docs/FEATURE_SET_IDS.md` §6.1).
-    ///
-    /// `era` is the caller's: only the caller knows which extractor build it
-    /// is, and an unregistered/unknown era must be passed as
-    /// [`crate::feature_set_id::ERA_UNKNOWN`] rather than guessed — a wrong
-    /// era label is worse than none.
-    ///
-    /// `None` only when `era` is not a valid token (`[a-z0-9_]+`).
-    ///
-    /// `#[doc(hidden)]`: an extractor-side provenance helper, not a product
-    /// knob — the same treatment `fold_engine::ScoringEngine` gets.
-    #[doc(hidden)]
-    pub fn feature_set_id(
-        &self,
-        n_scales: usize,
-        layout_width: usize,
-        era: &str,
-    ) -> Option<crate::feature_set_id::FeatureSetId> {
-        ComputeSet::from_toggles(*self).feature_set_id(n_scales, layout_width, era)
-    }
 
-    /// The slots an extraction with these toggles POPULATES at `n_scales`,
-    /// clipped to `layout_width` — the producer half of a feature-set id, for
-    /// a manifest that wants the explicit list beside the hash.
-    #[doc(hidden)]
-    pub fn populated_slots(
-        &self,
-        n_scales: usize,
-        layout_width: usize,
-    ) -> crate::feature_set_id::SlotSet {
-        ComputeSet::from_toggles(*self).populated_slots(n_scales, layout_width)
-    }
 }
 
 impl Default for V2NewFeatureToggles {
@@ -1485,56 +1239,6 @@ pub(crate) struct ComputeSet {
     /// here rather than re-read from the toggles at each site, so
     /// `raw_moments` has ONE derivation.
     pub free_extras: V1FreeExtras,
-}
-
-/// **The revision a BAKE declares**, from its `zentrain.formula_revision`
-/// metadata, defaulting to [`crate::ssim_form::SHIPPED_REVISION`] when it
-/// carries none.
-///
-/// Per-bake rather than per-process because the alternative was measured to
-/// be unshippable: `bake_block_profile` shows all three shipped 944 bakes
-/// reading the full `GLOBAL_DMEAN`/`CGAIN`/`CLOSS` set (33 slots each), so a
-/// global flip to `Rev2` would move 22 of 33 inputs per bake and silently
-/// re-price all of them. A bake declares the revision it was trained against
-/// and is served it; a bake refit later declares the newer one; both coexist.
-///
-/// An ABSENT value is the registered pre-stamp era (the shipped revision). A
-/// PRESENT value this build does not know is refused, never guessed: until
-/// featcanon-fix (2026-09-26) it fell back to the shipped revision, so a bake
-/// stamped `4` was silently read as Rev1 by `bake_verdict` while
-/// `Plan::for_bake` refused it. [`crate::feature_layout::formula_revision`] is
-/// the one parser; this is its name at the feature layer.
-pub(crate) fn bake_formula_revision(
-    model: &crate::mlp::Model,
-) -> Result<crate::feature_defs::FormulaRevision, ZensimError> {
-    crate::feature_layout::formula_revision(model)
-}
-
-/// [`bake_formula_revision`], for consumers outside the crate (the verdict
-/// tool's per-bake revision gate). Errors on a present value this build does
-/// not know.
-///
-/// `#[doc(hidden)]`: revision plumbing, not product surface.
-///
-/// # Errors
-///
-/// [`ZensimError::ModelLoadFailed`] when `zentrain.formula_revision` is
-/// present but not a known revision.
-#[doc(hidden)]
-pub fn bake_formula_revision_public(
-    model: &zenpredict::Model,
-) -> Result<FormulaRevision, ZensimError> {
-    bake_formula_revision(model)
-}
-
-/// The formula revision THIS BUILD computes by default — the shipped one,
-/// or whatever `ZENSIM_FORMULA_REV` pins.
-///
-/// `#[doc(hidden)]`: as above.
-#[doc(hidden)]
-#[must_use]
-pub fn active_formula_revision() -> FormulaRevision {
-    crate::ssim_form::active_revision()
 }
 
 impl ComputeSet {
@@ -1766,80 +1470,6 @@ impl ComputeSet {
         !self.v2_blocks
             && self.v1_basic
             && matches!(self.v1_pools, V1PoolsMode::Full | V1PoolsMode::Peaks)
-    }
-
-    /// The COMPUTE half of this request's **feature-set id**
-    /// (`docs/FEATURE_SET_IDS.md` §2.1) — which registered slot families this
-    /// walk actually populates.
-    ///
-    /// Derived from the SAME predicates the walk itself dispatches on
-    /// ([`Self::raw_moments`] / [`Self::bounded_err`]), not from the raw
-    /// toggle fields, so a full 944 walk correctly names NO free tranche: the
-    /// append kernel owns `GLOBAL_*` there, and the free accumulators are not
-    /// run at all.
-    ///
-    /// Sub-toggles (`gradient` / `blockiness` / `transducer_bank` /
-    /// `append2_dst_activity`) are deliberately not tokens — they reshape a
-    /// family from the inside, which moves the populated slot set, which moves
-    /// the id's hash. The name is a handle; the hash is the identity.
-    pub(crate) fn compute_parts(&self) -> crate::feature_set_id::ComputeParts {
-        use crate::feature_set_id::{ComputeParts, ComputeToken as T};
-        let mut p = ComputeParts::EMPTY;
-        if self.v1_basic {
-            p = p.with(T::Basic);
-        }
-        match self.v1_pools {
-            V1PoolsMode::Off => {}
-            V1PoolsMode::Carriers => p = p.with(T::Carriers),
-            V1PoolsMode::Peaks => p = p.with(T::Peaks),
-            V1PoolsMode::Full => p = p.with(T::Peaks).with(T::Masked).with(T::Iw),
-        }
-        if self.v2_blocks {
-            p = p.with(T::V2);
-        }
-        if self.append {
-            p = p.with(T::Append);
-        }
-        if self.append2 {
-            p = p.with(T::Append2);
-        }
-        if self.csfw {
-            p = p.with(T::Csfw);
-        }
-        if self.gridblk {
-            p = p.with(T::Gridblk);
-        }
-        if self.ringbasis {
-            p = p.with(T::Ringbasis);
-        }
-        if self.tailhist {
-            p = p.with(T::Tailhist);
-        }
-        if self.arttype {
-            p = p.with(T::Arttype);
-        }
-        if self.gmsbank {
-            p = p.with(T::Gmsbank);
-        }
-        if self.mapdev {
-            p = p.with(T::Mapdev);
-        }
-        if self.z1max {
-            p = p.with(T::Z1max);
-        }
-        if self.gmsnative {
-            p = p.with(T::Gmsnative);
-        }
-        if self.globaff {
-            p = p.with(T::GlobAff);
-        }
-        if self.raw_moments() {
-            p = p.with(T::Moments);
-        }
-        if self.bounded_err() {
-            p = p.with(T::ClassC);
-        }
-        p
     }
 
     /// The slot set this request POPULATES, clipped to `layout_width`.
@@ -2084,37 +1714,6 @@ impl ComputeSet {
             .is_some_and(|d| d.scale == 0 && matches!(d.channel, Channel::X | Channel::B))
     }
 
-    /// This request's full feature-set id at `era` — the producer-side id an
-    /// extractor stamps into a table's `_MANIFEST.json`.
-    pub(crate) fn feature_set_id(
-        &self,
-        n_scales: usize,
-        layout_width: usize,
-        era: &str,
-    ) -> Option<crate::feature_set_id::FeatureSetId> {
-        // Family tokens cannot reconstruct a channel subset. Its explicit
-        // feature IDs and per-slot provenance remain the authoritative identity;
-        // do not issue a shorthand that Request::for_set cannot reproduce.
-        if !self.full_res_xb
-            || self.coarse_y_only_scales != 0
-            || self.local_only
-            || self.sampling.is_some()
-            || (self.v1_pools == V1PoolsMode::Full && self.v1_full_scales != Self::ALL_SCALES)
-            || self.v1_scales != Self::ALL_SCALES
-        {
-            return None;
-        }
-        // The emitted width rides along as the legacy `@w<N>` hint — a
-        // PRODUCER's id is exactly where recording it pays, because a reader
-        // rebuilding this sparse set from its compute tokens needs the clip.
-        // It is not part of the id's identity.
-        crate::feature_set_id::FeatureSetId::from_slots_with_layout(
-            self.compute_parts(),
-            layout_width,
-            era,
-            &self.populated_slots(n_scales, layout_width),
-        )
-    }
 }
 
 /// Which groups of [`ScratchV2Strip`]'s planes a walk will actually write.
@@ -2245,11 +1844,6 @@ impl V2Scratch {
         }
     }
 
-    /// Grow (never shrink) every buffer to hold `strip_max_n` elements.
-    fn ensure(&mut self, strip_max_n: usize) {
-        self.ensure_for(strip_max_n, StripPlaneNeeds::ALL);
-    }
-
     /// [`Self::ensure`] restricted to the plane groups the caller will write
     /// (see [`StripPlaneNeeds`]). Both the size and the set are grow-only, so
     /// this can only ever allocate LESS than `ensure` — never differently.
@@ -2324,98 +1918,6 @@ fn run_blur_pass(
         0,
         crate::ssim_form::active_revision(),
     );
-}
-
-/// Strip-path variant of [`run_blur_pass`]: the inputs are `scratch`'s own
-/// `src_wide`/`dst_wide` halo buffers (filled by `gather_strip_halo` just
-/// before this call). Destructuring the struct once yields disjoint
-/// borrows — read-only input fields alongside `&mut` moment fields — which
-/// is what lets the halo buffers live inside the reusable scratch at all.
-fn run_blur_pass_strip(width: usize, height_local: usize, scratch: &mut ScratchV2Strip) {
-    let n = width * height_local;
-    let ScratchV2Strip {
-        src_wide,
-        dst_wide,
-        mu1_h,
-        mu2_h,
-        ssq_h,
-        s12_h,
-        mu1,
-        mu2,
-        ssq,
-        s12,
-        abs_src,
-        activity_tmp,
-        activity,
-        ..
-    } = scratch;
-    run_blur_pass_inner(
-        &src_wide[..n],
-        &dst_wide[..n],
-        width,
-        height_local,
-        mu1_h,
-        mu2_h,
-        ssq_h,
-        s12_h,
-        mu1,
-        mu2,
-        ssq,
-        s12,
-        abs_src,
-        activity_tmp,
-        activity,
-        // materialized walk: always wants the v2 planes
-        true,
-        // the materialized walk parallelises at the channel/scale level
-        // above this call; a nested band fan-out here is not its axis.
-        false,
-        0,
-        crate::ssim_form::active_revision(),
-    );
-}
-
-/// Strip-path blur pass when the reference-side moments (`mu1`,
-/// `activity`) come from a [`V2PreparedReference`] cache: 3-output fused
-/// H (`fused_blur_h_ssim3` — the mu1 chain is compiled out on the v4x
-/// tier; `mu1_h` is only fallback scratch) + V-blur of the 3
-/// distorted/joint planes only. The
-/// mu1 V-blur and the whole activity chain (abs-diff + 2-pass blur) are
-/// SKIPPED — their values are read from the cache instead, which was
-/// filled by replaying this exact strip walk (see
-/// [`compute_ref_moments_channel`]), so consumers see bit-identical
-/// inputs.
-fn run_blur_pass_strip_cached_ref(width: usize, height_local: usize, scratch: &mut ScratchV2Strip) {
-    let n = width * height_local;
-    let ScratchV2Strip {
-        src_wide,
-        dst_wide,
-        mu1_h,
-        mu2_h,
-        ssq_h,
-        s12_h,
-        mu2,
-        ssq,
-        s12,
-        ..
-    } = scratch;
-    crate::blur::fused_blur_h_ssim3(
-        &src_wide[..n],
-        &dst_wide[..n],
-        &mut mu1_h[..n],
-        &mut mu2_h[..n],
-        &mut ssq_h[..n],
-        &mut s12_h[..n],
-        width,
-        height_local,
-        BLUR_RADIUS,
-        // The wide walk's revision IS the process revision: every entry to it
-        // runs `validate_wide_revision` first, same as `run_blur_pass_strip`.
-        crate::ssim_form::active_revision(),
-    );
-    crate::blur::box_blur_v_from_copy(&mu2_h[..n], &mut mu2[..n], width, height_local, BLUR_RADIUS);
-    crate::blur::box_blur_v_from_copy(&ssq_h[..n], &mut ssq[..n], width, height_local, BLUR_RADIUS);
-    crate::blur::box_blur_v_from_copy(&s12_h[..n], &mut s12[..n], width, height_local, BLUR_RADIUS);
 }
 
 /// Fill one channel-scale's cached reference moments by REPLAYING the
@@ -3430,36 +2932,6 @@ fn era2_dense_enabled() -> bool {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn dense_block_kernel(
-    src: &[f32],
-    dst: &[f32],
-    mu1: &[f32],
-    mu2: &[f32],
-    ssq: &[f32],
-    s12: &[f32],
-    activity: &[f32],
-    width: usize,
-    height: usize,
-    transducer_bank: bool,
-    r4: Option<Rev4Dense<'_>>,
-) -> DenseAccum {
-    dense_block_kernel_at_revision(
-        src,
-        dst,
-        mu1,
-        mu2,
-        ssq,
-        s12,
-        activity,
-        width,
-        height,
-        transducer_bank,
-        r4,
-        crate::ssim_form::active_revision(),
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
 fn dense_block_kernel_at_revision(
     src: &[f32],
     dst: &[f32],
@@ -3638,15 +3110,6 @@ impl<'a> GmsBankWork<'a> {
         }
     }
 
-    fn rows(self, start: usize, end: usize) -> Self {
-        Self {
-            chroma: self.chroma.map(|p| ChromaStrip {
-                reference: &p.reference[start..end],
-                distorted: &p.distorted[start..end],
-            }),
-            ..self
-        }
-    }
 }
 
 /// Difference-form joint opponent loss. Equal constants reproduce 1-MDSI CS
@@ -5841,42 +5304,6 @@ fn gradient_block_kernel_canon64_vec_neon<
     )
 }
 
-/// `bandvis`: `Some((δ_lo, δ_hi))` accumulates the append2 BANDVIS pair
-/// (Y channel with `append2_block` on — the CROSS-pattern const split, so
-/// chroma/off paths pay nothing and change no byte). `bv_act_dst`:
-/// `Some(dst-activity strip)` switches the BANDVIS dst band term to the
-/// dst self-mask (`append2_dst_activity` — a third const-split
-/// instantiation; `None` runs the pre-fix bytes exactly). Ignored without
-/// `bandvis`. `r4`: REV4's C2 ring-bin / C4 bleed hook bundle — `None`
-/// on every non-rev4 call, and the `Option` check is one loop-invariant
-/// branch (the `transducer_bank` shape), so the OFF path's op sequence
-/// is the pre-REV4 one bit for bit.
-fn gradient_block_kernel(
-    src: &[f32],
-    dst: &[f32],
-    activity: &[f32],
-    width: usize,
-    height: usize,
-    bandvis: Option<(f32, f32)>,
-    bv_act_dst: Option<&[f32]>,
-    r4: Option<Rev4Grad<'_>>,
-    gmsbank: bool,
-) -> GradientAccum {
-    gradient_block_kernel_at_revision(
-        src,
-        dst,
-        activity,
-        None,
-        width,
-        height,
-        bandvis,
-        bv_act_dst,
-        r4,
-        gmsbank,
-        crate::ssim_form::active_revision(),
-    )
-}
-
 #[allow(clippy::too_many_arguments)]
 fn gradient_block_kernel_at_revision(
     src: &[f32],
@@ -6006,89 +5433,6 @@ fn gradient_block_kernel_at_revision(
             [v4x, v4, v3, neon, wasm128, scalar]
         ),
     }
-}
-
-/// Sparse blockiness pass — visits ONLY the 8-pixel-lattice positions
-/// (`x % BLOCK_LATTICE == 0`, `y % BLOCK_LATTICE == 0`) instead of every
-/// pixel. Deliberately scalar (§A.14: not folded into the SIMD dense pass
-/// this phase — see the module-level note above) but strictly cheaper
-/// than the pre-phase-4 dense-scalar-with-modulo-branch it replaces, since
-/// it no longer visits the 7/8 (or 63/64 for the corner term) of pixels
-/// that always contribute zero.
-///
-/// **Canonical accumulation order (streaming pre-chunk P1, 2026-07-26 —
-/// `docs/STREAMING_FOLDAPP_C0_DESIGN_2026-07-26.md` §2):** both term
-/// families accumulate ROW-ORDERED (y-outer), into two separate f64 sums
-/// combined once at the end:
-///
-/// - `sum_v` (vertical lattice-BOUNDARY steps, `x % LATTICE == 0, x > 0`,
-///   every row): `for y in 0..h { for x in lattice }`.
-/// - `sum_h` (horizontal lattice-boundary steps, `y % LATTICE == 0, y > 0`,
-///   every column): `for y in lattice { for x in 0..w }` (this family was
-///   already row-ordered).
-///
-/// The previous form iterated the vertical family COLUMN-outer and folded
-/// both families into one running f64 — an association no row-ordered
-/// strip walk can reproduce. Reordering shifts the pooled BLOCKINESS value
-/// by f64 reassociation only (~1e-16 rel; 12 of 720 slots affected, all
-/// entry paths shift identically so path-parity gates are unaffected), and
-/// lets a strip-fed variant accumulate rows `[y0, y1)` per kernel strip
-/// into running `(sum_v, sum_h)` with a bit-identical f64 op sequence.
-/// (Also a locality win: the old column-outer walk strode `width` floats
-/// per step.)
-fn blockiness_sparse(src: &[f32], dst: &[f32], width: usize, height: usize) -> f64 {
-    let (sum_v, sum_h) = blockiness_sparse_rows(src, dst, width, 0, height);
-    crate::featcanon::SumVar::fin(&sum_v) + crate::featcanon::SumVar::fin(&sum_h)
-}
-
-/// Row-range core of [`blockiness_sparse`]: accumulate BOTH term families
-/// for image rows `[y0, y1)` (`src`/`dst` hold the full plane here; the
-/// streamed walk (C2) will call this shape with strip-local slices and
-/// translated row indexing). Returns `(sum_v, sum_h)` so a strip walk can
-/// keep the two running sums across strips and combine ONCE at finalize,
-/// reproducing [`blockiness_sparse`]'s f64 op sequence exactly.
-fn blockiness_sparse_rows(
-    src: &[f32],
-    dst: &[f32],
-    width: usize,
-    y0: usize,
-    y1: usize,
-) -> (crate::featcanon::SumVar, crate::featcanon::SumVar) {
-    // featacc: `Seq` (the production `f64 +=` chain) unless a measurement
-    // mode is set — the f64-element rule means `c32` is `Seq` too.
-    use crate::featcanon::{LanesF64, SumVar};
-    let mut sum_v = SumVar::f64_elems_meas();
-    let mut sum_h = SumVar::f64_elems_meas();
-    let spread = crate::ssim_form::active_revision().row_lanes();
-    // Revision 7 with the eight-lane sums: lane partials per `STRIP_ROWS`
-    // kernel strip of the plane, added in strip order, as the strip walk
-    // does (`blockiness_sparse_strip_wide`).
-    let partial = spread && matches!(sum_v, SumVar::L64(_));
-    let (mut pv, mut ph) = (SumVar::L64(LanesF64::zero()), SumVar::L64(LanesF64::zero()));
-    for y in y0..y1 {
-        let (v, h) = if partial {
-            (&mut pv, &mut ph)
-        } else {
-            (&mut sum_v, &mut sum_h)
-        };
-        blockiness_row(
-            src,
-            dst,
-            y * width,
-            width,
-            y % BLOCK_LATTICE == 0 && y > 0,
-            spread,
-            v,
-            h,
-        );
-        if partial && ((y + 1).is_multiple_of(STRIP_ROWS) || y + 1 == y1) {
-            sum_v.merge_from(&pv);
-            sum_h.merge_from(&ph);
-            pv = SumVar::L64(LanesF64::zero());
-            ph = SumVar::L64(LanesF64::zero());
-        }
-    }
-    (sum_v, sum_h)
 }
 
 /// One row of the blockiness lattice, the shared step of every walk: the

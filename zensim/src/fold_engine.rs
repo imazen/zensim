@@ -128,26 +128,6 @@ pub(crate) fn v1_feature_width(config: &ZensimConfig) -> usize {
     config.num_scales * 3 * fpc
 }
 
-/// Fold-backed replacement for
-/// [`crate::streaming::compute_zensim_streaming_stoppable`]: same inputs,
-/// same `ZensimResult`, different walk.
-///
-/// The caller ([`crate::metric::compute_with_config_inner`]) has already
-/// applied the shared reflect-pad and byte-identical short-circuit, so this
-/// sees exactly what the buffered walk would.
-pub(crate) fn compute_fold_backed(
-    source: &impl ImageSource,
-    distorted: &impl ImageSource,
-    config: &ZensimConfig,
-    weights: &[f64],
-    scratch: &mut V2Scratch,
-    // The serving plan; `None` = today's unconditional v1 walk at
-    // `V1PoolsMode::Full`. See `score_plan`.
-    plan: Option<&crate::feature_plan::Plan>,
-) -> Result<ZensimResult, ZensimError> {
-    compute_fold_backed_stoppable(source, distorted, config, weights, scratch, plan, None)
-}
-
 pub(crate) fn compute_fold_backed_stoppable(
     source: &impl ImageSource,
     distorted: &impl ImageSource,
@@ -340,19 +320,7 @@ pub(crate) struct V1PoolNeed {
 }
 
 impl V1PoolNeed {
-    /// The conservative answer: assume every family is read. Returned for
-    /// anything this module declines to analyse.
-    pub(crate) const ALL: Self = Self {
-        peaks: true,
-        masked: true,
-        iw: true,
-    };
 }
-
-/// v1's 372 block boundaries, in caller feature indices.
-const V1_PEAKS: (usize, usize) = (156, 228);
-const V1_MASKED: (usize, usize) = (228, 300);
-const V1_IW: (usize, usize) = (300, 372);
 
 /// The layer-0 column range each CALLER line occupies, in caller order —
 /// `caller_col_spans()[k] = (start, end)` with `end == start` for a line the
@@ -396,33 +364,6 @@ fn caller_col_spans(model: &crate::mlp::Model, in_dim: usize) -> Option<Vec<(usi
         cur = end;
     }
     (cur == in_dim).then_some(out)
-}
-
-/// Layer-0 structural read-set of an ALREADY-PARSED bake, or
-/// [`V1PoolNeed::ALL`] when its arities do not tile layer 0 (which no valid
-/// bake's do). The parse-free half of [`bake_pool_need`] — split out so
-/// [`crate::feature_plan::Plan::for_bake`] can derive the same
-/// structural read-set from a model handle it already holds, rather than
-/// re-parsing bytes it was never given. Handles pruned and expanded bakes
-/// through [`caller_col_spans`].
-pub(crate) fn bake_pool_need_from_model(model: &crate::mlp::Model) -> V1PoolNeed {
-    // The read set as FEATURE IDS, through the one owner. This used to fold
-    // `caller_line_reads` (layer-0 POSITIONS) directly against the family
-    // bounds — sound only while position == id, i.e. only for an identity
-    // layout. Under the dense contract shipped `B` has 95 live positions
-    // `0..94` carrying ids `f3..f369`, and the positional fold reported
-    // `{peaks: false, masked: false, iw: false}` for a bake that reads 49
-    // lines above `f227`. That is a SKIP decision, so the wrong answer here
-    // deletes pools the bake then gathers as structural zeros.
-    let Some(slots) = crate::feature_plan::bake_read_slots(model) else {
-        return V1PoolNeed::ALL;
-    };
-    let reads = |lo: usize, hi: usize| -> bool { (lo..hi).any(|s| slots.contains(s)) };
-    V1PoolNeed {
-        peaks: reads(V1_PEAKS.0, V1_PEAKS.1),
-        masked: reads(V1_MASKED.0, V1_MASKED.1),
-        iw: reads(V1_IW.0, V1_IW.1),
-    }
 }
 
 /// **THE per-caller-line structural read predicate.** `caller_line_reads(m)[k]`
@@ -488,104 +429,6 @@ pub(crate) fn caller_line_reads(model: &crate::mlp::Model) -> Option<Vec<bool>> 
             })
             .collect(),
     )
-}
-
-/// Layer-0 structural read-set of one bake's BYTES, or [`V1PoolNeed::ALL`]
-/// when the bake cannot be parsed. Parses then delegates to
-/// [`bake_pool_need_from_model`] — see that function for the derivation.
-fn bake_pool_need(bytes: &[u8]) -> V1PoolNeed {
-    let Ok(model) = crate::mlp::Model::from_bytes(bytes) else {
-        return V1PoolNeed::ALL;
-    };
-    bake_pool_need_from_model(&model)
-}
-
-/// [`bake_pool_need`], interned by bake-bytes data pointer — the same cache
-/// shape (and the same stability argument) as
-/// `metric::cached_bake_metadata`: bake slices always come from `&'static`
-/// slots via `ProfileParams::mlp_bytes`, so the pointer is a stable unique
-/// key per slot. Parsing a bake per compare would defeat the point of the
-/// skip.
-pub(crate) fn cached_bake_pool_need(bytes: &[u8]) -> V1PoolNeed {
-    use std::collections::HashMap;
-    use std::sync::{OnceLock, RwLock};
-    static CACHE: OnceLock<RwLock<HashMap<usize, V1PoolNeed>>> = OnceLock::new();
-    let cache = CACHE.get_or_init(|| RwLock::new(HashMap::new()));
-    let key = bytes.as_ptr() as usize;
-    if let Ok(read) = cache.read()
-        && let Some(v) = read.get(&key)
-    {
-        return *v;
-    }
-    let need = bake_pool_need(bytes);
-    if let Ok(mut write) = cache.write() {
-        write.insert(key, need);
-    }
-    need
-}
-
-/// The pool mode a fold-backed SCORE may run for this profile — the three-way
-/// **model-class** decision, not a per-family one.
-///
-/// Returns [`V1PoolsMode::Full`] — today's unconditional behaviour — unless
-/// the caller opted into skipping AND **every** consumer of the feature
-/// vector structurally ignores the block in question. The consumers are:
-///
-/// * the profile's linear `weights`, which `metric::score_v1_layout_features`
-///   reads over `[0, num_scales·3·FEATURES_PER_CHANNEL_WITH_PEAKS)` =
-///   `f0..228`. Masked/IW are structurally out of its reach (checked, not
-///   assumed), but the PEAK block is not — so dropping to
-///   [`V1PoolsMode::Off`] additionally requires the weight vector to be zero
-///   there, or `raw_distance` would move;
-/// * `mlp_bytes`, `mlp_bytes_b3` and `ensemble_classifier_bytes`, each read
-///   through [`cached_bake_pool_need`].
-///
-/// The ladder, cheapest first:
-///
-/// | mode | when | what it skips |
-/// |---|---|---|
-/// | [`V1PoolsMode::Off`] | nothing reads `f156..372` — the **basic-only model class** (`ADD156` reads 28 of 156 basic lines and 0 of 216 pool lines) | the whole pool block |
-/// | [`V1PoolsMode::Peaks`] | peaks read, masked/IW not | the masked/IW pass group |
-/// | [`V1PoolsMode::Full`] | anything reads masked or IW — every profile shipped today | nothing |
-///
-/// `Off` and `Peaks` cost the SAME to compute (the peak accumulators are the
-/// fused V-blur kernel's unconditional L8/max tier); the difference between
-/// them is only which slots are emitted. The real compute boundary is
-/// `{Off, Peaks}` vs `Full`.
-pub(crate) fn score_pool_mode(
-    params: &crate::profile::ProfileParams,
-    config: &crate::metric::ZensimConfig,
-    skip_unread: bool,
-) -> crate::feature_v2::V1PoolsMode {
-    use crate::feature_v2::V1PoolsMode;
-    if !skip_unread {
-        return V1PoolsMode::Full;
-    }
-    // The linear tail's reach. If a future config ever widened it past the
-    // peak block this decision would be unsound, so it is checked, not
-    // assumed.
-    if config.num_scales * 3 * crate::metric::FEATURES_PER_CHANNEL_WITH_PEAKS > V1_PEAKS.1 {
-        return V1PoolsMode::Full;
-    }
-    let mut need = V1PoolNeed {
-        peaks: false,
-        masked: false,
-        iw: false,
-    };
-    let mut any_bake = false;
-    for bytes in params.scoring_bake_bytes() {
-        any_bake = true;
-        let n = cached_bake_pool_need(bytes);
-        need.peaks |= n.peaks;
-        need.masked |= n.masked;
-        need.iw |= n.iw;
-    }
-    if !any_bake {
-        // A purely linear profile reads f0..228 only, so masked/IW are
-        // unread by construction. The peak block still feeds `raw_distance`.
-        return V1PoolsMode::Peaks;
-    }
-    pools_mode_for_need(need)
 }
 
 /// The **serving plan** for a profile: the pair `(compute, layout)` one walk
@@ -692,36 +535,6 @@ pub(crate) fn score_plan(
         plan = crate::feature_plan::Plan::widened_to_identity(&plan, v1_width);
     }
     Some(plan)
-}
-
-/// The [`V1PoolsMode`] to run for a given structural read-set.
-///
-/// **Never returns [`V1PoolsMode::Off`]**, even when nothing reads the pool
-/// block at all — `Off` and `Peaks` cost the SAME to compute (the peak
-/// accumulators are the fused V-blur kernel's unconditional L8/max tier) but
-/// `Off` is never the better choice, and the reason is footprint, not
-/// arithmetic. `Off` hands the band no scratch at all, which disables the
-/// band-local self-blur shape (`FoldHSource::SelfBlur`) — so the walk falls
-/// back to phase A's four STRIP-wide H planes (`4 × 3 × 148·W × 4` bytes)
-/// where `Peaks` blurs exactly the 42 rows a band consumes into
-/// `3 × slots × 4 × 42·W × 4`. `Peaks` computes the identical sums, emits a
-/// superset of `Off`'s slots, and is the smaller hot set
-/// (`benchmarks/fold_footprint_2026-08-31.md` §9.2 costs a `Full` band task
-/// 12 planes × 42 rows = 2,016·W bytes; `Peaks` touches 6 of those 12). So
-/// `Peaks` dominates `Off` on every axis and this policy never returns `Off`.
-///
-/// Shared by [`score_pool_mode`] (which unions `need` across a profile's up
-/// to three bakes first) and
-/// [`crate::feature_plan::Plan::for_bake`] (which derives
-/// `need` from one already-parsed model) so the "`Off` is never the right
-/// answer" policy lives in exactly one place.
-pub(crate) fn pools_mode_for_need(need: V1PoolNeed) -> crate::feature_v2::V1PoolsMode {
-    use crate::feature_v2::V1PoolsMode;
-    if need.masked || need.iw {
-        V1PoolsMode::Full
-    } else {
-        V1PoolsMode::Peaks
-    }
 }
 
 #[cfg(test)]

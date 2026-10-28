@@ -3671,33 +3671,6 @@ mod tests {
     }
 }
 
-/// Bench-only hooks (`benches/pu21_bench.rs`) — not public API.
-#[doc(hidden)]
-pub fn bench_pu_xyb_dispatch(
-    pixels: &[[f32; 3]],
-    x_out: &mut [f32],
-    y_out: &mut [f32],
-    b_out: &mut [f32],
-) {
-    linear_to_pu_xyb_planar_into(pixels, x_out, y_out, b_out);
-}
-
-/// Bench-only scalar reference — see [`bench_pu_xyb_dispatch`].
-#[doc(hidden)]
-pub fn bench_pu_xyb_scalar(
-    pixels: &[[f32; 3]],
-    x_out: &mut [f32],
-    y_out: &mut [f32],
-    b_out: &mut [f32],
-) {
-    for (i, p) in pixels.iter().enumerate() {
-        let (x, y, b) = pu_xyb_pixel(*p);
-        x_out[i] = x;
-        y_out[i] = y;
-        b_out[i] = b;
-    }
-}
-
 #[cfg(test)]
 mod pu_simd_parity_tests {
     use super::*;
