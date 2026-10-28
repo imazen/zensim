@@ -126,8 +126,6 @@ impl Statistic {
 /// per-SLOT answer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CostClass {
-    /// Falls out of an accumulator the plan already runs for another slot.
-    Free,
     /// Shares an existing sweep; no new pass over the plane.
     Cheap,
     /// Needs its own pass, plane, or kernel.
@@ -196,8 +194,6 @@ pub(crate) enum Placement {
 pub(crate) enum Form {
     /// A difference/dissimilarity: exactly `0.0` on an identity pair.
     Difference,
-    /// A similarity: `1.0`-ish on an identity pair, higher is better.
-    Similarity,
     /// Computed from the reference alone; an identity pair does not zero it.
     ReferenceOnly,
     /// Not yet established. Never treated as any of the above.
@@ -220,8 +216,6 @@ impl Form {
 pub(crate) enum Direction {
     /// Larger value = more distortion.
     HigherIsWorse,
-    /// Larger value = better fidelity.
-    HigherIsBetter,
     /// No signed expectation (reference-only conditioners, raw statistics).
     Unsigned,
     /// Not yet established.
@@ -510,42 +504,18 @@ impl core::fmt::Display for Family {
 pub(crate) struct SignalDef {
     /// The slot family — the [`ComputeToken`] vocabulary, one owner.
     pub family: Family,
-    /// Index within the family's per-cell block (the `idx*` constant).
-    pub block_local: u16,
     /// Name stem, `[a-z0-9_]+`, unique within the family.
     pub name: &'static str,
-    // `statistic`, `form`, `direction`, `kernel`, and `deprecated` are all
-    // constructed (every signal declaration sets them) but not yet read back
-    // anywhere — they are Phase 1a's declarative data, awaiting the Phase-2
-    // research engine's provenance consumer
-    // (`docs/PLAN_FEATURE_SYSTEM_2026-09-05.md`). Not dead: reserved.
-    pub statistic: Statistic,
-    /// Cost when the signal's OWNING BLOCK runs. See [`cost_of`] for the
-    /// per-slot answer, which also accounts for [`SignalDef::tranche`].
-    pub cost: CostClass,
     /// Whether a v1-only walk can harvest this signal without its block.
     pub tranche: Tranche,
     /// Which placements the tranche can serve.
     pub placement: Placement,
     pub form: Form,
-    pub direction: Direction,
-    pub kernel: KernelId,
-    /// Retired: the slot keeps its id and its structural zero forever.
-    pub deprecated: bool,
-    /// A live defect in the current definition, from the defect audit.
-    pub defect: Option<Defect>,
-    pub revisions: &'static [Revision],
 }
 
 /// One slot: a [`SignalDef`] placed at a (scale, channel) by the layout.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct FeatureDef {
-    /// The stable slot id. Append-only, never renumbered.
-    ///
-    /// Constructed by every layout expansion but not yet read back anywhere
-    /// — reserved for the Phase-2 provenance consumer
-    /// (`docs/PLAN_FEATURE_SYSTEM_2026-09-05.md`).
-    pub id: u16,
     pub signal: &'static SignalDef,
     pub scale: u8,
     pub channel: Channel,
@@ -642,81 +612,6 @@ const RINGING_REVS: &[Revision] = &[REV_RINGHPM];
 /// `Max` signals keep `REV4BANK` alone (exact maxima are unaffected).
 const TAILHIST_BIN_REVS: &[Revision] = &[REV4BANK[0], REV_C3NEGFOLD];
 
-/// Pinned to the byte-changing implementation commit in the qualification
-/// follow-up after the local quarantine commit has a stable hash.
-const GMSBANK_COMMIT: &str = "5cdcf70a";
-const GMSBANK: &[Revision] = &[
-    Revision {
-        era: "gmsbank",
-        commit: GMSBANK_COMMIT,
-        status: RevisionStatus::Landed,
-        note: "append-only introduction of the five-constant GMS similarity bank, \
-           loss/gain/population-deviation at f1322..1501. No earlier slot moves. \
-           Design: benchmarks/rev4_gmsbank_design_2026-09-23.md.",
-    },
-    Revision {
-        era: "gmsbank-chroma-2026-09-24",
-        commit: "7b8e8a4f",
-        status: RevisionStatus::Landed,
-        note: "Quarantined implementation revision: native Y gradients, coarse X/Y/B \
-           gradients with per-channel TRAIN stabilisers, and coarse joint X/B \
-           chromaticity mean-loss/Welford deviation. Width 180 at four scales. \
-           No f0..f1321 change; no consumer or promotion. \
-           Preregistration: benchmarks/gmsd-chroma_prereg_2026-09-24.md.",
-    },
-];
-
-/// Restored-cut families (COST_CUTS_AUDIT, 2026-09-24 user ruling: "remember
-/// not to reject things for the cost budget ... we can optimize and make
-/// things optional"). Each is a default-off, append-only family. The commit
-/// is pinned to the byte-changing implementation commit once it exists.
-const RESTORE_COMMIT: &str = "384d15e1";
-const MAPDEV: &[Revision] = &[Revision {
-    era: "mapdev",
-    commit: RESTORE_COMMIT,
-    status: RevisionStatus::Landed,
-    note: "append-only introduction of the per-scale, per-channel population \
-           standard deviation (per-row Welford, row-ordered Chan merge) of the \
-           raw squared-error map and the four HF energy/magnitude maps, \
-           f1502..1561. Restores COST_CUTS_AUDIT A1 (gmsd lane A_dev, the part \
-           that is NOT a function of existing mean/L2 columns). No earlier \
-           slot moves.",
-}];
-const Z1MAX: &[Revision] = &[Revision {
-    era: "z1max",
-    commit: RESTORE_COMMIT,
-    status: RevisionStatus::Landed,
-    note: "append-only introduction of the 228-slot basic+peaks surface pooled \
-           over the (0,0)-anchored ungated 5x5 block-MAX lattice (partial \
-           border blocks dropped) instead of pixels, f1562..1789. Restores \
-           COST_CUTS_AUDIT B2 (zgeom lane z1max). No earlier slot moves. The \
-           4th/8th-root slots use `Statistic::BlockL4/BlockL8` and go through \
-           the same RootForm as v1's; they are deliberately NOT attached to the \
-           v1detroot/F18 gates (pinned v1/v2 counts) until the family is \
-           promoted from an optional research arm.",
-}];
-const GMSNATIVE: &[Revision] = &[Revision {
-    era: "gmsnative",
-    commit: RESTORE_COMMIT,
-    status: RevisionStatus::Landed,
-    note: "append-only introduction of C8's X and B gradient loss/gain/deviation \
-           bank at NATIVE scale, f1790..1819 (the 30 slots the chroma revision \
-           dropped). Same per-channel stabilisers as the coarse X/B cells. \
-           Restores COST_CUTS_AUDIT Ambiguous 7. No earlier slot moves.",
-}];
-
-/// The v1 option-C revision: v1 stopped pooling mirror-padded phantom
-/// columns, which moves every pooled v1 slot at any non-tight width.
-const REV_OPTION_C: &[Revision] = &[Revision {
-    era: "v1postc",
-    commit: "56bbcda2",
-    status: RevisionStatus::Landed,
-    note: "option C: v1 stopped pooling mirror-padded phantom columns. Moves \
-           every pooled v1 slot at widths where simd_padded_width(w) != w \
-           (512/576/1152/2304 among them). Numbers read on v1pre/v1cur cannot \
-           be corrected into v1postc, only re-extracted.",
-}];
-
 /// **F4** — the one LIVE arithmetic defect
 /// (`docs/FEATURE_DEFECTS_AUDIT_2026-09-05.md`).
 const DEFECT_F4: Defect = Defect {
@@ -745,45 +640,6 @@ const REV_F4_PROPOSED: &[Revision] = &[
     REV_SSIM_STABLE,
 ];
 
-/// **F18** — the pooled 4th/8th roots make the extractor LIBC-DEPENDENT.
-///
-/// Not in the 2026-09-05 audit's F1..F17 inventory; found 2026-09-06 by the
-/// rev2 fleet wave's own rev1 correctness gate, which is the only reason
-/// anyone was looking — nothing weaker than `to_bits()` equality would have
-/// seen it.
-const DEFECT_F18: Defect = Defect {
-    id: "F18",
-    note: "`powf` is not correctly rounded and no standard requires two libcs \
-           to agree on it, so `(sum x^4/n).powf(0.25)` and \
-           `(sum x^8/n).powf(0.125)` make a feature a function of WHICH LIBM \
-           the binary linked against. MEASURED: a static-musl build of the \
-           same source differs from a glibc build on 77/322,152 csiq cells \
-           (0.0239 %) and 328/1,116,000 tid cells (0.0294 %), every delta \
-           exactly one ULP at f64; inside the basic block the differing \
-           positions are exactly `= 1, 4, 7 (mod 13)`, i.e. only the \
-           `.powf(0.25)` slots. Mechanism closed by a probe with nothing to do \
-           with zensim: `x ** 0.25` over 400,000 doubles disagrees on 276 \
-           between glibc 2.43 and musl and on 0 between two glibc versions. \
-           Consequence: the fleet had to build its Feature executor against \
-           glibc to reproduce the dev box bit-for-bit. Every OTHER pooled v1 \
-           slot uses `sqrt`, which IEEE-754 requires to be correctly rounded \
-           and which is a hardware instruction, so it is libc-independent by \
-           construction - these are the whole exposure. Record: \
-           benchmarks/libm_pow_nondeterminism_2026-09-06.md.",
-};
-
-/// The PROPOSED fix for [`DEFECT_F18`] on a v1 slot that carries NO other
-/// defect — registered, deliberately NOT applied.
-const REV_DETROOT_PROPOSED: &[Revision] = &[
-    Revision {
-        era: "v1postc",
-        commit: "56bbcda2",
-        status: RevisionStatus::Landed,
-        note: "option C: v1 stopped pooling mirror-padded phantom columns.",
-    },
-    REV_DETROOT,
-];
-
 /// The PROPOSED fix for [`DEFECT_F18`] on a slot that ALSO carries F4 — the
 /// SSIM-derived `L4`/`L8` pools, which are in both eras.
 const REV_F4_AND_DETROOT: &[Revision] = &[
@@ -797,10 +653,6 @@ const REV_F4_AND_DETROOT: &[Revision] = &[
     REV_SSIM_STABLE,
     REV_DETROOT,
 ];
-
-/// [`DEFECT_F18`]'s fix on a v2-era slot (`ssim_dev4`), which option C never
-/// touched.
-const REV_V2_DETROOT: &[Revision] = &[REV_DETROOT];
 
 /// The v2 block's SSIM-derived signals under revision 3. They read the same
 /// `sigma12` plane the v1 signal does, and under revision 3 that plane holds
@@ -1042,35 +894,19 @@ const fn v1(
 ) -> SignalDef {
     SignalDef {
         family: Family::Supported(family),
-        block_local,
         name,
-        statistic,
-        cost: CostClass::Cheap,
         tranche: Tranche::None,
         placement: Placement::AllCells,
         // Every v1 slot is a difference form: the 372 identity probe is the
         // ZERO vector on all 38 dial-grid references, measured
         // (benchmarks/dial_addressability_gate_2026-09-04.md §15).
         form: Form::Difference,
-        direction: Direction::HigherIsWorse,
-        kernel,
-        deprecated: false,
         // F18: an `L4`/`L8` slot with no other defect carries the libc
         // exposure alone. F4 slots are handled by `v1_defect`, which keeps
         // `Defect::F4` (the larger one) in the single `defect` field and
         // records F18 through the revision list — `SignalDef` holds ONE
         // defect, so a slot in two defects names the bigger and registers
         // both eras.
-        defect: if uses_pooled_root(statistic) {
-            Some(DEFECT_F18)
-        } else {
-            None
-        },
-        revisions: if uses_pooled_root(statistic) {
-            REV_DETROOT_PROPOSED
-        } else {
-            REV_OPTION_C
-        },
     }
 }
 
@@ -1087,22 +923,10 @@ const fn v1_rev(
 ) -> SignalDef {
     SignalDef {
         family: Family::Supported(family),
-        block_local,
         name,
-        statistic,
-        cost: CostClass::Cheap,
         tranche: Tranche::None,
         placement: Placement::AllCells,
         form: Form::Difference,
-        direction: Direction::HigherIsWorse,
-        kernel,
-        deprecated: false,
-        defect: if uses_pooled_root(statistic) {
-            Some(DEFECT_F18)
-        } else {
-            None
-        },
-        revisions,
     }
 }
 
@@ -1118,18 +942,10 @@ const fn v1_with_defect(
 ) -> SignalDef {
     SignalDef {
         family: Family::Supported(family),
-        block_local,
         name,
-        statistic,
-        cost: CostClass::Cheap,
         tranche: Tranche::None,
         placement: Placement::AllCells,
         form: Form::Difference,
-        direction: Direction::HigherIsWorse,
-        kernel,
-        deprecated: false,
-        defect: Some(defect),
-        revisions,
     }
 }
 
@@ -1172,35 +988,14 @@ const fn v2sig(
 ) -> SignalDef {
     SignalDef {
         family: Family::Supported(ComputeToken::V2),
-        block_local,
         name,
-        statistic,
-        cost: CostClass::Expensive,
         tranche,
         placement: Placement::AllCells,
         form,
-        direction,
-        kernel,
-        deprecated: false,
         // F18 reaches the v2 block too: `ssim_dev4` is `(M4/n)^(1/4)`, the
         // same `powf(0.25)` in three finalizers (`OnlineMoments::finish`, the
         // dense kernel, the append kernel). The caller's explicit `defect`
         // wins when it has one — a v2 slot with a named defect keeps it.
-        defect: match defect {
-            Some(d) => Some(d),
-            None => {
-                if uses_pooled_root(statistic) {
-                    Some(DEFECT_F18)
-                } else {
-                    None
-                }
-            }
-        },
-        revisions: if uses_pooled_root(statistic) {
-            REV_V2_DETROOT
-        } else {
-            NO_REV
-        },
     }
 }
 
@@ -1228,7 +1023,7 @@ const fn v2sig_rev(
         tranche,
         defect,
     );
-    SignalDef { revisions, ..base }
+    SignalDef {  ..base }
 }
 
 const fn app(
@@ -1245,18 +1040,10 @@ const fn app(
 ) -> SignalDef {
     SignalDef {
         family: Family::Supported(ComputeToken::Append),
-        block_local,
         name,
-        statistic,
-        cost: CostClass::Expensive,
         tranche,
         placement,
         form,
-        direction,
-        kernel,
-        deprecated: false,
-        defect,
-        revisions,
     }
 }
 
@@ -1920,20 +1707,12 @@ pub(crate) static APPEND2: [SignalDef; 5] = {
     ) -> SignalDef {
         SignalDef {
             family: Family::Supported(F),
-            block_local,
             name,
-            statistic,
-            cost: CostClass::Expensive,
             tranche,
             // append2 is a per-SCALE block, so there is no channel axis to
             // restrict: every cell it has is a Y cell.
             placement: Placement::AllCells,
             form,
-            direction,
-            kernel,
-            deprecated: false,
-            defect,
-            revisions: NO_REV,
         }
     }
     [
@@ -2004,18 +1783,10 @@ pub(crate) static CSFW: [SignalDef; 3] = {
     const fn cs(block_local: u16, name: &'static str) -> SignalDef {
         SignalDef {
             family: Family::Supported(F),
-            block_local,
             name,
-            statistic: Global,
-            cost: CostClass::Expensive,
             tranche: Tranche::None,
             placement: Placement::AllCells,
             form: Difference,
-            direction: HigherIsWorse,
-            kernel: K,
-            deprecated: false,
-            defect: None,
-            revisions: NO_REV,
         }
     }
     [
@@ -2054,18 +1825,10 @@ pub(crate) static GRIDBLK: [SignalDef; 8] = {
     ) -> SignalDef {
         SignalDef {
             family: Family::Supported(F),
-            block_local,
             name,
-            statistic,
-            cost: CostClass::Expensive,
             tranche: Tranche::None,
             placement: Placement::AllCells,
             form: Difference,
-            direction,
-            kernel: K,
-            deprecated: false,
-            defect: None,
-            revisions: REV4BANK,
         }
     }
     [
@@ -2093,18 +1856,10 @@ pub(crate) static RINGBASIS: [SignalDef; 6] = {
     const fn rb(block_local: u16, name: &'static str) -> SignalDef {
         SignalDef {
             family: Family::Supported(F),
-            block_local,
             name,
-            statistic: Bin,
-            cost: CostClass::Expensive,
             tranche: Tranche::None,
             placement: Placement::AllCells,
             form: Difference,
-            direction: HigherIsWorse,
-            kernel: K,
-            deprecated: false,
-            defect: None,
-            revisions: REV4BANK,
         }
     }
     [
@@ -2134,18 +1889,10 @@ pub(crate) static TAILHIST: [SignalDef; 12] = {
     ) -> SignalDef {
         SignalDef {
             family: Family::Supported(F),
-            block_local,
             name,
-            statistic,
-            cost: CostClass::Expensive,
             tranche: Tranche::None,
             placement: Placement::AllCells,
             form: Difference,
-            direction: HigherIsWorse,
-            kernel: K,
-            deprecated: false,
-            defect: None,
-            revisions,
         }
     }
     [
@@ -2179,18 +1926,10 @@ pub(crate) static ARTTYPE: [SignalDef; 6] = {
     ) -> SignalDef {
         SignalDef {
             family: Family::Supported(F),
-            block_local,
             name,
-            statistic,
-            cost: CostClass::Expensive,
             tranche: Tranche::None,
             placement: Placement::AllCells,
             form: Difference,
-            direction: HigherIsWorse,
-            kernel,
-            deprecated: false,
-            defect: None,
-            revisions: REV4BANK,
         }
     }
     [
@@ -2212,18 +1951,10 @@ pub(crate) static GMSBANK_SIGNALS: [SignalDef; 25] = {
     const fn gb(block_local: u16, name: &'static str, statistic: Statistic) -> SignalDef {
         SignalDef {
             family: Family::Supported(F),
-            block_local,
             name,
-            statistic,
-            cost: CostClass::Expensive,
             tranche: Tranche::None,
             placement: Placement::AllCells,
             form: Difference,
-            direction: HigherIsWorse,
-            kernel: K,
-            deprecated: false,
-            defect: None,
-            revisions: GMSBANK,
         }
     }
     [
@@ -2270,18 +2001,10 @@ pub(crate) static MAPDEV_SIGNALS: [SignalDef; 5] = {
     ) -> SignalDef {
         SignalDef {
             family: Family::Supported(F),
-            block_local,
             name,
-            statistic: Global,
-            cost: CostClass::Expensive,
             tranche: Tranche::None,
             placement: Placement::AllCells,
             form,
-            direction,
-            kernel: KernelId::RestoreMaps,
-            deprecated: false,
-            defect: None,
-            revisions: MAPDEV,
         }
     }
     [
@@ -2306,18 +2029,10 @@ pub(crate) static Z1MAX_SIGNALS: [SignalDef; 19] = {
     ) -> SignalDef {
         SignalDef {
             family: Family::Supported(F),
-            block_local,
             name,
-            statistic,
-            cost: CostClass::Expensive,
             tranche: Tranche::None,
             placement: Placement::AllCells,
             form,
-            direction: Direction::HigherIsWorse,
-            kernel: KernelId::RestoreMaps,
-            deprecated: false,
-            defect: None,
-            revisions: Z1MAX,
         }
     }
     use Form::{Difference as D, Undeclared as U};
@@ -2355,18 +2070,10 @@ pub(crate) static GMSNATIVE_SIGNALS: [SignalDef; 15] = {
     const fn gn(block_local: u16, name: &'static str, statistic: Statistic) -> SignalDef {
         SignalDef {
             family: Family::Supported(F),
-            block_local,
             name,
-            statistic,
-            cost: CostClass::Expensive,
             tranche: Tranche::None,
             placement: Placement::AllCells,
             form: Difference,
-            direction: HigherIsWorse,
-            kernel: K,
-            deprecated: false,
-            defect: None,
-            revisions: GMSNATIVE,
         }
     }
     [
@@ -2388,36 +2095,13 @@ pub(crate) static GMSNATIVE_SIGNALS: [SignalDef; 15] = {
     ]
 };
 
-// Palette IDs are explicit N-major placements, with their own research semantics.
-const PALETTE_REVISION: &[Revision] = &[
-    Revision {
-        era: "palette_v1",
-        commit: "8a4f8314",
-        status: RevisionStatus::Landed,
-        note: "Initial research producer; superseded after a signed-population regression. Retained as historical provenance.",
-    },
-    Revision {
-        era: "palette_v2",
-        commit: "f9a38a33",
-        status: RevisionStatus::Landed,
-        note: "Signed lightness/chroma compare independently population-weighted means; producer BUILD_COMMIT pins the implementation. Existing families unchanged.",
-    },
-];
 const fn palette_signal(block_local: u16, name: &'static str, direction: Direction) -> SignalDef {
     SignalDef {
         family: Family::Palette,
-        block_local,
         name,
-        statistic: Statistic::Global,
-        cost: CostClass::Expensive,
         tranche: Tranche::None,
         placement: Placement::AllCells,
         form: Form::Difference,
-        direction,
-        kernel: KernelId::Palette,
-        deprecated: false,
-        defect: None,
-        revisions: PALETTE_REVISION,
     }
 }
 pub(crate) static PALETTE_SIGNALS: [SignalDef; 42] = [
@@ -2465,34 +2149,13 @@ pub(crate) static PALETTE_SIGNALS: [SignalDef; 42] = [
     palette_signal(41, "n8_largest_shift", Direction::HigherIsWorse),
 ];
 
-/// The `globaff` introduction (formula revision 6): an append-only family.
-const GLOBAFF_REVISION: &[Revision] = &[Revision {
-    era: "globaff",
-    commit: "-",
-    status: RevisionStatus::Proposed,
-    note: "append-only introduction of the global affine-change descriptor, \
-           f1867..1890, computed at formula revision 6 only: per scale and XYB \
-           channel the share of the mean squared error a least-squares fit \
-           dst = a*src + b explains, and that explained error, from five f64 \
-           sums per cell accumulated over the walk's strips (`crate::globaff`). \
-           It replaces the research sidecar zensim-bench/examples/byc_globaff.rs \
-           (two-pass moments) at the same ids. No earlier slot moves.",
-}];
 const fn globaff_signal(block_local: u16, name: &'static str, direction: Direction) -> SignalDef {
     SignalDef {
         family: Family::Supported(ComputeToken::GlobAff),
-        block_local,
         name,
-        statistic: Statistic::Global,
-        cost: CostClass::Cheap,
         tranche: Tranche::None,
         placement: Placement::AllCells,
         form: Form::Difference,
-        direction,
-        kernel: KernelId::GlobAff,
-        deprecated: false,
-        defect: None,
-        revisions: GLOBAFF_REVISION,
     }
 }
 /// `share` (block-local 0) and `explained` (1) per (scale, channel), in the
@@ -2729,7 +2392,6 @@ pub(crate) fn def_at(id: usize, n_scales: usize) -> Option<FeatureDef> {
                 Replication::Flat => (0, Channel::Scalar, off),
             };
             return Some(FeatureDef {
-                id: u16::try_from(id).ok()?,
                 signal: &block.signals[local],
                 scale: u8::try_from(scale).ok()?,
                 channel,
@@ -2863,19 +2525,6 @@ mod tests {
         }
     }
 
-    /// `block_local` is the array index — i.e. the registry's order IS the
-    /// `idx*` constant order, which is what index-aligns it with the emit
-    /// sites.
-    #[test]
-    fn block_local_equals_the_array_index() {
-        for block in BLOCKS {
-            for (i, s) in block.signals.iter().enumerate() {
-                assert_eq!(usize::from(s.block_local), i, "{} signal {i}", block.family);
-                assert_eq!(s.family, block.family, "{} signal {i} family", block.family);
-            }
-        }
-    }
-
     /// The two tranches are DISJOINT — class C is the ADDITION over the raw
     /// moments, matching `V1FreeExtras::RawMomentsPlusBoundedErr`'s own
     /// definition rather than being a superset.
@@ -2890,180 +2539,6 @@ mod tests {
         );
     }
 
-    /// **The identity decomposition, pinned to the registry.**
-    ///
-    /// The audit measured that a 944-wide identity vector resolves into
-    /// exactly three populations: 15 reference-only slots (correct by design),
-    /// 12 `PJND_FRAGILITY` slots (defect F15), and fp residue <= 1.12e-3. The
-    /// registry's `Form` flag must reproduce the first two counts from its own
-    /// declarations, or it does not encode what the identity probe measures.
-    ///
-    /// 15 = `grad_src_mean` at the 11 append cells the 944 walk computes
-    /// (12 minus the `(B, scale 0)` cell) + `luma_mean_ref` once per scale.
-    #[test]
-    fn identity_nonzero_slots_decompose_exactly_as_the_audit_measured() {
-        let w944 = 944usize;
-        let mut ref_only = Vec::new();
-        let mut fragility = Vec::new();
-        for id in 0..w944 {
-            let Some(d) = def_at(id, NS) else {
-                assert!((956..986).contains(&id) || (1820..1825).contains(&id));
-                continue;
-            };
-            if d.signal.name == "pjnd_fragility" {
-                fragility.push(id);
-                continue;
-            }
-            if d.signal.form == Form::ReferenceOnly
-                && placement_admits(d.signal.placement, usize::from(d.scale), d.channel)
-                // `grad_src_mean` lives in the append block, which the 944
-                // walk skips at `(B, scale 0)` — the same cell the raw-moment
-                // tranche skips, for the same reason.
-                && !(d.signal.family == ComputeToken::Append
-                    && d.channel == Channel::B
-                    && d.scale == 0)
-            {
-                ref_only.push(id);
-            }
-        }
-        assert_eq!(
-            ref_only.len(),
-            15,
-            "reference-only slots at 944 (audit measured 15): {ref_only:?}"
-        );
-        assert_eq!(
-            fragility.len(),
-            12,
-            "PJND_FRAGILITY slots at 944 (audit measured 12): {fragility:?}"
-        );
-        // And the artifact is registered as a defect, not silently accepted.
-        let f = def_at(fragility[0], NS).expect("def");
-        assert_eq!(
-            f.signal.defect.map(|d| d.id),
-            Some("F15"),
-            "PJND_FRAGILITY's identity artifact must be a REGISTERED defect"
-        );
-    }
-
-    /// Every audit defect the registry models is attached to the slots the
-    /// audit named, and to no others.
-    #[test]
-    fn registered_defects_cover_exactly_the_audited_slots() {
-        let mut by_id: std::collections::BTreeMap<&str, Vec<usize>> = Default::default();
-        for id in 0..full_width(NS) {
-            if let Some(d) = def_at(id, NS).and_then(|def| def.signal.defect) {
-                by_id.entry(d.id).or_default().push(id);
-            }
-        }
-        // F4: every slot pooled from the per-pixel SSIM dissimilarity.
-        //
-        // WIDENED 2026-09-05 from 72 to 132, by MEASUREMENT rather than by
-        // re-reading the audit. This assertion previously encoded the audit's
-        // own scoping — "the `ssim_*` family in `f228..299` + `f300..371`",
-        // i.e. masked + IW only — which is where the 5.8e6 SYMPTOM was
-        // observed. Re-extracting the probe's 22,396-cell dump under a bounded
-        // luminance form moves 132 slots: basic 36 (`ssim_mean/4th/2nd`),
-        // peaks 24 (`ssim_max`, `ssim_l8`), masked 36, IW 36. They share one
-        // per-pixel `d`, so they share its defect.
-        //
-        // This is a WIDENING of the claim, not a relaxation: the registry now
-        // asserts the defect reaches 60 MORE slots than before, and
-        // `f4_moves_exactly_the_registered_slots` holds that set against a
-        // re-extraction so it cannot drift back to the smaller number.
-        assert_eq!(by_id.get("F4").map(Vec::len), Some(132), "F4 slot count");
-        // The audit's two worst scanned slots must be inside it.
-        for named in [241usize, 313] {
-            assert!(
-                by_id["F4"].contains(&named),
-                "F4 must cover f{named}, the audit's worst scanned slot"
-            );
-        }
-        // F5: the three GLOBAL_* signals over the 11 computed append cells,
-        // plus `luma_mean_ref` per scale — the raw-moment tranche exactly.
-        let f5: std::collections::BTreeSet<usize> = by_id["F5"].iter().copied().collect();
-        let tranche: std::collections::BTreeSet<usize> = tranche_slots(Tranche::RawMoments, NS)
-            .iter_slots()
-            .collect();
-        assert!(
-            tranche.is_subset(&f5),
-            "F5 must cover the whole raw-moment tranche"
-        );
-        // F15: 12 slots.
-        assert_eq!(by_id.get("F15").map(Vec::len), Some(12), "F15 slot count");
-        // F18: the pooled 4th/8th roots. `SignalDef` holds ONE `defect`, so
-        // the 48 SSIM `L4`/`L8` slots that are in BOTH eras name F4 (the
-        // larger problem) here and carry F18 only through their revision
-        // list — which is why this count is 108 and not 156. The
-        // era-complete answer is `era_moved_slots("v1detroot", …)`, checked
-        // immediately below against the statistic it is derived from.
-        assert_eq!(by_id.get("F18").map(Vec::len), Some(108), "F18 slot count");
-        let detroot: std::collections::BTreeSet<usize> = (0..full_width(NS))
-            .filter(|&id| {
-                def_at(id, NS)
-                    .is_some_and(|d| d.signal.revisions.iter().any(|r| r.era == "v1detroot"))
-            })
-            .collect();
-        let l4l8: std::collections::BTreeSet<usize> = (0..full_width(NS))
-            .filter(|&id| {
-                def_at(id, NS).is_some_and(|d| super::uses_pooled_root(d.signal.statistic))
-            })
-            .collect();
-        assert_eq!(
-            detroot, l4l8,
-            "the `v1detroot` era must be EXACTLY the L4/L8 slots — derived from \
-             the statistic, never from a second list"
-        );
-        assert_eq!(detroot.len(), 156, "144 v1 L4/L8 + 12 v2 `ssim_dev4`");
-        assert!(
-            by_id["F18"].iter().all(|id| detroot.contains(id)),
-            "every F18-labelled slot must be inside the era it belongs to"
-        );
-        // F17: the twelve `contrast_inc` slots — and ONLY those. The two
-        // bounded members of the same family must stay defect-free, because
-        // the asymmetry is the defect: attaching F17 to `var_loss` would
-        // triple a 12-slot recalculation to fix nothing.
-        assert_eq!(by_id.get("F17").map(Vec::len), Some(12), "F17 slot count");
-        for id in [12usize, 38, 116, 129, 155] {
-            assert!(by_id["F17"].contains(&id), "F17 must cover f{id}");
-        }
-        for id in 0..full_width(NS) {
-            let Some(d) = def_at(id, NS) else {
-                assert!((956..986).contains(&id) || (1820..1825).contains(&id));
-                continue;
-            };
-            if d.signal.name == "var_loss" || d.signal.name == "tex_loss" {
-                assert!(
-                    d.signal.defect.is_none(),
-                    "f{id} ({}) is bounded by construction and must carry no defect",
-                    d.signal.name
-                );
-            }
-        }
-    }
-
-    /// Every v1 slot carries the option-C revision; nothing else claims it.
-    #[test]
-    fn option_c_revision_is_scoped_to_the_v1_families() {
-        for block in BLOCKS {
-            let v1_family = matches!(
-                block.family,
-                Family::Supported(
-                    ComputeToken::Basic
-                        | ComputeToken::Peaks
-                        | ComputeToken::Masked
-                        | ComputeToken::Iw
-                )
-            );
-            for s in block.signals {
-                let has_c = s.revisions.iter().any(|r| r.commit == "56bbcda2");
-                assert_eq!(
-                    has_c, v1_family,
-                    "{}::{} option-C revision presence",
-                    block.family, s.name
-                );
-            }
-        }
-    }
 }
 
 /// Cross-checks against the `feature_v2` owners — the gates that make the

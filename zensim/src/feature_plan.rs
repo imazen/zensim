@@ -764,18 +764,6 @@ impl Plan {
 /// The chain is nested by construction: `append2` implies `append`, `csfw`
 /// these implications.
 struct LayoutBlocks {
-    append: bool,
-    append2: bool,
-    csfw: bool,
-    gridblk: bool,
-    ringbasis: bool,
-    tailhist: bool,
-    arttype: bool,
-    gmsbank: bool,
-    mapdev: bool,
-    z1max: bool,
-    gmsnative: bool,
-    globaff: bool,
 }
 
 impl LayoutBlocks {
@@ -793,18 +781,6 @@ impl LayoutBlocks {
         let gmsnative = z1max && width > base_of(ComputeToken::Gmsnative, ns);
         let globaff = gmsnative && width > base_of(ComputeToken::GlobAff, ns);
         Self {
-            append,
-            append2,
-            csfw,
-            gridblk,
-            ringbasis,
-            tailhist,
-            arttype,
-            gmsbank,
-            mapdev,
-            z1max,
-            gmsnative,
-            globaff,
         }
     }
 }
@@ -820,7 +796,6 @@ fn base_of(t: ComputeToken, ns: usize) -> usize {
 fn pools_union(a: V1PoolsMode, b: V1PoolsMode) -> V1PoolsMode {
     let rank = |m: V1PoolsMode| match m {
         V1PoolsMode::Off => 0u8,
-        V1PoolsMode::Carriers => 1,
         V1PoolsMode::Peaks => 2,
         V1PoolsMode::Full => 3,
     };

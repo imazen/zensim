@@ -397,21 +397,8 @@ pub(crate) fn row_moments_canon(v: &[f64]) -> OnlineMoments {
 }
 
 /// Running `(Σw·v, Σw)` accumulator for the canonical weighted-mean
-/// pooling form — the same `Σw·v/Σw` shape as
-/// [`crate::iw_pool::WeightedPool::mean`] (iteration 1's promoted
-/// canonical pooling helper), computed incrementally instead of from
+/// pooling form `Σw·v/Σw`, computed incrementally instead of from
 /// materialized weight/value arrays.
-///
-/// **This is a gated mirror, not a duplicate**, per this crate's
-/// no-duplication policy ("a second implementation is legitimate only
-/// when it exists for a measured engineering reason AND a test holds it
-/// bit-exact against the owner"): iteration 1's array-based
-/// `WeightedPool::mean` was measured (`docs/FEATURE_V2_SPEC_2026-07-18.md`
-/// §A.12) to make v2 2-5x SLOWER than v1 — materializing nine full-image
-/// `Vec<f32>` maps per channel-scale to feed `WeightedPool::mean` is
-/// exactly the cost iteration 2 removes. `WeightedSum` computes the
-/// IDENTICAL formula (`Σw·v/Σw`) online, O(1) space. The equivalence is
-/// pinned by `tests::weighted_sum_matches_weighted_pool_mean_exactly`.
 #[derive(Default, Clone, Copy)]
 pub(crate) struct WeightedSum {
     pub(crate) num: f64,
@@ -596,11 +583,6 @@ pub enum V1PoolsMode {
     /// Structural zeros (the production folded regimes).
     #[default]
     Off,
-    /// The ten carrier slots of the `fused944native` regime — `art_l8` at
-    /// (s1,c0) (s1,c2) (s2,c0) (s3,c2) = f178/190/196/226,
-    /// `masked_art_4th` at s0 c0-2 = f231/237/243, `iw_art_4th` at (s0,c0)
-    /// (s1,c0) (s1,c2) = f303/321/333 — every other pool slot stays 0.
-    Carriers,
     /// **The peak block only** (`f156..228`) — masked and IW stay 0.
     ///
     /// Costs the SAME as [`Self::Off`]: the peak accumulators (`ssim_d8`,
@@ -978,7 +960,6 @@ impl ComputeSet {
     pub(crate) fn full_pool_scales(&self) -> u8 {
         match self.v1_pools {
             V1PoolsMode::Full => self.v1_full_scales,
-            V1PoolsMode::Carriers => 0b0011,
             _ => 0,
         }
     }
@@ -1188,7 +1169,6 @@ impl ComputeSet {
         }
         match self.v1_pools {
             V1PoolsMode::Off => {}
-            V1PoolsMode::Carriers => scattered.extend(V1PoolsMode::CARRIER_SLOTS),
             V1PoolsMode::Peaks => ranges.push((basic, peaks_end)),
             V1PoolsMode::Full => ranges.push((basic, v1_total)),
         }
@@ -1810,19 +1790,12 @@ struct ChromaStrip<'a> {
 
 #[derive(Clone, Copy)]
 struct GmsBankWork<'a> {
-    gradient: &'static [f64; 5],
     chroma: Option<ChromaStrip<'a>>,
 }
 
 impl<'a> GmsBankWork<'a> {
     fn new(channel: usize, chroma: Option<ChromaStrip<'a>>) -> Self {
         Self {
-            gradient: match channel {
-                0 => &GMSBANK_X_C,
-                1 => &GMSBANK_C,
-                2 => &GMSBANK_B_C,
-                _ => unreachable!(),
-            },
             chroma,
         }
     }
@@ -1901,18 +1874,12 @@ impl GmsBankCell {
 /// strip boundary so `GradientAccum::accumulate`'s plain-f64 fold is
 /// unchanged for every mode.
 struct GmsBankCellVar {
-    loss: crate::featcanon::SumVar,
-    gain: crate::featcanon::SumVar,
-    wf: crate::featcanon::WelfordVar,
 }
 
 impl GmsBankCellVar {
     #[inline]
     fn for_mode(mode: crate::featcanon::Mode) -> Self {
         Self {
-            loss: crate::featcanon::SumVar::f64_elems(mode),
-            gain: crate::featcanon::SumVar::f64_elems(mode),
-            wf: crate::featcanon::WelfordVar::for_mode(mode),
         }
     }
 
@@ -2250,8 +2217,6 @@ pub(crate) struct GradTerms64 {
     pub(crate) g2: f64,
     pub(crate) ring: f64,
     pub(crate) band: f64,
-    pub(crate) bv_gain: f64,
-    pub(crate) bv_loss: f64,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2315,8 +2280,6 @@ pub(crate) fn gradient_terms64(
         g2: g * g,
         ring,
         band,
-        bv_gain,
-        bv_loss,
     }
 }
 
@@ -3493,39 +3456,6 @@ fn blockiness_row_l64(
 /// Per-row-reduced f64 accumulator for the append block.
 #[derive(Default, Clone, Copy)]
 struct AppendAccum {
-    sum_xmask: f64,
-    sum_lumt: f64,
-    ws_dark: WeightedSum,
-    ws_bright: WeightedSum,
-    /// Σ mse_i — the mid-luminance bin is DERIVED at finalize: Bernstein
-    /// weights sum to 1, so `Σw_mid = n − Σw_dark − Σw_bright` and
-    /// `Σw_mid·v = Σv − Σw_dark·v − Σw_bright·v`. One fewer lane pair in
-    /// the kernel; bitwise path-stable because the derivation runs in f64
-    /// finalize on sums that are themselves path-bitwise-equal.
-    sum_mse: f64,
-    sum_mscn: f64,
-    sum_mscn2: f64,
-    sum_cgain: f64,
-    sum_closs: f64,
-    sum_tex: f64,
-    /// Σ art², Σ det² — second raw moments of per-pixel values that are
-    /// bit-identical to the dense kernel's `art_i`/`det_i` (same formula,
-    /// same inputs, same order), so `finish_append` can pair them with
-    /// `DenseAccum::sum_art`/`sum_det` as the matching first moments.
-    sum_art2: f64,
-    sum_det2: f64,
-    sum_s: f64,
-    sum_d: f64,
-    sum_s2: f64,
-    sum_d2: f64,
-    /// Revision 2's paired second moment `Σ(d−s)(d+s)`.
-    sum_dd: f64,
-    /// Revision 2's paired first difference `Σ(d−s)`.
-    sum_ds: f64,
-    /// append2 highlight bins (HDR route + `append2_block` only — the
-    /// `HL = true` kernel instantiation; untouched zeros otherwise).
-    ws_hl1: WeightedSum,
-    ws_hl2: WeightedSum,
 }
 
 impl AppendAccum {
@@ -3562,28 +3492,9 @@ impl AppendAccum {
 /// strip-foldable exactly like [`AppendAccum`]).
 #[derive(Default, Clone, Copy)]
 struct CsfwAccum {
-    sum_w: f64,
-    sum_ws: f64,
-    sum_wd: f64,
-    sum_ws2: f64,
-    sum_wd2: f64,
 }
 
 impl CsfwAccum {
-}
-
-/// Per-walk CSFW parameters, derived once from the route: the effective
-/// per-scale weight quadratic `w(y) = clamp(b0 + b1·y + b2·y², w_min,
-/// w_max)` with `b = [1 + g·c0, g·c1, g·c2]`, `g = κ_Y·λ_b` folded at
-/// walk setup (design §4.2: `κ_c·λ_b` folds to one constant per band —
-/// no runtime multiply of the two) and `c` the route's derived φ
-/// quadratic ([`CSFW_PHI_Y_SDR`]/[`CSFW_PHI_Y_PU`]).
-#[derive(Clone, Copy)]
-struct CsfwParams {
-    eff: [[f64; 3]; crate::NUM_SCALES],
-}
-
-impl CsfwParams {
 }
 
 /// Finalize one channel-scale's append block into its 17 output slots.

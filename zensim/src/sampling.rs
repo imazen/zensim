@@ -237,9 +237,6 @@ type Axis = Vec<Vec<(usize, f64)>>;
 /// Cache spatial ownership once per reference; it depends only on the model's
 /// sampling contract and the logical dimensions, never on image values.
 pub(crate) struct Geometry {
-    width: usize,
-    height: usize,
-    axes: Vec<[Axis; 2]>,
 }
 impl Geometry {
 }

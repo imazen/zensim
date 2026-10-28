@@ -41,12 +41,6 @@ pub(crate) const ERA2_BAND_ROWS: usize = 32;
 #[allow(unused_imports)]
 pub(crate) use crate::featcanon::era2_reduce8;
 
-/// One era-2 accumulator: 8 f32 virtual lanes.
-#[derive(Clone, Copy)]
-pub(crate) struct Lanes8(pub [f32; 8]);
-impl Lanes8 {
-}
-
 /// Tier dispatch for the era-2 kernel. The BODY is one source shared by every
 /// tier (see `dense_block_kernel_era2_inner`); `#[magetypes]` exists here only
 /// to put that body inside each tier's `target_feature` region.

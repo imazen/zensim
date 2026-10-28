@@ -356,10 +356,6 @@ fn redistribute_pow2x_guided_add(
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CoarseKernel {
     Nearest,
-    Bilinear,
-    CatmullRom,
-    BSpline,
-    Lanczos3,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -380,9 +376,6 @@ impl CoarseKernel {
     fn support(self) -> f64 {
         match self {
             CoarseKernel::Nearest => 0.5,
-            CoarseKernel::Bilinear => 1.0,
-            CoarseKernel::CatmullRom | CoarseKernel::BSpline => 2.0,
-            CoarseKernel::Lanczos3 => 3.0,
         }
     }
 
@@ -390,16 +383,6 @@ impl CoarseKernel {
         let a = t.abs();
         match self {
             CoarseKernel::Nearest => f64::from(u8::from(a < 0.5)),
-            CoarseKernel::Bilinear => (1.0 - a).max(0.0),
-            CoarseKernel::CatmullRom if a < 1.0 => 1.5 * a * a * a - 2.5 * a * a + 1.0,
-            CoarseKernel::CatmullRom if a < 2.0 => -0.5 * a * a * a + 2.5 * a * a - 4.0 * a + 2.0,
-            CoarseKernel::BSpline if a < 1.0 => (4.0 - 6.0 * a * a + 3.0 * a * a * a) / 6.0,
-            CoarseKernel::BSpline if a < 2.0 => (2.0 - a).powi(3) / 6.0,
-            CoarseKernel::Lanczos3 if a < 1e-12 => 1.0,
-            CoarseKernel::Lanczos3 if a < 3.0 => {
-                let pa = core::f64::consts::PI * a;
-                3.0 * pa.sin() * (pa / 3.0).sin() / (pa * pa)
-            }
             _ => 0.0,
         }
     }
@@ -809,7 +792,6 @@ impl ScaleAccumulators {
             edge,
             mse,
             hf_energy_loss,
-            hf_sq_dst_sum: self.hf_sq_dst,
             hf_mag_loss,
             hf_energy_gain,
             ssim_2nd,
@@ -2952,7 +2934,6 @@ pub(crate) type XybPyramidLevel = ([Vec<f32>; 3], usize, usize);
 pub struct PrecomputedReference {
     pub(crate) formula_revision: crate::feature_defs::FormulaRevision,
     pub(crate) sampling: Option<crate::sampling::Sampling>,
-    pub(crate) sampling_geometry: Option<crate::sampling::Geometry>,
     pub(crate) scales: Vec<([Vec<f32>; 3], usize, usize)>,
     // INVARIANT: scales[i].0[0..3].len() == scales[i].1 * scales[i].2
     // (padded_width × height per plane). Enforced at construction.
@@ -3116,7 +3097,6 @@ impl PrecomputedReference {
         Self {
             formula_revision: revision,
             sampling: None,
-            sampling_geometry: None,
             scales,
             ref_width: 0,
             ref_height: 0,

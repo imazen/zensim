@@ -4695,29 +4695,6 @@ impl VWin {
             }
         };
         match blur {
-            crate::featcanon::BlurMode::Rec => {
-                let mut m1 = vec![0.0; p.width];
-                let mut m2 = vec![0.0; p.width];
-                let mut sq = vec![0.0; p.width];
-                let mut s12 = vec![0.0; p.width];
-                let mut act = if p.act.is_empty() {
-                    Vec::new()
-                } else {
-                    vec![0.0; p.width]
-                };
-                seed32(p.m1, &mut m1);
-                seed32(p.m2, &mut m2);
-                seed32(p.sq, &mut sq);
-                seed32(p.s12, &mut s12);
-                seed32(p.act, &mut act);
-                Self::Rec {
-                    m1,
-                    m2,
-                    sq,
-                    s12,
-                    act,
-                }
-            }
             crate::featcanon::BlurMode::Rec64 => {
                 let seed64 = |plane: &[f32], out: &mut Vec<f64>| {
                     if plane.is_empty() {

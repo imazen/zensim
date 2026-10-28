@@ -91,15 +91,6 @@ pub(crate) fn mode(revision: FormulaRevision) -> Mode {
     }
 }
 
-/// Process-bound arithmetic for legacy research helpers that receive no revision.
-/// Raw wide extraction guards require matching process/request revisions before
-/// these helpers run. Model-bound Rev5 serving instead passes the requested
-/// revision explicitly to its canonical leaves and accumulator constructors.
-#[inline]
-pub(crate) fn compute_mode() -> Mode {
-    mode(crate::ssim_form::active_revision())
-}
-
 // ============================================================================
 // The blur-recurrence axis (featacc) — `Rec64` is the Rev4 canon; the rest
 // of the axis is measurement-only
@@ -117,9 +108,6 @@ pub(crate) fn compute_mode() -> Mode {
 /// Rev1–Rev3; `Rec64` is the Rev4 canon; `Local` is the Rev5 canon.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BlurMode {
-    /// Production: per-column (V) / per-row (H) sliding f32 sums
-    /// (`sum = sum + add − rem`).
-    Rec,
     /// The same sliding recurrence in f64 — THE REV4 CANON's blur axis
     /// (rev4canon). Under `oracle` it is also a measurement arm measuring
     /// the f32 storage of the running sums, not the recurrence's existence.
@@ -441,11 +429,6 @@ impl SumVar {
         }
     }
 
-    #[inline]
-    pub(crate) fn f64_elems_meas() -> Self {
-        Self::f64_elems(compute_mode())
-    }
-
     /// Accumulate one f64 term — `Seq`/`L64`/`Neum` keep it exact; `L32`
     /// narrows to f32 first (the caller-chosen variant encodes whether that
     /// narrowing is value-exact — it is whenever the term is f32-stored).
@@ -505,9 +488,6 @@ pub(crate) enum WelfordVar {
 /// Plain f64 Welford triple — the production cell shape.
 #[derive(Clone, Copy, Default)]
 pub(crate) struct WelfordCell {
-    pub(crate) n: u64,
-    pub(crate) mean: f64,
-    pub(crate) m2: f64,
 }
 
 impl WelfordCell {
@@ -515,12 +495,6 @@ impl WelfordCell {
 }
 
 impl WelfordVar {
-    pub(crate) fn for_mode(mode: Mode) -> Self {
-        match mode {
-            Mode::Off => Self::Seq(WelfordCell::default()),
-            Mode::Canon64 => Self::Lanes([WelfordCell::default(); 8]),
-        }
-    }
 
 }
 

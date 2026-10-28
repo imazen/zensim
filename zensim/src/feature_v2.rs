@@ -197,7 +197,7 @@ pub const K_PJND_MASK_HIGH: f64 = 16.0;
 /// in unit-XYB scale, not blur residuals, but the dynamic range is
 /// comparable).
 pub const C_GMS: f64 = 1e-4;
-use crate::gmsbank_constants::{GMSBANK_B_C, GMSBANK_C, GMSBANK_CS_C, GMSBANK_X_C};
+use crate::gmsbank_constants::GMSBANK_CS_C;
 /// Saturating half-point for the reference-edge indicator used by ringing
 /// (`edge_r` in the A.10 table's `err · dilate(edge_r) · (1−edge_r)` form).
 pub const C_RING_EDGE: f64 = 0.02;
@@ -400,33 +400,9 @@ pub(crate) const TAILHIST_PER_CELL: usize = 12;
 /// arttype slots per scale (no channel axis — like append2/CSFW, each
 /// signal names its channel): blur(Y), noise_x/y/b, bleed_x/b.
 pub(crate) const ARTTYPE_PER_SCALE: usize = 6;
-/// Tail histogram bin count per map (31 true-log interior edges
-/// `10^(-6 + k*6/32)`, k = 1..31 → 32 partition cells).
-pub(crate) const TAILHIST_BINS: usize = 32;
 
 /// Named local offsets within one scale's arttype block.
 pub(crate) mod idx_arttype {}
-
-/// Triangular-hat bin count shared by gridblk and ringbasis.
-pub(crate) const REV4_HATS: usize = 6;
-/// Largest lattice period any rev4 cell can take (chroma at scale 0).
-pub(crate) const GRIDBLK_MAX_PERIOD: usize = 16;
-
-/// Binade LUT for the pinned C3 edges, used to bin in ~5 ops.
-struct TailEdges {
-    /// 31 ascending interior-edge bit patterns.
-    edges: [u64; 31],
-    /// `base[e]` = #edges strictly below binade `e`'s low end;
-    /// `inner[e]` = #edges inside binade `e` (≤ 2: edge spacing
-    /// 6/32 decade > binade width 0.301... i.e. at most `ceil(0.301/
-    /// 0.1875) = 2` — asserted at build).
-    base: Box<[u8; 1024]>,
-    inner: Box<[u8; 1024]>,
-}
-
-impl TailEdges {
-
-}
 
 // ---------------------------------------------------------------------------
 // Calibration diagnostics (registry-revision tooling, 2026-09-24).
@@ -435,13 +411,6 @@ impl TailEdges {
 // and C1 hat-centre calibration over TRAIN corpora. Default off; the
 // `Option` check is one predictable branch per scatter/rescan pass.
 // ---------------------------------------------------------------------------
-
-/// 64 log bins per diagnostic histogram.
-const DIAG_BINS: usize = 64;
-
-fn rev4_diag_enabled() -> bool {
-    false
-}
 
 // ---------------------------------------------------------------------------
 // REV4 per-(scale, channel) accumulator cell
@@ -458,26 +427,11 @@ fn rev4_diag_enabled() -> bool {
 /// merge- and order-invariant; the max is order-free.
 #[derive(Clone)]
 struct TailAccum {
-    hist: [[u32; TAILHIST_BINS]; 4],
-    max: [f64; 4],
-    /// Env-gated fine histogram for the top-edge calibration dump
-    /// (`ZENSIM_REV4_DIAG`); `None` in every production/test path.
-    diag: Option<Box<[[u32; DIAG_BINS]; 4]>>,
-    /// `c3negfold`: bin through [`TailEdges::bin_folded`]. Set from the
-    /// computation's revision (`Rev4` only); Rev1–Rev3 keep the legacy
-    /// [`TailEdges::bin`] so the landed `rev4bank` Bin slots they emit stay
-    /// byte-identical. The process revision equals the computation's
-    /// (`ssim_form::refuse_rev4_mix`).
-    fold: bool,
 }
 
 impl Default for TailAccum {
     fn default() -> Self {
         Self {
-            hist: [[0; TAILHIST_BINS]; 4],
-            max: [0.0; 4],
-            fold: crate::ssim_form::active_revision() >= FormulaRevision::Rev5,
-            diag: rev4_diag_enabled().then(|| Box::new([[0; DIAG_BINS]; 4])),
         }
     }
 }
@@ -489,17 +443,11 @@ impl TailAccum {
 /// featacc: `hfg` is a `SumVar` (f64-native terms) — `Seq` under production.
 #[derive(Clone, Copy)]
 struct FlatAccum {
-    /// Σ `hf_gain_i` over pixels with `act ≤ C4_FLAT_ACT` (scan order).
-    hfg: crate::featcanon::SumVar,
-    /// Count of flat pixels.
-    n: u64,
 }
 
 impl Default for FlatAccum {
     fn default() -> Self {
         Self {
-            hfg: crate::featcanon::SumVar::f64_elems_meas(),
-            n: 0,
         }
     }
 }
@@ -509,13 +457,11 @@ impl Default for FlatAccum {
 /// featacc: `SumVar` bins — `Seq` under production.
 #[derive(Clone, Copy)]
 struct RingAccum {
-    bins: [crate::featcanon::SumVar; REV4_HATS],
 }
 
 impl Default for RingAccum {
     fn default() -> Self {
         Self {
-            bins: std::array::from_fn(|_| crate::featcanon::SumVar::f64_elems_meas()),
         }
     }
 }
@@ -524,15 +470,11 @@ impl Default for RingAccum {
 /// mask (scan order). featacc: `SumVar` — `Seq` under production.
 #[derive(Clone, Copy)]
 struct BleedAccum {
-    out_src: crate::featcanon::SumVar,
-    out_dst: crate::featcanon::SumVar,
 }
 
 impl Default for BleedAccum {
     fn default() -> Self {
         Self {
-            out_src: crate::featcanon::SumVar::f64_elems_meas(),
-            out_dst: crate::featcanon::SumVar::f64_elems_meas(),
         }
     }
 }
@@ -555,31 +497,11 @@ impl Default for BleedAccum {
 /// construction, so the accumulation order is identical on every tier,
 /// engine and thread count — this family's determinism contract).
 struct GridblkAccum {
-    plane_v: Vec<f32>,
-    plane_h: Vec<f32>,
-    abs_v: [f64; GRIDBLK_MAX_PERIOD],
-    signed_v: [f64; GRIDBLK_MAX_PERIOD],
-    abs_h: [f64; GRIDBLK_MAX_PERIOD],
-    signed_h: [f64; GRIDBLK_MAX_PERIOD],
-    /// featacc `exact`-mode shadow planes: the same `ẽ` grid evaluated in
-    /// f64. Empty in every other mode (and in product builds — two dead
-    /// `Vec`s, 48 bytes of cell state). The rescan in
-    /// [`finish_gridblk_cell`] reads whichever plane family is populated.
-    plane_v64: Vec<f64>,
-    plane_h64: Vec<f64>,
 }
 
 impl Default for GridblkAccum {
     fn default() -> Self {
         Self {
-            plane_v: Vec::new(),
-            plane_h: Vec::new(),
-            abs_v: [0.0; GRIDBLK_MAX_PERIOD],
-            signed_v: [0.0; GRIDBLK_MAX_PERIOD],
-            abs_h: [0.0; GRIDBLK_MAX_PERIOD],
-            signed_h: [0.0; GRIDBLK_MAX_PERIOD],
-            plane_v64: Vec::new(),
-            plane_h64: Vec::new(),
         }
     }
 }
@@ -588,11 +510,6 @@ impl Default for GridblkAccum {
 /// rev4 compute flag is off.
 #[derive(Default)]
 struct Rev4CellAccum {
-    grid: GridblkAccum,
-    ring: RingAccum,
-    tail: TailAccum,
-    flat: FlatAccum,
-    bleed: BleedAccum,
 }
 
 // ---------------------------------------------------------------------------
@@ -2202,49 +2119,6 @@ pub(crate) fn finish_channel_scale_at_revision(
 // Top-level entry point
 // ============================================================================
 
-/// Precomputed reference-side state for the v2 extraction: the
-/// (reflect-padded, XYB-converted) reference planes at every pyramid
-/// scale. Build once per reference via
-/// [`crate::Zensim::prepare_v2_reference`], then score any number of
-/// distorted variants against it with
-/// [`crate::Zensim::compute_v2_features_with_ref`] — each call skips the
-/// reference-side decode-adjacent work (reflect-pad copy, RGB→XYB
-/// conversion, and the 3-level downscale chain) that the pair entry point
-/// would otherwise redo per pair.
-///
-/// Bit-exactness contract: the planes are built by the SAME functions in
-/// the SAME order as the pair path (`convert_source_to_xyb` +
-/// `downscale_2x` per level), so `compute_v2_features_with_ref(prepare(r),
-/// d)` produces features **bit-identical** to `compute_v2_features(r, d)`
-/// — guarded by `prepared_ref_bit_identical_to_pair_path` in this file's
-/// tests. Memory: ~`5.33 * w * h` f32s (≈21 MB at 1 MP, ≈85 MB at 4 MP).
-pub struct V2PreparedReference {
-    /// Per pyramid scale: 3 XYB planes at that scale's exact
-    /// `(width, height)` — same layout the pair path materializes.
-    scales: Vec<([Vec<f32>; 3], usize, usize)>,
-    /// Optional cached reference-side blur moments (`mu1` = blurred ref,
-    /// `activity` = blurred |ref − mu1|), per scale per channel, at full
-    /// plane size. Filled by REPLAYING the strip walk (same halo gather,
-    /// same sliding-sum chain starts), so the cached values are
-    /// bit-identical to what the kernels would recompute — see
-    /// [`fill_ref_moments`]. When present, each per-pair call skips the
-    /// mu1 V-blur and the entire activity chain (abs-diff + 2-pass blur)
-    /// per channel-scale.
-    moments: Option<Vec<[V2RefMoments; 3]>>,
-    /// Original (pre reflect-pad) source dimensions; distorted images are
-    /// validated against these, exactly like `validate_pair`.
-    orig_width: usize,
-    orig_height: usize,
-}
-
-/// One channel-scale's cached reference-side blur moments (full-plane).
-struct V2RefMoments {
-    mu1: Vec<f32>,
-    activity: Vec<f32>,
-}
-
-impl V2PreparedReference {}
-
 // ============================================================================
 // STREAMING folded-720[+append] walk (C2 of
 // docs/STREAMING_FOLDAPP_C0_DESIGN_2026-07-26.md).
@@ -2263,40 +2137,17 @@ impl V2PreparedReference {}
 // plane exists on either side at any point.
 // ============================================================================
 
-/// append2 per-walk parameters, derived once from the route + toggles:
-/// BANDVIS δ half-points (route-specific EMPIRICAL constants) and whether
-/// the HDR highlight bins are live.
-#[derive(Clone, Copy)]
-struct Append2Params {
-    bv_delta_lo: f32,
-    bv_delta_hi: f32,
-    hl_bins: bool,
-    /// BANDVIS dst self-mask live ([`V2NewFeatureToggles::append2_dst_activity`]):
-    /// phase A computes the Y-channel dst-activity plane, phase B routes it
-    /// into the BANDVIS-dstact kernel instantiation. Route-independent.
-    dst_activity: bool,
-}
-
 /// Per-channel accumulator state for the streaming walk: per-scale totals
 /// for every family the walk pools, merged strictly in kernel-strip order.
 struct StreamChannelAccums {
     dense: Vec<DenseAccum>,
     grad: Vec<GradientAccum>,
-    app: Vec<AppendAccum>,
     v1: Vec<V1BasicSums>,
     /// Row-ordered blockiness partials `(sum_v, sum_h)` (P1 canonical).
     /// featacc: [`SumVar`] slots — `Seq` unless a measurement mode is set
     /// (f64-native elements: `c32` resolves to `Seq`, i.e. production
     /// accumulation, per the f64-element rule).
     block: Vec<(crate::featcanon::SumVar, crate::featcanon::SumVar)>,
-    /// CSFW weighted-pool partials (Y channel + `csfw_block` only —
-    /// untouched zeros otherwise).
-    csfw: Vec<CsfwAccum>,
-    /// REV4 per-scale cells (`gridblk`/`ringbasis`/`tailhist` plus this
-    /// channel's share of `arttype`) — written by the dense/gradient hook
-    /// bundles and the gridblk strip kernel, all inside `stream_phase_b`.
-    /// Untouched zeros when every rev4 compute flag is off.
-    rev4: Vec<Rev4CellAccum>,
     /// Band-local planes for the v1 pool replay (`v1_pools`); empty
     /// (never allocated) when the toggle is off.
     /// One scratch per band SLOT within a strip (`STRIP_ROWS /
@@ -3230,7 +3081,6 @@ impl StreamChannelAccums {
         Self {
             dense: vec![DenseAccum::default(); n_scales],
             grad: vec![GradientAccum::default(); n_scales],
-            app: vec![AppendAccum::default(); n_scales],
             v1: vec![V1BasicSums::at_revision(revision); n_scales],
             block: vec![
                 (
@@ -3239,8 +3089,6 @@ impl StreamChannelAccums {
                 );
                 n_scales
             ],
-            csfw: vec![CsfwAccum::default(); n_scales],
-            rev4: (0..n_scales).map(|_| Rev4CellAccum::default()).collect(),
             pool_scratch: (0..n_band_slots.clamp(1, V1_BANDS_PER_STRIP))
                 .map(|_| FoldPoolScratch::default())
                 .collect(),
@@ -3627,13 +3475,6 @@ fn stream_fold_v1(
             // Peaks: the scratch travels only so a self-blur band owns
             // its H planes — no pool arithmetic runs (`HOnly`).
             V1PoolsMode::Peaks => Some((&mut acc.pool_scratch[..], BandPoolWork::HOnly)),
-            // The carrier slots need the activity + edge kernel at
-            // scales 0-1 only (masked_art_4th s0, iw_art_4th s0-s1);
-            // the peaks come from the kernel at every scale for free.
-            V1PoolsMode::Carriers if scale <= 1 => {
-                Some((&mut acc.pool_scratch[..], BandPoolWork::Carriers))
-            }
-            V1PoolsMode::Carriers => None,
             V1PoolsMode::Full => Some((&mut acc.pool_scratch[..], BandPoolWork::Full)),
         },
         band_parallel,
@@ -3755,23 +3596,6 @@ fn blockiness_sparse_strip_wide(
 // tier-dependent — the same reason the production kernels spell
 // `a*b + c` out).
 // ============================================================================
-
-/// Per-strip C4 mask scratch (sized by the caller once per walk).
-#[derive(Default)]
-struct BleedMaskWork {
-    /// Dst-Y rows for `reflect_101(y0 − 2 + r)`, r ∈ 0..strip_h+4.
-    dh: Vec<f32>,
-    /// One raw edge-flag row (width f32, {0,1}).
-    e_row: Vec<f32>,
-    /// Horizontally-dilated edge rows j ∈ 0..strip_h+2 (E at plane row
-    /// `y0 − 1 + j`, zero when that row is out of plane).
-    ehd: Vec<f32>,
-    /// The finished mask, `width * strip_h`, {0.0, 1.0}.
-    mask: Vec<f32>,
-}
-
-impl BleedMaskWork {
-}
 
 pub(crate) fn compute_folded_v1_372_streaming_stoppable(
     source: &impl ImageSource,
@@ -5037,35 +4861,6 @@ thread_local! {
     static PERF_BLUR: std::cell::Cell<f64> = const { std::cell::Cell::new(0.0) };
     static PERF_KERN: std::cell::Cell<f64> = const { std::cell::Cell::new(0.0) };
     static PERF_PASSB: std::cell::Cell<f64> = const { std::cell::Cell::new(0.0) };
-}
-
-/// Per-(scale, channel) pass-A pooled state.
-///
-/// Stays compiled in every configuration (it is a [`FoldRetention`] field
-/// type, and the walk's retention hooks write it), but its fields are only
-/// READ by the `custom-profiles`-gated attribution-density cluster — hence
-/// the targeted dead-code allowance.
-#[derive(Default, Clone, Copy)]
-pub(crate) struct AttrCellSums {
-    pub(crate) dense: DenseAccum,
-    pub(crate) grad: GradientAccum,
-    app: AppendAccum,
-    pub(crate) blockiness: f64,
-    pub(crate) n: usize,
-}
-
-/// Per-scale per-channel cached planes (scale-plane sized slices of
-/// scale-0-sized buffers).
-pub(crate) struct AttrChPlanes {
-    pub(crate) mu1: Vec<f32>,
-    pub(crate) mu2: Vec<f32>,
-    pub(crate) ssq: Vec<f32>,
-    pub(crate) s12: Vec<f32>,
-    pub(crate) act: Vec<f32>,
-    bs2: Vec<f32>,
-}
-
-impl AttrChPlanes {
 }
 
 // ============================================================================

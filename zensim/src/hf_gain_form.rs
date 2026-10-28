@@ -61,26 +61,6 @@ use crate::feature_defs::FormulaRevision;
 /// drift between the three sites that used to spell it out.
 pub(crate) const VAR_SRC_FLOOR: f64 = 1e-10;
 
-/// The HF bounded-excess stabiliser, v1 — same value and same derivation as
-/// `feature_v2::C_HF`, declared independently so a future v2-only change
-/// cannot silently move v1's bytes. `C2_V2` carries the same note for the same
-/// reason, in the opposite direction. Held equal by
-/// [`tests::v1_c_hf_matches_the_v2_owner`].
-pub(crate) const C_HF_V1: f64 = 1e-4;
-
-/// The cap [`HfGainForm::CappedExcess`] applies — **derived, not chosen**.
-///
-/// `1.0` is exactly the bound the two `loss` members of this family already
-/// have, so capping the gain member there gives the family one shared range
-/// without introducing a constant from outside it. It is also the point at
-/// which the distorted region carries twice the source's HF energy.
-///
-/// Its cost, stated because the arm is carried to measure it: `g > 1` on
-/// **2.5854 %** of the 2,601,072 measured cells, and every one of them
-/// receives the same value — so this arm, alone in the family, does not
-/// preserve severity order. See [`HfGainForm::preserves_order`].
-pub(crate) const GAIN_CAP: f64 = 1.0;
-
 /// Which form the HF *gain* member uses.
 ///
 /// The revision axis is owned by [`crate::feature_defs`]; this enum is the
@@ -99,24 +79,6 @@ pub(crate) enum HfGainForm {
     /// `g`. The shipped form, **unbounded above** (F17).
     #[default]
     RatioExcess,
-    /// `max(0, a−b) / (a + b + C_HF)` — [`crate::feature_v2`]'s own
-    /// `bounded_excess`, the crate's existing owner for this exact quantity.
-    ///
-    /// Bounded `[0, 1)`. Same numerator as [`Self::RatioExcess`]; the
-    /// denominator is the stabilised one. Introduces no constant — `C_HF` is
-    /// this family's declared stabiliser.
-    ///
-    /// Its cost: the denominator swap rescales even the smallest values, since
-    /// `(a−b)/(a+b+C) → g/2` as `g → 0`. It also leaves the family spelled two
-    /// ways — the gain member as a bounded excess, the two loss members still
-    /// as `max(0, 1 − ratio)` — so making the family consistent under this arm
-    /// would move 36 slots instead of 12.
-    BoundedExcess,
-    /// `ln(1 + g)`. Monotone, zero-preserving, agrees with
-    /// [`Self::RatioExcess`] to first order — and **still unbounded**, which is
-    /// exactly why it is carried: the log family is the obvious cheap answer
-    /// and this is what measuring it costs rather than assuming it.
-    Log1pExcess,
     /// `g / (g + 1)`, i.e. the crate's own `saturate(g, 1)` idiom.
     ///
     /// Bounded `[0, 1)`, strictly increasing, agrees with
@@ -129,11 +91,6 @@ pub(crate) enum HfGainForm {
     /// `var_loss = max(0, 1 − var_dst/var_src)`. So it makes the family
     /// symmetric by changing only the member that is broken.
     SaturatingExcess,
-    /// `min(g, `[`GAIN_CAP`]`)`. **Exact** below the cap and flat above it —
-    /// the [`crate::ssim_form::SsimLumaForm::Clamp`] analogue. Bounds without
-    /// touching anything below a doubling of HF energy, at the cost of
-    /// flattening order among the 2.59 % of cells above it.
-    CappedExcess,
 }
 
 impl HfGainForm {
@@ -213,23 +170,15 @@ impl HfGainForm {
     pub(crate) const REV2_HFGAIN: Self = Self::SaturatingExcess;
 
     /// Whether the arm has a **structural** upper bound (gate H3).
-    ///
-    /// [`Self::Log1pExcess`] answers `false` on purpose: log growth is not a
-    /// bound, and an arm that merely makes the number small enough to look
-    /// tidy is the failure mode this flag exists to name.
     pub(crate) const fn bounds_gain(self) -> bool {
-        matches!(
-            self,
-            Self::BoundedExcess | Self::SaturatingExcess | Self::CappedExcess
-        )
+        matches!(self, Self::SaturatingExcess)
     }
 
     /// The arm's least upper bound, or `None` when it has none.
     pub(crate) const fn upper_bound(self) -> Option<f64> {
         match self {
-            Self::RatioExcess | Self::Log1pExcess => None,
-            Self::BoundedExcess | Self::SaturatingExcess => Some(1.0),
-            Self::CappedExcess => Some(GAIN_CAP),
+            Self::RatioExcess => None,
+            Self::SaturatingExcess => Some(1.0),
         }
     }
 
@@ -238,10 +187,7 @@ impl HfGainForm {
     pub(crate) const fn as_str(self) -> &'static str {
         match self {
             Self::RatioExcess => "ratio",
-            Self::BoundedExcess => "bexcess",
-            Self::Log1pExcess => "log1p",
             Self::SaturatingExcess => "satexcess",
-            Self::CappedExcess => "cap",
         }
     }
 }
@@ -282,17 +228,10 @@ pub(crate) fn hf_energy_gain(form: HfGainForm, var_src: f64, var_dst: f64) -> f6
         // Bit-identical to the expression this replaced: same subtraction of
         // 1.0 from the ratio, same `.max(0.0)`, same order.
         HfGainForm::RatioExcess => (var_dst / var_src - 1.0).max(0.0),
-        HfGainForm::BoundedExcess => (var_dst - var_src).max(0.0) / (var_dst + var_src + C_HF_V1),
-        HfGainForm::Log1pExcess => (var_dst / var_src - 1.0).max(0.0).ln_1p(),
         HfGainForm::SaturatingExcess => {
             let g = (var_dst / var_src - 1.0).max(0.0);
             g / (g + 1.0)
         }
-        // `.max(0.0).min(cap)` rather than `.clamp(0.0, cap)`: the `.max(0.0)`
-        // is the SHIPPED expression's own floor, and keeping it visible is what
-        // makes "exact below the cap" readable as an edit to one end only.
-        #[allow(clippy::manual_clamp)]
-        HfGainForm::CappedExcess => (var_dst / var_src - 1.0).max(0.0).min(GAIN_CAP),
     };
     // The boundedness claim, checked rather than asserted in prose — the same
     // shape `ssim_form`'s scalar tail uses. Debug-only; this is a per-cell
@@ -338,14 +277,6 @@ pub(crate) fn hf_mag_loss(mad_src: f64, mad_dst: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    const ARMS: [HfGainForm; 5] = [
-        HfGainForm::RatioExcess,
-        HfGainForm::BoundedExcess,
-        HfGainForm::Log1pExcess,
-        HfGainForm::SaturatingExcess,
-        HfGainForm::CappedExcess,
-    ];
 
     /// `(var_src, var_dst)` pairs reaching the healthy regime, the gate, and
     /// F17's pathology — the last row is the measured 36,465.7 configuration.
@@ -402,104 +333,6 @@ mod tests {
         }
     }
 
-    /// **F17, stated as a failing property of the shipped form.** If this ever
-    /// stops failing for `RatioExcess`, the pathology was fixed elsewhere and
-    /// this module's reason to exist has changed.
-    #[test]
-    fn only_the_ratio_and_log_arms_are_unbounded() {
-        // The measured worst configuration: a near-flat source past the gate
-        // against a distorted region carrying real HF.
-        let (b, a) = (1e-9, 3.6466e-5);
-        assert!(
-            hf_energy_gain(HfGainForm::RatioExcess, b, a) > 3.6e4,
-            "the F17 pathology should reproduce here"
-        );
-        for form in ARMS {
-            let g = hf_energy_gain(form, b, a);
-            match form.upper_bound() {
-                Some(hi) => assert!(
-                    (0.0..=hi).contains(&g),
-                    "{form:?} claims bound {hi} but produced {g}"
-                ),
-                None => assert!(form == HfGainForm::RatioExcess || form == HfGainForm::Log1pExcess),
-            }
-            assert_eq!(form.bounds_gain(), form.upper_bound().is_some());
-        }
-        // Log growth is a compression, not a bound — named, not implied.
-        assert!(!HfGainForm::Log1pExcess.bounds_gain());
-        assert!(hf_energy_gain(HfGainForm::Log1pExcess, b, a) < 11.0);
-    }
-
-    /// **H3, structurally.** Every bounding arm stays inside its declared
-    /// bound across the whole sweep, not just the headline case.
-    #[test]
-    fn bounding_arms_respect_their_declared_bound_everywhere() {
-        for form in ARMS.iter().copied().filter(|f| f.bounds_gain()) {
-            let hi = form.upper_bound().unwrap();
-            for (b, a) in cases() {
-                let g = hf_energy_gain(form, b, a);
-                assert!(
-                    g.is_finite() && (0.0..=hi).contains(&g),
-                    "{form:?} produced {g} outside [0, {hi}] at var_src={b} var_dst={a}"
-                );
-            }
-        }
-    }
-
-    /// **H4 — zero preservation.** Every arm returns EXACTLY 0 wherever the
-    /// shipped form does. This is what keeps the identity vector zero and the
-    /// slot a `Difference` form under any revision.
-    #[test]
-    fn every_arm_preserves_the_zeros_of_the_shipped_form() {
-        for (b, a) in cases() {
-            if legacy_gain(b, a) != 0.0 {
-                continue;
-            }
-            for form in ARMS {
-                let g = hf_energy_gain(form, b, a);
-                assert_eq!(
-                    g.to_bits(),
-                    0.0f64.to_bits(),
-                    "{form:?} broke zero-preservation at var_src={b} var_dst={a}: {g}"
-                );
-            }
-        }
-    }
-
-    /// The two derivations that make `SaturatingExcess` constant-free, checked
-    /// rather than argued: it is the src↔dst reflection of `hf_energy_loss`,
-    /// and it agrees with the shipped form to first order in `g`.
-    #[test]
-    fn saturating_excess_is_the_reflection_of_the_loss_member() {
-        for &(b, a) in &[(0.25, 0.5), (1e-4, 3e-4), (2.0, 2.5), (0.5, 50.0)] {
-            let got = hf_energy_gain(HfGainForm::SaturatingExcess, b, a);
-            let reflected = hf_energy_loss(a, b); // swap src and dst
-            assert!(
-                (got - reflected).abs() < 1e-15,
-                "reflection identity failed at ({b}, {a}): {got} vs {reflected}"
-            );
-        }
-        // First-order agreement: |arm − g| / g² → 1 as g → 0.
-        for &eps in &[1e-3, 1e-4, 1e-5] {
-            let (b, a) = (1.0, 1.0 + eps);
-            let g = hf_energy_gain(HfGainForm::RatioExcess, b, a);
-            let s = hf_energy_gain(HfGainForm::SaturatingExcess, b, a);
-            assert!(
-                ((g - s) / (g * g) - 1.0).abs() < 1e-2,
-                "1st-order agreement failed at eps={eps}: g={g} s={s}"
-            );
-        }
-        // `BoundedExcess` by contrast rescales by ~1/2 even as g → 0 — the
-        // reason §11.5 predicts it perturbs healthy cells hardest.
-        let (b, a) = (1.0, 1.0 + 1e-5);
-        let g = hf_energy_gain(HfGainForm::RatioExcess, b, a);
-        let be = hf_energy_gain(HfGainForm::BoundedExcess, b, a);
-        assert!(
-            (be / g - 0.5).abs() < 1e-3,
-            "expected ~g/2, got {be} vs {g}"
-        );
-    }
-
     /// The `loss` members' bound is a property of the algebra, not a clamp —
     /// stated as a test so a future edit that breaks it fails loudly.
     #[test]
@@ -512,26 +345,4 @@ mod tests {
         }
     }
 
-    /// Every arm token round-trips, and the tokens are the `ZENSIM_HF_GAIN`
-    /// spellings the R6b scripts use.
-    #[test]
-    fn arm_tokens_are_unique_and_stable() {
-        let mut seen = std::collections::BTreeSet::new();
-        for form in ARMS {
-            assert!(
-                seen.insert(form.as_str()),
-                "duplicate token {}",
-                form.as_str()
-            );
-        }
-        assert_eq!(
-            seen.iter().copied().collect::<Vec<_>>(),
-            ["bexcess", "cap", "log1p", "ratio", "satexcess"]
-        );
-    }
-
-    #[test]
-    fn v1_c_hf_matches_the_v2_owner() {
-        assert_eq!(C_HF_V1, crate::feature_v2::C_HF);
-    }
 }

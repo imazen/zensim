@@ -64,21 +64,6 @@ use archmage::autoversion;
 use magetypes::simd::backends::{F32x8Backend, F32x16Backend};
 use magetypes::simd::generic::{f32x8 as GenericF32x8, f32x16};
 
-/// Scratch for the exact f64 second-pass kernel. Row-ring storage is
-/// proportional to width and blur radius, independent of image height.
-///
-/// NOT on the served path any more: revision 3 is served by the FUSED
-/// direct-error moments inside the existing H/V pass (`blur::fused_blur_h_ssim`
-/// accumulates `Σ(a-b)²` in place of `Σab`, and `fused::fused_vblur_ssim_inner`
-/// forms the dissimilarity from it). This kernel is the exactness REFERENCE the
-/// bounded-error tests measure against — see
-/// `benchmarks/stable_ssim_kernel_2026-09-08.md`.
-#[derive(Default)]
-pub(crate) struct StableSsimScratch {
-    rows: Vec<[f64; 4]>,
-    vertical: Vec<[f64; 4]>,
-}
-
 /// **Ablation mirror of [`stable_ssim_plane`], for separating the two halves
 /// of the correction.**
 ///
@@ -203,10 +188,6 @@ pub(crate) fn ablation_plane(
             let luma_loss = match form {
                 SsimLumaForm::Ssim2Legacy => mean_error2,
                 SsimLumaForm::Clamp => mean_error2.min(1.0),
-                SsimLumaForm::Lorentz => r(mean_error2 / r(1.0 + mean_error2)),
-                SsimLumaForm::SsimLumaC1 => {
-                    r(mean_error2 / r(r(r(a * a) + r(b * b)) + C_SSIM_LUMA as f64))
-                }
             };
             *value = if direct_error {
                 let error_variance = r(r(m[3] * inv_n) - mean_error2).max(0.0);
@@ -387,10 +368,6 @@ pub(crate) fn ablation_plane_tiled(
         let luma_loss = match form {
             SsimLumaForm::Ssim2Legacy => mean_error2,
             SsimLumaForm::Clamp => mean_error2.min(1.0),
-            SsimLumaForm::Lorentz => r(mean_error2 / r(1.0 + mean_error2)),
-            SsimLumaForm::SsimLumaC1 => {
-                r(mean_error2 / r(r(r(a * a) + r(b * b)) + C_SSIM_LUMA as f64))
-            }
         };
         *value = if direct_error {
             let error_variance = r(r(m[3] * inv_n) - mean_error2).max(0.0);
@@ -405,23 +382,6 @@ pub(crate) fn ablation_plane_tiled(
         };
     }
     out
-}
-
-/// Scratch for [`stable_ssim_plane_tiled`]. Still O(width x radius): two
-/// tiles of raw row sums plus a derived suffix and prefix tile, all
-/// `diameter` rows tall, independent of image height.
-#[derive(Default)]
-pub(crate) struct TiledSsimScratch {
-    /// Raw H-summed rows for the current and next row-tile, rolling.
-    hraw: Vec<f64>,
-    /// Backward cumulative over the current row-tile.
-    suf: Vec<f64>,
-    /// Forward cumulative over the next row-tile.
-    pre: Vec<f64>,
-    /// The horizontal pass's three live tiles (previous suffix, current
-    /// prefix, current suffix) — about 1 KB, so the decomposition stays in L1
-    /// and the padded row is never materialised.
-    hpad: Vec<f64>,
 }
 
 /// Independent direct-window f64 reference, shared by the numerical
@@ -469,8 +429,6 @@ pub(crate) fn precision_reference(
             let loss = match form {
                 SsimLumaForm::Ssim2Legacy => md * md,
                 SsimLumaForm::Clamp => (md * md).min(1.0),
-                SsimLumaForm::Lorentz => md * md / (1.0 + md * md),
-                SsimLumaForm::SsimLumaC1 => md * md / (m1 * m1 + m2 * m2 + C_SSIM_LUMA as f64),
             };
             let sd = loss + (1.0 - loss) * ve / (v1 + v2 + c2);
             let ssq = samples.iter().map(|p| p.0 * p.0 + p.1 * p.1).sum::<f64>() / count;
@@ -494,31 +452,6 @@ pub(crate) fn precision_reference(
 /// FROM.
 pub(crate) const C2: f32 = 0.0009;
 
-/// SSIM luminance stabiliser — **derived, not chosen**, and used only by the
-/// bounded forms.
-///
-/// Two independent derivations land on the same value:
-///
-/// 1. **From the family.** Every `bounded_sim(a, b, c) = (2ab+c)/(a^2+b^2+c)`
-///    regularizer in this crate is `1e-4` — `C_EDGE`, `C_GMS`, `C_CONTRAST`,
-///    `C_BV`. `bounded_sim` **is** the standard SSIM luminance term, already
-///    present as a named, documented, shared primitive
-///    (`feature_v2.rs`, "Bounded `(0, 1]`"). [`SsimLumaForm::SsimLumaC1`] is
-///    that owner's form, applied to the one place in the crate that hand-rolls
-///    an unbounded substitute for it.
-/// 2. **From the constant already here.** [`C2`] is `(K2 * L)^2` at
-///    `K2 = 0.03`, `L = 1`. The matching `C1 = (K1 * L)^2` at the textbook
-///    `K1 = 0.01` is `1e-4`.
-///
-/// It regularises only as `mu1^2 + mu2^2 -> 0`; at photographic magnitudes it
-/// is negligible, which is why the exact value is not load-bearing and the
-/// agreement of the two derivations is what makes it defensible.
-///
-/// CORRECTION to `benchmarks/ssim_moment_explosion_2026-07-16.md` §7a, which
-/// evaluated "C1(0.01)" — 100x this value. Its ordering conclusions are
-/// unaffected; its photographic row moves from +0.0003 to +0.00004 here.
-pub(crate) const C_SSIM_LUMA: f32 = 1e-4;
-
 /// Which luminance term the per-pixel dissimilarity uses.
 ///
 /// The revision axis is owned by [`crate::feature_defs`]; this enum is the
@@ -530,24 +463,6 @@ pub(crate) enum SsimLumaForm {
     /// `1 - D^2`. ssimulacra2's form, shipped, **unbounded below** (F4).
     #[default]
     Ssim2Legacy,
-    /// `(2*mu1*mu2 + C1) / (mu1^2 + mu2^2 + C1)` — the standard SSIM
-    /// luminance term, i.e. `bounded_sim(mu1, mu2, C_SSIM_LUMA)`.
-    ///
-    /// Bounded `(0, 1]`, so `d_raw` lands in `[0, 2]` and the `.max(0)` floor
-    /// the call sites apply becomes provably redundant. Preserves severity
-    /// ORDER where a clamp would saturate. Its cost is that it re-introduces
-    /// the mean-dependent (Weber) normalisation `lib.rs` says was dropped on
-    /// purpose for a perceptually-uniform space.
-    SsimLumaC1,
-    /// `1 / (1 + D^2)`, i.e. `1 - saturate(D^2, 1)` in the crate's own
-    /// `saturate(x, c) = x/(x+c)` idiom.
-    ///
-    /// Bounded `(0, 1]`, **no Weber normalisation** (so it keeps the
-    /// perceptual-uniformity intent), and `c = 1` is the unique scale at which
-    /// it agrees with [`Self::Ssim2Legacy`] to first order in `D^2` — so it
-    /// introduces no new constant. Compresses the extreme tail harder than
-    /// `SsimLumaC1`.
-    Lorentz,
     /// `max(0, 1 - D^2)`. **Exact** for `D^2 <= 1` — the overwhelming majority
     /// of pixels — and flat above it, so it bounds without touching the
     /// photographic regime at all, at the cost of flattening rank among the
@@ -723,7 +638,6 @@ pub(crate) struct SsimSplats16<T: F32x16Backend + Copy> {
     two: f32x16<T>,
     zero: f32x16<T>,
     c2: f32x16<T>,
-    c1: f32x16<T>,
 }
 
 impl<T: F32x16Backend + Copy> SsimSplats16<T> {
@@ -735,7 +649,6 @@ impl<T: F32x16Backend + Copy> SsimSplats16<T> {
             two: f32x16::splat_t(token, 2.0),
             zero: f32x16::zero_t(token),
             c2: f32x16::splat_t(token, C2),
-            c1: f32x16::splat_t(token, C_SSIM_LUMA),
         }
     }
 
@@ -762,14 +675,6 @@ impl<T: F32x16Backend + Copy> SsimSplats16<T> {
             SsimLumaForm::Ssim2Legacy => {
                 let mu_diff = m1 - m2;
                 (mu_diff.mul_add(-mu_diff, self.one), self.one)
-            }
-            SsimLumaForm::SsimLumaC1 => (
-                self.two.mul_add(m1 * m2, self.c1),
-                m1.mul_add(m1, m2.mul_add(m2, self.c1)),
-            ),
-            SsimLumaForm::Lorentz => {
-                let mu_diff = m1 - m2;
-                (self.one, mu_diff.mul_add(mu_diff, self.one))
             }
             SsimLumaForm::Clamp => {
                 let mu_diff = m1 - m2;
@@ -802,8 +707,6 @@ impl<T: F32x16Backend + Copy> SsimSplats16<T> {
         let luma_loss = match self.form {
             SsimLumaForm::Ssim2Legacy => mean_error2,
             SsimLumaForm::Clamp => mean_error2.min(self.one),
-            SsimLumaForm::Lorentz => mean_error2 / (mean_error2 + self.one),
-            SsimLumaForm::SsimLumaC1 => mean_error2 / m1.mul_add(m1, m2.mul_add(m2, self.c1)),
         };
         (self.one - luma_loss).mul_add(error_variance / (variance_sum + self.c2), luma_loss)
     }
@@ -817,7 +720,6 @@ pub(crate) struct SsimSplats8<T: F32x8Backend + Copy> {
     two: GenericF32x8<T>,
     zero: GenericF32x8<T>,
     c2: GenericF32x8<T>,
-    c1: GenericF32x8<T>,
 }
 
 impl<T: F32x8Backend + Copy> SsimSplats8<T> {
@@ -829,7 +731,6 @@ impl<T: F32x8Backend + Copy> SsimSplats8<T> {
             two: GenericF32x8::splat_t(token, 2.0),
             zero: GenericF32x8::zero_t(token),
             c2: GenericF32x8::splat_t(token, C2),
-            c1: GenericF32x8::splat_t(token, C_SSIM_LUMA),
         }
     }
 
@@ -848,14 +749,6 @@ impl<T: F32x8Backend + Copy> SsimSplats8<T> {
             SsimLumaForm::Ssim2Legacy => {
                 let mu_diff = m1 - m2;
                 (mu_diff.mul_add(-mu_diff, self.one), self.one)
-            }
-            SsimLumaForm::SsimLumaC1 => (
-                self.two.mul_add(m1 * m2, self.c1),
-                m1.mul_add(m1, m2.mul_add(m2, self.c1)),
-            ),
-            SsimLumaForm::Lorentz => {
-                let mu_diff = m1 - m2;
-                (self.one, mu_diff.mul_add(mu_diff, self.one))
             }
             SsimLumaForm::Clamp => {
                 let mu_diff = m1 - m2;
@@ -881,8 +774,6 @@ impl<T: F32x8Backend + Copy> SsimSplats8<T> {
         let luma_loss = match self.form {
             SsimLumaForm::Ssim2Legacy => mean_error2,
             SsimLumaForm::Clamp => mean_error2.min(self.one),
-            SsimLumaForm::Lorentz => mean_error2 / (mean_error2 + self.one),
-            SsimLumaForm::SsimLumaC1 => mean_error2 / m1.mul_add(m1, m2.mul_add(m2, self.c1)),
         };
         (self.one - luma_loss).mul_add(error_variance / (variance_sum + self.c2), luma_loss)
     }
@@ -906,14 +797,6 @@ pub(crate) fn ssim_dissim_raw_scalar(
         SsimLumaForm::Ssim2Legacy => {
             let mu_diff = m1 - m2;
             (mu_diff.mul_add(-mu_diff, 1.0f32), 1.0f32)
-        }
-        SsimLumaForm::SsimLumaC1 => (
-            2.0f32.mul_add(m1 * m2, C_SSIM_LUMA),
-            m1.mul_add(m1, m2.mul_add(m2, C_SSIM_LUMA)),
-        ),
-        SsimLumaForm::Lorentz => {
-            let mu_diff = m1 - m2;
-            (1.0f32, mu_diff.mul_add(mu_diff, 1.0f32))
         }
         SsimLumaForm::Clamp => {
             let mu_diff = m1 - m2;
@@ -981,8 +864,6 @@ pub(crate) fn ssim_direct_raw_scalar(
     let luma_loss = match form {
         SsimLumaForm::Ssim2Legacy => mean_error2,
         SsimLumaForm::Clamp => mean_error2.min(1.0f32),
-        SsimLumaForm::Lorentz => mean_error2 / (mean_error2 + 1.0f32),
-        SsimLumaForm::SsimLumaC1 => mean_error2 / m1.mul_add(m1, m2.mul_add(m2, C_SSIM_LUMA)),
     };
     (1.0f32 - luma_loss).mul_add(error_variance / (variance_sum + C2), luma_loss)
 }
@@ -1104,57 +985,6 @@ mod tests {
         }
     }
 
-    /// **F4, stated as a failing property of the shipped form.** The legacy
-    /// arm is unbounded; every other arm is not. If this ever stops failing
-    /// for `Ssim2Legacy`, the pathology has been fixed somewhere else and
-    /// this module's reason to exist has changed.
-    #[test]
-    fn only_the_legacy_arm_is_unbounded() {
-        // mu1 = 50, mu2 = 2450 on a near-flat region: the configuration
-        // `benchmarks/ssim_moment_explosion_2026-07-16.md` reproduces 5.8e6 from.
-        let (m1, m2) = (50.0f32, 2450.0f32);
-        let var = 1e-6f32;
-        let ssq = m1 * m1 + m2 * m2 + 2.0 * var;
-        let s12 = m1 * m2 + var;
-
-        let legacy = ssim_dissim_raw_scalar(SsimLumaForm::Ssim2Legacy, m1, m2, ssq, s12);
-        assert!(
-            legacy > 1e6,
-            "the F4 pathology should reproduce here, got {legacy}"
-        );
-
-        for form in [
-            SsimLumaForm::SsimLumaC1,
-            SsimLumaForm::Lorentz,
-            SsimLumaForm::Clamp,
-        ] {
-            assert!(form.bounds_dissim(), "{form:?} claims not to bound");
-            let d = ssim_dissim_raw_scalar(form, m1, m2, ssq, s12);
-            assert!(
-                (-1e-5..=2.0 + 1e-5).contains(&d),
-                "{form:?} produced d = {d} outside [0, 2] on the pathological case"
-            );
-        }
-    }
-
-    /// Boundedness across the whole sweep, not just the headline case.
-    #[test]
-    fn bounded_arms_keep_d_in_zero_to_two_everywhere() {
-        for form in [
-            SsimLumaForm::SsimLumaC1,
-            SsimLumaForm::Lorentz,
-            SsimLumaForm::Clamp,
-        ] {
-            for (m1, m2, ssq, s12) in cases() {
-                let d = ssim_dissim_raw_scalar(form, m1, m2, ssq, s12);
-                assert!(
-                    d.is_finite() && (-1e-4..=2.0 + 1e-4).contains(&d),
-                    "{form:?} at mu=({m1},{m2}) ssq={ssq} s12={s12} gave {d}"
-                );
-            }
-        }
-    }
-
     /// **`Clamp` is exact where it matters.** It is defined to differ from the
     /// shipped form only where `(mu1-mu2)^2 > 1`, which is why it moved ZERO
     /// of 22,396 cells on the synthetic dump. Pinning that here means a future
@@ -1168,37 +998,6 @@ mod tests {
             let c = ssim_dissim_raw_scalar(SsimLumaForm::Clamp, m1, m2, ssq, s12);
             let l = ssim_dissim_raw_scalar(SsimLumaForm::Ssim2Legacy, m1, m2, ssq, s12);
             assert_eq!(c.to_bits(), l.to_bits(), "clamp diverged below the knee");
-        }
-    }
-
-    /// **The G-OWNER claim, checked.** `SsimLumaC1`'s luminance term is not
-    /// merely *like* the crate's `bounded_sim` primitive — it IS it, and this
-    /// compares the f32 kernel arm against the f64 owner rather than against a
-    /// second transcription.
-    ///
-    /// `crate::feature_v2` only exists under `feature-regime-v2` — this test
-    /// asserts parity with it, so it is unrunnable (not just untestable)
-    /// without that feature.
-    #[test]
-    fn ssim_luma_arm_is_the_crate_s_own_bounded_sim() {
-        for (m1, m2, ssq, s12) in cases() {
-            let want_luma: f64 =
-                crate::feature_v2::bounded_sim(m1 as f64, m2 as f64, C_SSIM_LUMA as f64);
-            // Reconstruct the arm's luminance factor from its output:
-            // d = 1 - luma * (num_s/denom_s).
-            let num_s = 2.0f64 * ((s12 - m1 * m2) as f64) + C2 as f64;
-            let denom_s = ((ssq - m1 * m1 - m2 * m2) as f64) + C2 as f64;
-            let d = ssim_dissim_raw_scalar(SsimLumaForm::SsimLumaC1, m1, m2, ssq, s12) as f64;
-            let want = 1.0 - want_luma * (num_s / denom_s);
-            let scale = want.abs().max(1.0);
-            assert!(
-                (d - want).abs() <= 2e-3 * scale,
-                "arm vs bounded_sim at mu=({m1},{m2}): {d} vs {want}"
-            );
-            assert!(
-                want_luma > 0.0 && want_luma <= 1.0 + 1e-12,
-                "bounded_sim escaped (0,1]: {want_luma}"
-            );
         }
     }
 

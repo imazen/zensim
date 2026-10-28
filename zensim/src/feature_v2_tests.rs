@@ -132,66 +132,6 @@ pub(crate) mod tests {
     ///     `x`, tail included — so the shape is width-independent, unlike
     ///     era-1's, whose tail landed in the f64 running total.
 
-    /// **The two `self_blur` predicates must be the SAME predicate.**
-    ///
-    /// There are two, and until 2026-09-05 they disagreed on
-    /// [`V1PoolsMode::Peaks`]:
-    ///
-    /// * [`ComputeSet::self_blur_eligible`] — read at `stream_foldapp`'s
-    ///   `plane_needs` call, which is what SIZES the strip scratch.
-    /// * the `let self_blur = …` binding inside the strip loop's
-    ///   `fuse_channels` arm, which is what DECIDES whether phase A runs.
-    ///
-    /// When the sizing predicate says `false` and the loop predicate says
-    /// `true`, the scratch reserves phase A's four fused-H planes and the
-    /// loop then skips phase A whole, so those planes are allocated,
-    /// first-touched and never written. That is exactly the waste
-    /// `StripPlaneNeeds` was introduced to remove
-    /// (`benchmarks/fold_footprint_2026-08-31.md` §5), reappearing on the
-    /// one mode the fast class actually ships:
-    /// `fold_engine::pools_mode_for_need` returns `Peaks` for any bake that
-    /// does not read masked/IW, which is every basic+peaks model.
-    ///
-    /// This test pins them together so the next edit to either one cannot
-    /// silently re-open the gap. It asserts the LOOP's predicate, because
-    /// the loop is the one that determines what is actually written — a
-    /// sizing decision that disagrees with it is wrong by definition, in
-    /// whichever direction it disagrees (under-sizing would be a
-    /// correctness bug, over-sizing is the footprint bug found here).
-    #[test]
-    fn self_blur_sizing_predicate_matches_the_strip_loop_predicate() {
-        for &pm in &[
-            V1PoolsMode::Off,
-            V1PoolsMode::Carriers,
-            V1PoolsMode::Peaks,
-            V1PoolsMode::Full,
-        ] {
-            for &v1_only in &[true, false] {
-                let t = V2NewFeatureToggles {
-                    v1_only,
-                    v1_pools: pm,
-                    ..Default::default()
-                };
-                let cs = ComputeSet::from_toggles(t);
-                // Verbatim from the strip loop's `fuse_channels` arm, minus
-                // `fuse_channels` itself (a runtime parallelism fact, which
-                // both sites already AND in separately).
-                let loop_predicate = !cs.v2_blocks
-                    && cs.v1_basic
-                    && matches!(t.v1_pools, V1PoolsMode::Full | V1PoolsMode::Peaks);
-                assert_eq!(
-                    cs.self_blur_eligible(),
-                    loop_predicate,
-                    "self_blur sizing vs loop predicate disagree at \
-                     v1_pools={pm:?} v1_only={v1_only}: sizing says {}, loop says \
-                     {loop_predicate}. A disagreement in this direction reserves \
-                     phase A's four H planes and never writes them.",
-                    cs.self_blur_eligible(),
-                );
-            }
-        }
-    }
-
     // ---------------------------------------------------------------- //
     // Feature-set IDs (`docs/FEATURE_SET_IDS.md`) — the COMPUTE half.
     // ---------------------------------------------------------------- //
