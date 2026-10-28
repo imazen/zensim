@@ -232,11 +232,6 @@ pub(crate) enum RingForm {
 
 impl RingForm {}
 
-/// The ring form: the raw error product (revision 6's high-pass form is not shipped).
-pub(crate) fn active_ring_form() -> RingForm {
-    RingForm::Raw
-}
-
 #[cfg(test)]
 mod ring_form_tests {
     use super::*;
@@ -299,7 +294,7 @@ mod ring_form_tests {
                 false,
                 true,
                 false,
-            >(src_h, dst_h, act, &[], mu1, mu2, w, h, 0.0, 0.0, None, m)
+            >(src_h, dst_h, act, &[], mu1, mu2, w, h, 0.0, 0.0, m)
         } else {
             gradient_block_kernel_canon::<
                 crate::featcanon::Lanes16F64,
@@ -308,7 +303,7 @@ mod ring_form_tests {
                 false,
                 false,
                 false,
-            >(src_h, dst_h, act, &[], mu1, mu2, w, h, 0.0, 0.0, None, m)
+            >(src_h, dst_h, act, &[], mu1, mu2, w, h, 0.0, 0.0, m)
         }
     }
 
@@ -572,11 +567,6 @@ pub(crate) const ARTTYPE_PER_SCALE: usize = 6;
 /// Tail histogram bin count per map (31 true-log interior edges
 /// `10^(-6 + k*6/32)`, k = 1..31 → 32 partition cells).
 pub(crate) const TAILHIST_BINS: usize = 32;
-/// Flat-reference activity ceiling for the C4 noise descriptors — the
-/// plan's `C4_FLAT_ACT`, pinned equal to [`C_ACTIVITY`] (design note
-/// §C4): "flat" is the same saturator scale the masking/ringing
-/// formulas already use.
-pub(crate) const C4_FLAT_ACT: f64 = C_ACTIVITY;
 
 /// Named local offsets within one scale's arttype block.
 pub(crate) mod idx_arttype {}
@@ -585,48 +575,6 @@ pub(crate) mod idx_arttype {}
 pub(crate) const REV4_HATS: usize = 6;
 /// Largest lattice period any rev4 cell can take (chroma at scale 0).
 pub(crate) const GRIDBLK_MAX_PERIOD: usize = 16;
-/// C2 magnitude-hat centres, as the `u()` coordinates of
-/// `[1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1]` (design note §C2).
-const RINGBASIS_LEVELS: [f64; REV4_HATS] = [1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0];
-
-/// The shared rev4 log-magnitude coordinate: the IEEE-754 bit pattern of
-/// the positive value, read as an f64 (design note "shared log-magnitude
-/// coordinate" — monotone in `v` for `v > 0`, transcendental-free,
-/// tier/libc-invariant).
-#[inline(always)]
-fn rev4_u(v: f64) -> f64 {
-    v.to_bits() as f64
-}
-
-/// `u(level)` per hat centre — const-computed through `to_bits`/`as`
-/// (the same map `rev4_u` applies per pixel).
-const fn u_centres(levels: [f64; REV4_HATS]) -> [f64; REV4_HATS] {
-    let mut c = [0.0f64; REV4_HATS];
-    let mut i = 0;
-    while i < REV4_HATS {
-        c[i] = levels[i].to_bits() as f64;
-        i += 1;
-    }
-    c
-}
-
-/// C2's six u-domain hat centres.
-const RINGBASIS_UC: [f64; REV4_HATS] = u_centres(RINGBASIS_LEVELS);
-
-/// Evaluate all six triangular memberships at `u` — `hat_memberships`
-/// side="left" picks the adjacent pair, `1−t`/`t` weights with
-/// `t = (u − c_j)/(c_{j+1} − c_j)`. Exactly two entries of the result
-/// are nonzero.
-fn rev4_hats(c: &[f64; REV4_HATS], u: f64) -> [f64; REV4_HATS] {
-    let mut h = [0.0f64; REV4_HATS];
-    let uc = u.clamp(c[0], c[REV4_HATS - 1]);
-    let i = c.partition_point(|&x| x < uc);
-    let j = i.saturating_sub(1).min(REV4_HATS - 2);
-    let t = (uc - c[j]) / (c[j + 1] - c[j]);
-    h[j] = 1.0 - t;
-    h[j + 1] = t;
-    h
-}
 
 /// Binade LUT for the pinned C3 edges, used to bin in ~5 ops.
 struct TailEdges {
@@ -642,41 +590,6 @@ struct TailEdges {
 
 impl TailEdges {
 
-    /// [`bin`](Self::bin) with the `c3negfold` correction: non-positive (and
-    /// NaN) values fold into bin 0. The maps are non-negative by construction
-    /// up to f32 rounding, which produces small negative `art`/`det` values
-    /// (and possibly `-0.0`); the raw `to_bits` compare in `bin` sorts every
-    /// sign-bit-set double above the top edge and silently saturates the top
-    /// bin. Used at [`FormulaRevision::Rev4`] only (see [`TailAccum::fold`]).
-    #[inline(always)]
-    fn bin_folded(&self, v: f64) -> usize {
-        let ub = v.to_bits();
-        if (ub >> 63) != 0 || ub >= (0x7ff8u64 << 48) {
-            return 0;
-        }
-        self.bin(v)
-    }
-
-    /// Bin index `#{edges strictly below v}` — the C3 cell convention
-    /// (an exact edge hit lands in the cell below it).
-    /// `v >= 0` is assumed: a sign-bit-set `v` lands in the TOP bin (the
-    /// legacy behaviour every Rev1–Rev3 research extraction keeps, byte for
-    /// byte); values above the last edge enter the top cell.
-    #[inline(always)]
-    fn bin(&self, v: f64) -> usize {
-        let ub = v.to_bits();
-        let e = ((ub >> 52) as usize).min(1023);
-        let b = self.base[e] as usize;
-        let inner = self.inner[e];
-        let mut bin = b;
-        if inner > 0 && ub > self.edges[b] {
-            bin += 1;
-            if inner > 1 && ub > self.edges[b + 1] {
-                bin += 1;
-            }
-        }
-        bin
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -692,18 +605,6 @@ const DIAG_BINS: usize = 64;
 
 fn rev4_diag_enabled() -> bool {
     false
-}
-
-/// Diag bin for the C3 maps (range [0, 1]): 16 log bins per decade over
-/// [1e-4, 1]. `v <= 0` folds into bin 0, `v >= 1` into the last bin.
-/// Diagnostic-only — a `log10` per pixel is fine on the gated path.
-fn diag_bin01(v: f64) -> usize {
-    if v <= 0.0 || v.is_nan() {
-        return 0;
-    }
-    ((v.log10() + 4.0) * 16.0)
-        .floor()
-        .clamp(0.0, (DIAG_BINS - 1) as f64) as usize
 }
 
 // ---------------------------------------------------------------------------
@@ -746,20 +647,6 @@ impl Default for TailAccum {
 }
 
 impl TailAccum {
-    /// One map value into its bin + running max.
-    #[inline(always)]
-    fn scatter(&mut self, edges: &TailEdges, v: f64, map: usize) {
-        let b = if self.fold {
-            edges.bin_folded(v)
-        } else {
-            edges.bin(v)
-        };
-        self.hist[map][b] += 1;
-        self.max[map] = self.max[map].max(v);
-        if let Some(d) = self.diag.as_deref_mut() {
-            d[map][diag_bin01(v)] += 1;
-        }
-    }
 }
 
 /// C4-noise: flat-reference-region HF-gain mass for one cell.
@@ -870,120 +757,6 @@ struct Rev4CellAccum {
     tail: TailAccum,
     flat: FlatAccum,
     bleed: BleedAccum,
-}
-
-/// REV4 hook bundle for the dense kernel — carries C3 (`tail`) and C4's
-/// noise descriptor (`flat`) for ONE cell. `None` on every non-rev4 call:
-/// inside the kernel the Option is one loop-invariant branch (the same
-/// shape `transducer_bank` already carries here).
-struct Rev4Dense<'a> {
-    /// C3 target when `tailhist` is on.
-    tail: Option<&'a mut TailAccum>,
-    /// C4-noise target when `arttype` is on.
-    flat: Option<&'a mut FlatAccum>,
-    /// Resolved once by the caller (a `OnceLock` hit per strip, not per
-    /// pixel).
-    edges: &'static TailEdges,
-}
-
-/// One pixel's contribution to the C3/C4 dense targets — the single code
-/// path shared by the era-1 SIMD chunk lanes, the era-1 scalar tail, and
-/// the era-2 V8 lanes so the three cannot drift.
-#[inline(always)]
-fn rev4_dense_pixel(
-    r4: &mut Rev4Dense<'_>,
-    d: f64,
-    art: f64,
-    det: f64,
-    mse: f64,
-    hfg: f64,
-    act: f64,
-    lane: usize,
-) {
-    if let Some(t) = r4.tail.as_deref_mut() {
-        t.scatter(r4.edges, d, 0);
-        t.scatter(r4.edges, art, 1);
-        t.scatter(r4.edges, det, 2);
-        t.scatter(r4.edges, mse, 3);
-    }
-    if let Some(f) = r4.flat.as_deref_mut()
-        && act <= C4_FLAT_ACT
-    {
-        f.hfg.add64(lane, hfg);
-        f.n += 1;
-    }
-}
-
-/// One chunk's (8 lanes) worth of [`rev4_dense_pixel`] calls — pulled out
-/// of the SIMD chunk loop so the per-element histogram/pool scatter stays
-/// scalar on every tier. On AVX-512 LLVM otherwise fuses the lane loop's
-/// `pool[lane]` and `hist[bin]` indexed updates into
-/// `vgatherqpd`/`vscatterqpd` (4.3x slower than the scalar form,
-/// measured 2026-10-03); `black_box` on the trip count makes the loop
-/// unvectorizable, and `inline(never)` keeps the mangled shape from being
-/// re-created inside the caller. Bit-exact: the calls are identical.
-#[inline(never)]
-fn rev4_dense_chunk8(
-    r4: &mut Rev4Dense<'_>,
-    d: &[f32; 8],
-    art: &[f32; 8],
-    det: &[f32; 8],
-    mse: &[f32; 8],
-    hfg: &[f32; 8],
-    act: &[f32; 8],
-) {
-    for l in 0..std::hint::black_box(8usize) {
-        rev4_dense_pixel(
-            r4,
-            d[l] as f64,
-            art[l] as f64,
-            det[l] as f64,
-            mse[l] as f64,
-            hfg[l] as f64,
-            act[l] as f64,
-            l,
-        );
-    }
-}
-
-/// REV4 hook bundle for the gradient kernel — C2's ring bins on every
-/// channel and C4's bleed sums on the chroma channels (`mask` present).
-struct Rev4Grad<'a> {
-    /// C2 target when `ringbasis` is on.
-    ring: Option<&'a mut RingAccum>,
-    /// C4 bleed: `(outside-weight mask slice, target)` — `None` on the Y
-    /// channel (and whenever `arttype` is off).
-    bleed: Option<(&'a [f32], &'a mut BleedAccum)>,
-    bank: GmsBankWork<'a>,
-}
-
-/// One pixel's contribution to the C2/C4 gradient targets — shared by the
-/// scalar border path and the SIMD chunk lanes. `i` is the pixel's
-/// strip-local index (`y*width + x`) — the C4 outside-mask weight is
-/// `1 − mask[i]`, read inside so the slice borrow never leaves `r4`.
-#[inline(always)]
-fn rev4_grad_pixel(
-    r4: &mut Rev4Grad<'_>,
-    centres: &[f64; REV4_HATS],
-    ring: f64,
-    g_src: f64,
-    g_dst: f64,
-    i: usize,
-    lane: usize,
-) {
-    if let Some(bins) = r4.ring.as_deref_mut()
-        && ring > 0.0
-    {
-        let h = rev4_hats(centres, rev4_u(ring));
-        for (b, h) in bins.bins.iter_mut().zip(h.iter()) {
-            b.add64(lane, ring * h);
-        }
-    }
-    if let Some((m, b)) = r4.bleed.as_mut() {
-        let out_w = 1.0 - m[i] as f64;
-        b.out_src.add64(lane, g_src * out_w);
-        b.out_dst.add64(lane, g_dst * out_w);
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -3918,23 +3691,12 @@ fn stream_phase_b(
             width,
             strip_h,
             toggles.transducer_bank,
-            None,
             toggles.formula_revision,
         );
         acc.dense[scale].accumulate(&d);
-        let mut retained_grad = GradientAccum::default();
-
-        // REV4 C2/C4-bleed ride the gradient kernel too — it must run
-        // whenever either hook has work, even with `gradient_features`
-        // off (the hook's `Option` gates keep the rev4-off call
-        // byte-identical to the pre-rev4 signature).
         if toggles.gradient_features {
             let g_off = (HALO_P - 1) * width;
             let g_n = width * (strip_h + 2);
-            // BANDVIS accumulates only on (Y, append2 on) — the const-split
-            // instantiation; every other path runs the byte-identical
-            // BANDVIS=false kernel. The dst self-mask plane routes in only
-            // when `append2_dst_activity` is live (third instantiation).
             let g = gradient_block_kernel_at_revision(
                 &src_win[g_off..g_off + g_n],
                 &dst_win[g_off..g_off + g_n],
@@ -3942,18 +3704,10 @@ fn stream_phase_b(
                 Some((mu1_strip, mu2_strip)),
                 width,
                 strip_h,
-                None,
-                None,
-                None,
-                false,
                 toggles.formula_revision,
             );
             acc.grad[scale].accumulate(&g);
-            if toggles.gradient_features {
-                retained_grad = g;
-            }
         }
-
     }
 
     if fold_v1 {

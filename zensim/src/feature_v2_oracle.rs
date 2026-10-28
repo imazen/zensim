@@ -70,7 +70,6 @@ fn dense_block_kernel_era2(
     width: usize,
     height: usize,
     transducer_bank: bool,
-    r4: Option<Rev4Dense<'_>>,
 ) -> DenseAccum {
     incant!(
         dense_block_kernel_era2_entry(
@@ -83,8 +82,7 @@ fn dense_block_kernel_era2(
             activity,
             width,
             height,
-            transducer_bank,
-            r4
+            transducer_bank
         ),
         [v4x, v4, v3, neon, wasm128, scalar]
     )
@@ -119,7 +117,6 @@ fn dense_block_kernel_era2_entry(
     width: usize,
     height: usize,
     transducer_bank: bool,
-    r4: Option<Rev4Dense<'_>>,
 ) -> DenseAccum {
     dense_block_kernel_era2_generic::<_, false>(
         token,
@@ -133,7 +130,6 @@ fn dense_block_kernel_era2_entry(
         width,
         height,
         transducer_bank,
-        r4,
     )
 }
 
@@ -151,7 +147,6 @@ fn dense_block_kernel_era2_entry(
     width: usize,
     height: usize,
     transducer_bank: bool,
-    r4: Option<Rev4Dense<'_>>,
 ) -> DenseAccum {
     dense_block_kernel_era2_generic::<_, false>(
         token,
@@ -165,7 +160,6 @@ fn dense_block_kernel_era2_entry(
         width,
         height,
         transducer_bank,
-        r4,
     )
 }
 
@@ -214,7 +208,6 @@ fn dense_block_kernel_era2_generic<T: F32x8Backend + Copy, const FUSED: bool>(
     width: usize,
     height: usize,
     transducer_bank: bool,
-    mut r4: Option<Rev4Dense<'_>>,
 ) -> DenseAccum {
     // Revision 3 (issue #61): the `s12` plane is the direct error moment, so
     // the v2 SSIM signal must read it as such. Hoisted once per call;
@@ -373,26 +366,6 @@ fn dense_block_kernel_era2_generic<T: F32x8Backend + Copy, const FUSED: bool>(
                 // (the §A.14 pattern; the bit-domain edges cannot
                 // vectorize). `t[7]` is `hfg`. One Option check per
                 // chunk; `None` is the pre-REV4 op sequence bit for bit.
-                if let Some(r4) = r4.as_mut() {
-                    let d_a = d.to_array();
-                    let art_a = art_i.to_array();
-                    let det_a = det_i.to_array();
-                    let mse_a = mse_i.to_array();
-                    let hfg_a = t[7].to_array();
-                    let act_a = act.to_array();
-                    for lane in 0..8 {
-                        rev4_dense_pixel(
-                            r4,
-                            d_a[lane] as f64,
-                            art_a[lane] as f64,
-                            det_a[lane] as f64,
-                            mse_a[lane] as f64,
-                            hfg_a[lane] as f64,
-                            act_a[lane] as f64,
-                            lane,
-                        );
-                    }
-                }
                 x += 8;
             }
             // TAIL: masked, never zero-padded (see `v8_add_first`).
@@ -429,26 +402,6 @@ fn dense_block_kernel_era2_generic<T: F32x8Backend + Copy, const FUSED: bool>(
                 // REV4 tail: only the first `rem` lanes are real pixels
                 // (the padded lanes' values are discarded, matching the
                 // masked-fold convention).
-                if let Some(r4) = r4.as_mut() {
-                    let d_a = d.to_array();
-                    let art_a = art_i.to_array();
-                    let det_a = det_i.to_array();
-                    let mse_a = mse_i.to_array();
-                    let hfg_a = t[7].to_array();
-                    let act_a = act.to_array();
-                    for lane in 0..rem {
-                        rev4_dense_pixel(
-                            r4,
-                            d_a[lane] as f64,
-                            art_a[lane] as f64,
-                            det_a[lane] as f64,
-                            mse_a[lane] as f64,
-                            hfg_a[lane] as f64,
-                            act_a[lane] as f64,
-                            lane,
-                        );
-                    }
-                }
             }
 
             // Per-row reduction into the f64 band partial, via the FIXED tree.
@@ -660,7 +613,6 @@ fn dense_block_kernel_canon<P: crate::featcanon::Pool>(
     width: usize,
     height: usize,
     transducer_bank: bool,
-    mut r4: Option<Rev4Dense<'_>>,
     revision: FormulaRevision,
 ) -> DenseAccum {
     use crate::featcanon::{Lanes16F32, ROW_LANES_FOLD};
@@ -725,7 +677,6 @@ fn dense_block_kernel_canon<P: crate::featcanon::Pool>(
                         transducer_bank,
                         direct,
                         forms7,
-                        &mut r4,
                         &mut r32,
                         &mut p_mw32,
                         &mut p_iw32,
@@ -767,7 +718,6 @@ fn dense_block_kernel_canon<P: crate::featcanon::Pool>(
                         transducer_bank,
                         direct,
                         forms7,
-                        &mut r4,
                         r,
                         p_mw,
                         p_iw,
@@ -960,7 +910,6 @@ fn dense_elem_canon<P: crate::featcanon::Pool>(
     transducer_bank: bool,
     direct: bool,
     stable: bool,
-    r4: &mut Option<Rev4Dense<'_>>,
     r: &mut [P; 13],
     p_mw: &mut P,
     p_iw: &mut P,
@@ -984,18 +933,6 @@ fn dense_elem_canon<P: crate::featcanon::Pool>(
     for j in 0..3 {
         p_kn[j].add(lane, kn[j]);
         p_kd[j].add(lane, kd[j]);
-    }
-    if let Some(r4) = r4.as_mut() {
-        rev4_dense_pixel(
-            r4,
-            t[0] as f64,
-            art_i as f64,
-            det_i as f64,
-            mse_i as f64,
-            t[7] as f64,
-            act as f64,
-            lane,
-        );
     }
     t[0]
 }
@@ -1069,10 +1006,8 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64, const R7: bool>(
     width: usize,
     height: usize,
     transducer_bank: bool,
-    r4: Option<Rev4Dense<'_>>,
     revision: FormulaRevision,
 ) -> DenseAccum {
-    let mut r4 = r4;
     let direct = revision >= FormulaRevision::Rev5;
     let stable_moments = P::LANES == 16;
     let forms7 = revision.stable_forms();
@@ -1304,9 +1239,6 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64, const R7: bool>(
                         acc.central.merge(OnlineMoments::block(&local[..8]));
                     }
                 }
-                    if let Some(r4) = r4.as_mut() {
-                        rev4_dense_chunk8(r4, &bufs[0], &bufs[4], &bufs[5], &bufs[6], &bufs[7], $act8);
-                    }
                 }};
             }
             let mut c = 0usize;
@@ -1341,7 +1273,7 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64, const R7: bool>(
                     m_w, i_w, mv[0], mv[1], mv[2], mv[3], iv[0], iv[1], iv[2], iv[3], kn[0], kn[1],
                     kn[2], kd[0], kd[1], kd[2],
                 ];
-                if rev7 && r4.is_none() {
+                if rev7 {
                     for j in DENSE_POOLS7 {
                         let lanes = &mut pools32[j].0;
                         (f32x16::load_t(token, lanes) + vecs[j]).store(lanes);
@@ -1493,17 +1425,6 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64, const R7: bool>(
                         acc.central.merge(OnlineMoments::block(&local[..8]));
                     }
                 }
-                if let Some(r4) = r4.as_mut() {
-                    rev4_dense_chunk8(
-                        r4,
-                        &t[0].to_array(),
-                        &art_i.to_array(),
-                        &det_i.to_array(),
-                        &mse_i.to_array(),
-                        &t[7].to_array(),
-                        &act_v.to_array(),
-                    );
-                }
             }
             // Full blocks before the tail's own blocks, in raster order.
             central8(&cols, blocks, &mut acc.central);
@@ -1535,7 +1456,6 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64, const R7: bool>(
                         transducer_bank,
                         direct,
                         forms7,
-                        &mut r4,
                         r.try_into().unwrap(),
                         &mut mw[0],
                         &mut iw[0],
@@ -1614,7 +1534,6 @@ fn dense_block_kernel_canon64_vec_scalar<P: crate::featcanon::Pool64, const R7: 
     width: usize,
     height: usize,
     transducer_bank: bool,
-    r4: Option<Rev4Dense<'_>>,
     revision: FormulaRevision,
 ) -> DenseAccum {
     dense_block_kernel_canon::<P>(
@@ -1628,7 +1547,6 @@ fn dense_block_kernel_canon64_vec_scalar<P: crate::featcanon::Pool64, const R7: 
         width,
         height,
         transducer_bank,
-        r4,
         revision,
     )
 }
@@ -1647,7 +1565,6 @@ fn dense_block_kernel_canon64_vec_wasm128<P: crate::featcanon::Pool64, const R7:
     width: usize,
     height: usize,
     transducer_bank: bool,
-    r4: Option<Rev4Dense<'_>>,
     revision: FormulaRevision,
 ) -> DenseAccum {
     dense_block_kernel_canon::<P>(
@@ -1661,7 +1578,6 @@ fn dense_block_kernel_canon64_vec_wasm128<P: crate::featcanon::Pool64, const R7:
         width,
         height,
         transducer_bank,
-        r4,
         revision,
     )
 }
@@ -1681,7 +1597,6 @@ fn dense_block_kernel_canon64_vec_neon<P: crate::featcanon::Pool64, const R7: bo
     width: usize,
     height: usize,
     transducer_bank: bool,
-    r4: Option<Rev4Dense<'_>>,
     revision: FormulaRevision,
 ) -> DenseAccum {
     dense_block_kernel_canon::<P>(
@@ -1695,499 +1610,7 @@ fn dense_block_kernel_canon64_vec_neon<P: crate::featcanon::Pool64, const R7: bo
         width,
         height,
         transducer_bank,
-        r4,
         revision,
     )
-}
-
-/// featcanon-fix D1 at the crate-internal walk (`validate_wide_revision`): the
-/// public entries refuse a Rev4 request first (D2), so this pins the walk's
-/// OWN refusal — the guard `research::extract` and every internal caller rely
-/// on — in both directions.
-#[cfg(test)]
-mod featcanon_contract_tests {
-    use super::*;
-    
-    
-
-    /// REV4VEC2 bit-exactness gate: `*_canon64_vec` tier variants must
-    /// reproduce the scalar `LanesF64` canonical body **bit for bit** —
-    /// every `DenseAccum`/`GradientAccum` field plus the Rev4 hook state
-    /// (`TailAccum` hist/max, `FlatAccum`, `RingAccum` bins, `BleedAccum`,
-    /// bank/chroma cells). Each compiled variant is invoked directly on
-    /// its summoned token.
-    mod rev4vec2 {
-        use super::*;
-        use crate::featcanon::{LanesF64, Mode, SumVar};
-        use archmage::SimdToken as _;
-
-        struct Rng(u64);
-        impl Rng {
-            fn next(&mut self) -> u64 {
-                let mut x = self.0;
-                x ^= x >> 12;
-                x ^= x << 25;
-                x ^= x >> 27;
-                self.0 = x;
-                x.wrapping_mul(0x2545_F491_4F6C_DD1D)
-            }
-            fn f32v(&mut self) -> f32 {
-                if self.next().is_multiple_of(257) {
-                    f32::from_bits(self.next() as u32)
-                } else {
-                    (self.next() % 4096) as f32 / 128.0 - 16.0
-                }
-            }
-        }
-
-        fn sumvar_bits(v: &SumVar) -> Vec<u64> {
-            vec![v.fin().to_bits()]
-        }
-
-        fn dense_bits(a: &DenseAccum) -> Vec<u64> {
-            let mut v = vec![
-                a.sum_d,
-                a.sum_d2,
-                a.sum_d3,
-                a.sum_d4,
-                a.sum_art,
-                a.sum_det,
-                a.sum_mse,
-                a.sum_hf_gain,
-                a.sum_hf_loss,
-                a.sum_hf_mag_loss,
-                a.sum_pjnd,
-                a.sum_pjnd_lo,
-                a.sum_pjnd_hi,
-            ]
-            .iter()
-            .map(|x| x.to_bits())
-            .collect::<Vec<u64>>();
-            for w in [
-                &a.ws_peak_ssim,
-                &a.ws_peak_art,
-                &a.ws_peak_det,
-                &a.ws_mask_ssim,
-                &a.ws_mask_art,
-                &a.ws_mask_det,
-                &a.ws_mask_mse,
-                &a.ws_iw_ssim,
-                &a.ws_iw_art,
-                &a.ws_iw_det,
-                &a.ws_iw_mse,
-            ] {
-                v.push(w.num.to_bits());
-                v.push(w.den.to_bits());
-            }
-            v
-        }
-
-        fn tail_bits(t: &TailAccum) -> Vec<u64> {
-            let mut v = Vec::new();
-            for m in 0..4 {
-                v.extend(t.hist[m].iter().map(|&b| b as u64));
-                v.push(t.max[m].to_bits());
-            }
-            v
-        }
-
-        fn flat_bits(f: &FlatAccum) -> Vec<u64> {
-            let mut v = sumvar_bits(&f.hfg);
-            v.push(f.n);
-            v
-        }
-
-        fn ring_bits(r: &RingAccum) -> Vec<u64> {
-            r.bins.iter().flat_map(sumvar_bits).collect()
-        }
-
-        fn bleed_bits(b: &BleedAccum) -> Vec<u64> {
-            [sumvar_bits(&b.out_src), sumvar_bits(&b.out_dst)].concat()
-        }
-
-        fn grad_bits(a: &GradientAccum) -> Vec<u64> {
-            let mut v = [
-                a.sum_gms,
-                a.sum_gms2,
-                a.sum_ringing,
-                a.sum_banding,
-                a.sum_grad_src,
-                a.sum_grad_dst,
-                a.sum_bv_gain,
-                a.sum_bv_loss,
-            ]
-            .iter()
-            .map(|x| x.to_bits())
-            .collect::<Vec<u64>>();
-            for c in a.bank.iter().chain(a.chroma.iter()) {
-                v.push(c.loss.to_bits());
-                v.push(c.gain.to_bits());
-                v.push(c.n);
-                v.push(c.mean.to_bits());
-                v.push(c.m2.to_bits());
-            }
-            v
-        }
-
-        /// One gradient case: all six const combos, `r4_kind` 0=None,
-        /// 1=ring+bleed+bank-with-chroma, 2=ring only.
-        #[allow(clippy::too_many_arguments)]
-        fn run_gradient<const B: bool, const V: bool, const K: bool>(
-            f: impl Fn(
-                &[f32],
-                &[f32],
-                &[f32],
-                &[f32],
-                usize,
-                usize,
-                f32,
-                f32,
-                Option<Rev4Grad<'_>>,
-            ) -> GradientAccum,
-            src_h: &[f32],
-            dst_h: &[f32],
-            act: &[f32],
-            actd: &[f32],
-            bleed_mask: &[f32],
-            chroma_r: &[f32],
-            chroma_d: &[f32],
-            w: usize,
-            h: usize,
-            bv_lo: f32,
-            bv_hi: f32,
-            r4_kind: usize,
-        ) -> (GradientAccum, Option<(RingAccum, BleedAccum)>) {
-            let mut cell = Rev4CellAccum::default();
-            let r4 = match r4_kind {
-                0 => None,
-                _ => Some(Rev4Grad {
-                    ring: Some(&mut cell.ring),
-                    bleed: if r4_kind == 1 {
-                        Some((bleed_mask, &mut cell.bleed))
-                    } else {
-                        None
-                    },
-                    bank: if r4_kind == 1 {
-                        GmsBankWork::new(
-                            1,
-                            Some(ChromaStrip {
-                                reference: chroma_r,
-                                distorted: chroma_d,
-                            }),
-                        )
-                    } else {
-                        GmsBankWork::new(0, None)
-                    },
-                }),
-            };
-            let acc = f(src_h, dst_h, act, actd, w, h, bv_lo, bv_hi, r4);
-            let hooks = (r4_kind != 0).then_some((cell.ring, cell.bleed));
-            (acc, hooks)
-        }
-
-        macro_rules! gradient_cases {
-            ($name:literal, $f:ident, $tok:expr, $rng:expr, $compiled:expr) => {{
-                $compiled += 1;
-                // (w, h, r4_kind) — interior needs w>2; borders-only at
-                // w≤2; chroma/bleed paths at r4=1.
-                for &(w, h, r4_kind) in &[
-                    (3usize, 4usize, 0usize),
-                    (9, 5, 1),
-                    (10, 3, 1),
-                    (17, 6, 2),
-                    (18, 4, 1),
-                    (5, 9, 1),
-                    (33, 5, 1),
-                    (2, 6, 1),
-                    (1, 3, 0),
-                    (26, 7, 1),
-                ] {
-                    let n = w * h;
-                    let nh = (h + 2) * w;
-                    let src_h: Vec<f32> = (0..nh).map(|_| $rng.f32v()).collect();
-                    let dst_h: Vec<f32> = (0..nh).map(|_| $rng.f32v()).collect();
-                    let act: Vec<f32> = (0..n).map(|_| $rng.f32v()).collect();
-                    let actd: Vec<f32> = (0..n).map(|_| $rng.f32v()).collect();
-                    let bleed: Vec<f32> = (0..n).map(|_| $rng.f32v()).collect();
-                    let cr: Vec<f32> = (0..n).map(|_| $rng.f32v()).collect();
-                    let cd: Vec<f32> = (0..n).map(|_| $rng.f32v()).collect();
-                    let mu1: Vec<f32> = (0..n).map(|_| $rng.f32v()).collect();
-                    let mu2: Vec<f32> = (0..n).map(|_| $rng.f32v()).collect();
-                    let (bv_lo, bv_hi) = (0.03f32, 0.21f32);
-
-                    macro_rules! run_one {
-                        ($want:ident, $got:ident, $B:literal, $V:literal, $K:literal, $R:literal) => {{
-                            let ($want, want_hooks) = run_gradient::<$B, $V, $K>(
-                                |s, d, a, ad, w, h, lo, hi, r4| {
-                                    gradient_block_kernel_canon::<LanesF64, $B, $V, $K, $R, false>(
-                                        s,
-                                        d,
-                                        a,
-                                        ad,
-                                        &mu1,
-                                        &mu2,
-                                        w,
-                                        h,
-                                        lo,
-                                        hi,
-                                        r4,
-                                        Mode::Canon64,
-                                    )
-                                },
-                                &src_h,
-                                &dst_h,
-                                &act,
-                                &actd,
-                                &bleed,
-                                &cr,
-                                &cd,
-                                w,
-                                h,
-                                bv_lo,
-                                bv_hi,
-                                r4_kind,
-                            );
-                            let ($got, got_hooks) = run_gradient::<$B, $V, $K>(
-                                |s, d, a, ad, w, h, lo, hi, r4| {
-                                    $f::<$B, $V, $K, $R>($tok, s, d, a, ad, &mu1, &mu2, w, h, lo, hi, r4)
-                                },
-                                &src_h,
-                                &dst_h,
-                                &act,
-                                &actd,
-                                &bleed,
-                                &cr,
-                                &cd,
-                                w,
-                                h,
-                                bv_lo,
-                                bv_hi,
-                                r4_kind,
-                            );
-                            assert_eq!(
-                                grad_bits(&$got),
-                                grad_bits(&$want),
-                                "{}: accum differs (B={} V={} K={} R={} w={w} h={h} r4={r4_kind})",
-                                $name,
-                                $B,
-                                $V,
-                                $K,
-                                $R
-                            );
-                            match (got_hooks, want_hooks) {
-                                (Some((gr, gb)), Some((wr, wb))) => {
-                                    assert_eq!(
-                                        ring_bits(&gr),
-                                        ring_bits(&wr),
-                                        "{}: ring differs",
-                                        $name
-                                    );
-                                    assert_eq!(
-                                        bleed_bits(&gb),
-                                        bleed_bits(&wb),
-                                        "{}: bleed differs",
-                                        $name
-                                    );
-                                }
-                                (None, None) => {}
-                                _ => panic!("{}: hook presence mismatch", $name),
-                            }
-                        }};
-                    }
-                    for b in [false, true] {
-                        for v in [false, true] {
-                            for k in [false, true] {
-                                // Const-generic combos cannot be runtime
-                                // booleans — dispatch on the 8 tuples.
-                                match (b, v, k) {
-                                    (false, false, false) => {
-                                        run_one!(w0, g0, false, false, false, false);
-                                        run_one!(w0, g0, false, false, false, true)
-                                    }
-                                    (false, false, true) => {
-                                        run_one!(w1, g1, false, false, true, false);
-                                        run_one!(w1, g1, false, false, true, true)
-                                    }
-                                    (false, true, false) => {
-                                        run_one!(w2, g2, false, true, false, false);
-                                        run_one!(w2, g2, false, true, false, true)
-                                    }
-                                    (false, true, true) => {
-                                        run_one!(w3, g3, false, true, true, false);
-                                        run_one!(w3, g3, false, true, true, true)
-                                    }
-                                    (true, false, false) => {
-                                        run_one!(w4, g4, true, false, false, false);
-                                        run_one!(w4, g4, true, false, false, true)
-                                    }
-                                    (true, false, true) => {
-                                        run_one!(w5, g5, true, false, true, false);
-                                        run_one!(w5, g5, true, false, true, true)
-                                    }
-                                    (true, true, false) => {
-                                        run_one!(w6, g6, true, true, false, false);
-                                        run_one!(w6, g6, true, true, false, true)
-                                    }
-                                    (true, true, true) => {
-                                        run_one!(w7, g7, true, true, true, false);
-                                        run_one!(w7, g7, true, true, true, true)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }};
-        }
-
-        #[test]
-        fn gradient_canon64_vec_matches_scalar_on_every_compiled_tier() {
-            fn go_scalar<const B: bool, const V: bool, const K: bool, const R: bool>(
-                _t: archmage::ScalarToken,
-                s: &[f32],
-                d: &[f32],
-                a: &[f32],
-                ad: &[f32],
-                m1: &[f32],
-                m2: &[f32],
-                w: usize,
-                h: usize,
-                lo: f32,
-                hi: f32,
-                r4: Option<Rev4Grad<'_>>,
-            ) -> GradientAccum {
-                gradient_block_kernel_canon64_vec_scalar::<crate::featcanon::LanesF64, B, V, K, R, false>(
-                    _t,
-                    s,
-                    d,
-                    a,
-                    ad,
-                    m1,
-                    m2,
-                    w,
-                    h,
-                    lo,
-                    hi,
-                    r4,
-                    Mode::Canon64,
-                )
-            }
-            #[cfg(target_arch = "x86_64")]
-            fn go_v3<const B: bool, const V: bool, const K: bool, const R: bool>(
-                t: archmage::X64V3Token,
-                s: &[f32],
-                d: &[f32],
-                a: &[f32],
-                ad: &[f32],
-                m1: &[f32],
-                m2: &[f32],
-                w: usize,
-                h: usize,
-                lo: f32,
-                hi: f32,
-                r4: Option<Rev4Grad<'_>>,
-            ) -> GradientAccum {
-                gradient_block_kernel_canon64_vec_v3::<crate::featcanon::LanesF64, B, V, K, R, false>(
-                    t,
-                    s,
-                    d,
-                    a,
-                    ad,
-                    m1,
-                    m2,
-                    w,
-                    h,
-                    lo,
-                    hi,
-                    r4,
-                    Mode::Canon64,
-                )
-            }
-            #[cfg(all(target_arch = "x86_64", feature = "avx512"))]
-            fn go_v4<const B: bool, const V: bool, const K: bool, const R: bool>(
-                t: archmage::X64V4Token,
-                s: &[f32],
-                d: &[f32],
-                a: &[f32],
-                ad: &[f32],
-                m1: &[f32],
-                m2: &[f32],
-                w: usize,
-                h: usize,
-                lo: f32,
-                hi: f32,
-                r4: Option<Rev4Grad<'_>>,
-            ) -> GradientAccum {
-                gradient_block_kernel_canon64_vec_v4::<crate::featcanon::LanesF64, B, V, K, R, false>(
-                    t,
-                    s,
-                    d,
-                    a,
-                    ad,
-                    m1,
-                    m2,
-                    w,
-                    h,
-                    lo,
-                    hi,
-                    r4,
-                    Mode::Canon64,
-                )
-            }
-            #[cfg(all(target_arch = "x86_64", feature = "avx512"))]
-            fn go_v4x<const B: bool, const V: bool, const K: bool, const R: bool>(
-                t: archmage::X64V4xToken,
-                s: &[f32],
-                d: &[f32],
-                a: &[f32],
-                ad: &[f32],
-                m1: &[f32],
-                m2: &[f32],
-                w: usize,
-                h: usize,
-                lo: f32,
-                hi: f32,
-                r4: Option<Rev4Grad<'_>>,
-            ) -> GradientAccum {
-                gradient_block_kernel_canon64_vec_v4x::<crate::featcanon::LanesF64, B, V, K, R, false>(
-                    t,
-                    s,
-                    d,
-                    a,
-                    ad,
-                    m1,
-                    m2,
-                    w,
-                    h,
-                    lo,
-                    hi,
-                    r4,
-                    Mode::Canon64,
-                )
-            }
-            let mut rng = Rng(0x6752_4144_5F43_4153);
-            let mut compiled = 0usize;
-            gradient_cases!(
-                "scalar",
-                go_scalar,
-                archmage::ScalarToken::summon().expect("infallible"),
-                rng,
-                compiled
-            );
-            #[cfg(target_arch = "x86_64")]
-            if let Some(t) = archmage::X64V3Token::summon() {
-                gradient_cases!("v3", go_v3, t, rng, compiled);
-            }
-            #[cfg(all(target_arch = "x86_64", feature = "avx512"))]
-            if let Some(t) = archmage::X64V4Token::summon() {
-                gradient_cases!("v4", go_v4, t, rng, compiled);
-            }
-            #[cfg(all(target_arch = "x86_64", feature = "avx512"))]
-            if let Some(t) = archmage::X64V4xToken::summon() {
-                gradient_cases!("v4x", go_v4x, t, rng, compiled);
-            }
-            assert!(compiled >= 1);
-        }
-    }
 }
 

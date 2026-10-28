@@ -410,13 +410,6 @@ pub enum FormulaRevision {
 
 impl FormulaRevision {
 
-    /// Whether the v2 `ringing` family measures the local-mean-removed error
-    /// ([`Self::Rev6`]'s `ringhpm` era) rather than the raw pixel error.
-    /// Revision 7 returns to the raw error.
-    pub(crate) const fn ring_high_pass(self) -> bool {
-        false
-    }
-
     /// Whether the `globaff` family (f1867..1890) is computed at this revision.
     pub(crate) const fn computes_globaff(self) -> bool {
         matches!(self, Self::Rev7)

@@ -122,60 +122,6 @@ pub(crate) mod tests {
         }
     }
 
-    /// f64 accumulation shows no cancellation on flat high-value inputs:
-    /// scatter one large constant into the f64 accumulators and compare
-    /// against the n·v algebraic reference — the running sums must stay
-    /// within a tiny relative bound (1e-12), i.e. no catastrophic
-    /// cancellation or drift, not merely "approximately" right.
-    #[test]
-    fn rev4_accumulators_flat_no_cancellation() {
-        const N: usize = 200_000;
-        let big = 0.75f64; // high-value flat term
-        // RingAccum: Σ ring·h_k — constant ring ⇒ fixed hat weights.
-        let mut ring = RingAccum::default();
-        let h = rev4_hats(&RINGBASIS_UC, rev4_u(big));
-        for _ in 0..N {
-            for (b, h) in ring.bins.iter_mut().zip(h.iter()) {
-                b.add64(0, big * h);
-            }
-        }
-        for (k, (b, &h)) in ring.bins.iter().zip(h.iter()).enumerate() {
-            let b = b.fin();
-            let expect = N as f64 * big * h;
-            let rel = ((b - expect) / expect).abs();
-            assert!(
-                rel < 1e-10 || expect == 0.0 && b == 0.0,
-                "ring bin {k} drifted on flat input: {b} vs {expect} (rel {rel:e})",
-            );
-        }
-        // FlatAccum: Σ hfg over flat pixels ≈ N · hfg.
-        let mut flat = FlatAccum::default();
-        for _ in 0..N {
-            flat.hfg.add64(0, big);
-            flat.n += 1;
-        }
-        let expect = N as f64 * big;
-        assert!(
-            ((flat.hfg.fin() - expect) / expect).abs() < 1e-10,
-            "flat hfg drifted: {:?} vs {expect}",
-            flat.hfg
-        );
-        // GridblkAccum signed sums over an alternating ±big pattern: the
-        // equal-magnitude pairs cancel EXACTLY (same-bits add/sub), and
-        // |ẽ| stays on the algebraic bound.
-        let mut g = GridblkAccum::default();
-        for i in 0..N {
-            g.signed_v[0] += if i % 2 == 0 { big } else { -big };
-            g.abs_v[0] += big;
-        }
-        assert_eq!(g.signed_v[0].to_bits(), 0.0f64.to_bits());
-        assert!(
-            ((g.abs_v[0] - expect) / expect).abs() < 1e-10,
-            "gridblk abs drifted: {} vs {expect}",
-            g.abs_v[0]
-        );
-    }
-
     /// ERA-2 STRUCTURAL GATE: the properties the break actually rests on.
     ///
     /// **A correction the first version of this test earned.** It originally

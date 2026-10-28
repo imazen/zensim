@@ -1746,17 +1746,11 @@ fn dense_block_kernel_at_revision(
     width: usize,
     height: usize,
     transducer_bank: bool,
-    r4: Option<Rev4Dense<'_>>,
     revision: FormulaRevision,
 ) -> DenseAccum {
-    // rev4canon: the computation's own mode selects the scalar
-    // `Pool`-generic canon body — `LanesF64` (c64) at Rev4, the oracle arms
-    // under `ZENSIM_FEATCANON` (`LanesF32` replays era-2 bitwise — the
-    // superseded c32 canon). `compute_mode()` is `mode(comp_rev)` here (see
-    // it for the guarantee); `Off` at every revision < 4 keeps the shipped
-    // era-1/era-2 dispatch byte-for-byte.
-    let mode = crate::featcanon::mode(revision);
-    if revision >= FormulaRevision::Rev5 && matches!(mode, crate::featcanon::Mode::Canon64) {
+    // Revisions 5 and 7 run the 16-lane canonical body (revision 7 with row
+    // lanes); revision 1 keeps the era-2 production body.
+    if crate::featcanon::mode(revision).active() {
         let acc = if revision.row_lanes() {
             incant!(
                 dense_block_kernel_canon64_vec::<crate::featcanon::Lanes16F64, true>(
@@ -1770,7 +1764,6 @@ fn dense_block_kernel_at_revision(
                 width,
                 height,
                 transducer_bank,
-                r4,
                 revision,
                 ),
                 [v4x, v4, v3, neon, wasm128, scalar]
@@ -1788,39 +1781,12 @@ fn dense_block_kernel_at_revision(
                 width,
                 height,
                 transducer_bank,
-                r4,
                 revision,
                 ),
                 [v4x, v4, v3, neon, wasm128, scalar]
             )
         };
         return acc;
-    }
-    if mode.active() {
-        match mode {
-            crate::featcanon::Mode::Canon64 => {
-                // canon64: the `LanesF64` canonical arm — tier-dispatched;
-                // scalar/wasm128 keep the generic scalar body.
-                return incant!(
-                    dense_block_kernel_canon64_vec::<crate::featcanon::LanesF64, false>(
-                        src,
-                        dst,
-                        mu1,
-                        mu2,
-                        ssq,
-                        s12,
-                        activity,
-                        width,
-                        height,
-                        transducer_bank,
-                        r4,
-                        revision,
-                    ),
-                    [v4x, v4, v3, neon, wasm128, scalar]
-                );
-            }
-            crate::featcanon::Mode::Off => unreachable!("active() excludes Off"),
-        }
     }
     dense_block_kernel_era2(
         src,
@@ -1833,7 +1799,6 @@ fn dense_block_kernel_at_revision(
         width,
         height,
         transducer_bank,
-        r4,
     )
 }
 
@@ -2114,16 +2079,12 @@ fn gradient_block_kernel_generic<
     height: usize,
     bv_delta_lo: f32,
     bv_delta_hi: f32,
-    mut r4: Option<Rev4Grad<'_>>,
 ) -> GradientAccum {
     // Revision 7's cancellation-free forms, by the process revision.
     let stable = crate::ssim_form::active_revision().stable_forms();
     debug_assert_eq!(src_h.len(), width * (height + 2));
     debug_assert_eq!(dst_h.len(), width * (height + 2));
     debug_assert_eq!(activity.len(), width * height);
-    if let Some((m, _)) = r4.as_ref().and_then(|r| r.bleed.as_ref()) {
-        debug_assert_eq!(m.len(), width * height);
-    }
     if BV_DSTACT {
         debug_assert!(BANDVIS, "BV_DSTACT is a BANDVIS refinement");
         debug_assert_eq!(act_dst.len(), width * height);
@@ -2144,9 +2105,7 @@ fn gradient_block_kernel_generic<
 
     let mut acc = GradientAccum::default();
 
-    let bank = r4
-        .as_ref()
-        .map_or_else(|| GmsBankWork::new(1, None), |r| r.bank);
+    let bank = GmsBankWork::new(1, None);
     if let Some(chroma) = bank.chroma {
         debug_assert_eq!(chroma.reference.len(), width * height);
         debug_assert_eq!(chroma.distorted.len(), width * height);
@@ -2178,7 +2137,6 @@ fn gradient_block_kernel_generic<
     let scalar_pixel = |x: usize,
                         y: usize,
                         acc: &mut GradientAccum,
-                        r4: &mut Option<Rev4Grad<'_>>,
                         bank_row: &mut [GmsBankCell; 5],
                         chroma_row: &mut [GmsBankCell; 5]| {
         let xl = x.saturating_sub(1);
@@ -2225,17 +2183,6 @@ fn gradient_block_kernel_generic<
         acc.sum_ringing += ring_i;
         // REV4: C2's ring bins + C4's outside-mask bleed — same values,
         // scalar per lane like the SIMD arm's `to_array()` tail.
-        if let Some(r4) = r4.as_mut() {
-            rev4_grad_pixel(
-                r4,
-                &RINGBASIS_UC,
-                ring_i,
-                grad_src_mag,
-                grad_dst_mag,
-                y * width + x,
-                x & 7,
-            );
-        }
 
         let edge_excess = bounded_excess(grad_dst_mag, grad_src_mag, C_BAND_DST);
         let src_smooth_b = 1.0 - saturate(grad_src_mag, C_BAND_SRC);
@@ -2304,7 +2251,7 @@ fn gradient_block_kernel_generic<
         let row_d = (y + 2) * width;
         let act_row = y * width;
 
-        scalar_pixel(0, y, &mut acc, &mut r4, &mut bank_row, &mut chroma_row);
+        scalar_pixel(0, y, &mut acc, &mut bank_row, &mut chroma_row);
         if width > 2 {
             let interior_end = width - 1;
             let interior_w = interior_end - 1; // pixels [1, width-2]
@@ -2369,22 +2316,6 @@ fn gradient_block_kernel_generic<
                 // REV4: C2 ring bins + C4 outside-mask bleed — scalarized
                 // per lane (the §A.14 register-pressure pattern; the
                 // u-domain bit lookup cannot vectorize anyway).
-                if let Some(r4) = r4.as_mut() {
-                    let ring_a = ring_i.to_array();
-                    let gs_a = grad_src_mag.to_array();
-                    let gd_a = grad_dst_mag.to_array();
-                    for lane in 0..8 {
-                        rev4_grad_pixel(
-                            r4,
-                            &RINGBASIS_UC,
-                            ring_a[lane] as f64,
-                            gs_a[lane] as f64,
-                            gd_a[lane] as f64,
-                            act_row + x + lane,
-                            lane,
-                        );
-                    }
-                }
 
                 let edge_excess = bounded_excess_v(token, grad_dst_mag, grad_src_mag, c_band_dst);
                 let src_smooth_b = one - saturate_v(token, grad_src_mag, c_band_src);
@@ -2440,14 +2371,13 @@ fn gradient_block_kernel_generic<
             }
 
             for x in chunk_end..=interior_end - 1 {
-                scalar_pixel(x, y, &mut acc, &mut r4, &mut bank_row, &mut chroma_row);
+                scalar_pixel(x, y, &mut acc, &mut bank_row, &mut chroma_row);
             }
         }
         scalar_pixel(
             width - 1,
             y,
             &mut acc,
-            &mut r4,
             &mut bank_row,
             &mut chroma_row,
         );
@@ -2472,7 +2402,6 @@ fn gradient_block_kernel_entry(
     activity: &[f32],
     width: usize,
     height: usize,
-    r4: Option<Rev4Grad<'_>>,
 ) -> GradientAccum {
     gradient_block_kernel_generic::<_, false, false, false>(
         token,
@@ -2484,137 +2413,6 @@ fn gradient_block_kernel_entry(
         height,
         0.0,
         0.0,
-        r4,
-    )
-}
-
-#[magetypes(v4x, v4, v3, neon, wasm128, scalar)]
-fn gradient_block_kernel_entry_bandvis(
-    token: Token,
-    src: &[f32],
-    dst: &[f32],
-    activity: &[f32],
-    width: usize,
-    height: usize,
-    bv_delta_lo: f32,
-    bv_delta_hi: f32,
-    r4: Option<Rev4Grad<'_>>,
-) -> GradientAccum {
-    gradient_block_kernel_generic::<_, true, false, false>(
-        token,
-        src,
-        dst,
-        activity,
-        &[],
-        width,
-        height,
-        bv_delta_lo,
-        bv_delta_hi,
-        r4,
-    )
-}
-
-#[magetypes(v4x, v4, v3, neon, wasm128, scalar)]
-fn gradient_block_kernel_entry_bandvis_dstact(
-    token: Token,
-    src: &[f32],
-    dst: &[f32],
-    activity: &[f32],
-    act_dst: &[f32],
-    width: usize,
-    height: usize,
-    bv_delta_lo: f32,
-    bv_delta_hi: f32,
-    r4: Option<Rev4Grad<'_>>,
-) -> GradientAccum {
-    gradient_block_kernel_generic::<_, true, true, false>(
-        token,
-        src,
-        dst,
-        activity,
-        act_dst,
-        width,
-        height,
-        bv_delta_lo,
-        bv_delta_hi,
-        r4,
-    )
-}
-
-#[magetypes(v4x, v4, v3, neon, wasm128, scalar)]
-fn gradient_block_kernel_entry_gmsbank(
-    token: Token,
-    src: &[f32],
-    dst: &[f32],
-    activity: &[f32],
-    width: usize,
-    height: usize,
-    r4: Option<Rev4Grad<'_>>,
-) -> GradientAccum {
-    gradient_block_kernel_generic::<_, false, false, true>(
-        token,
-        src,
-        dst,
-        activity,
-        &[],
-        width,
-        height,
-        0.0,
-        0.0,
-        r4,
-    )
-}
-
-#[magetypes(v4x, v4, v3, neon, wasm128, scalar)]
-fn gradient_block_kernel_entry_bandvis_gmsbank(
-    token: Token,
-    src: &[f32],
-    dst: &[f32],
-    activity: &[f32],
-    width: usize,
-    height: usize,
-    bv_delta_lo: f32,
-    bv_delta_hi: f32,
-    r4: Option<Rev4Grad<'_>>,
-) -> GradientAccum {
-    gradient_block_kernel_generic::<_, true, false, true>(
-        token,
-        src,
-        dst,
-        activity,
-        &[],
-        width,
-        height,
-        bv_delta_lo,
-        bv_delta_hi,
-        r4,
-    )
-}
-
-#[magetypes(v4x, v4, v3, neon, wasm128, scalar)]
-fn gradient_block_kernel_entry_bandvis_dstact_gmsbank(
-    token: Token,
-    src: &[f32],
-    dst: &[f32],
-    activity: &[f32],
-    act_dst: &[f32],
-    width: usize,
-    height: usize,
-    bv_delta_lo: f32,
-    bv_delta_hi: f32,
-    r4: Option<Rev4Grad<'_>>,
-) -> GradientAccum {
-    gradient_block_kernel_generic::<_, true, true, true>(
-        token,
-        src,
-        dst,
-        activity,
-        act_dst,
-        width,
-        height,
-        bv_delta_lo,
-        bv_delta_hi,
-        r4,
     )
 }
 
@@ -2784,7 +2582,6 @@ fn gradient_border_pixel<
     bv_lo: f32,
     bv_hi: f32,
     acc: &mut GradientAccum,
-    r4: &mut Option<Rev4Grad<'_>>,
     bank: GmsBankWork<'_>,
     bank_row: &mut [GmsBankCellVar; 5],
     chroma_row: &mut [GmsBankCellVar; 5],
@@ -2831,17 +2628,6 @@ fn gradient_border_pixel<
     acc.sum_gms += t.g;
     acc.sum_gms2 += t.g2;
     acc.sum_ringing += t.ring;
-    if let Some(r4) = r4.as_mut() {
-        rev4_grad_pixel(
-            r4,
-            &RINGBASIS_UC,
-            t.ring,
-            t.gsrc,
-            t.gdst,
-            y * width + x,
-            x & 7,
-        );
-    }
     acc.sum_banding += t.band;
     if BANDVIS {
         acc.sum_bv_gain += t.bv_gain;
@@ -2881,7 +2667,6 @@ fn gradient_interior_elem_canon<
     bank: GmsBankWork<'_>,
     bank_row: &mut [GmsBankCellVar; 5],
     chroma_row: &mut [GmsBankCellVar; 5],
-    r4: &mut Option<Rev4Grad<'_>>,
     r_gsrc: &mut Q,
     r_gdst: &mut Q,
     r_gms: &mut Q,
@@ -2965,17 +2750,6 @@ fn gradient_interior_elem_canon<
     let edge_r = sat32(gsrc, C_RING_EDGE as f32);
     let ring_i = err_b * act_b * (1.0f32 - edge_r);
     r_ring.add(lane, ring_i);
-    if let Some(r4) = r4.as_mut() {
-        rev4_grad_pixel(
-            r4,
-            &RINGBASIS_UC,
-            ring_i as f64,
-            gsrc as f64,
-            gdst as f64,
-            act_row + x,
-            x & 7,
-        );
-    }
 
     let edge_excess = bex32(gdst, gsrc, C_BAND_DST as f32);
     let src_smooth_b = 1.0f32 - sat32(gsrc, C_BAND_SRC as f32);
@@ -3053,13 +2827,10 @@ fn gradient_block_kernel_canon<
     height: usize,
     bv_lo: f32,
     bv_hi: f32,
-    mut r4: Option<Rev4Grad<'_>>,
     mode: crate::featcanon::Mode,
 ) -> GradientAccum {
     let mut acc = GradientAccum::default();
-    let bank = r4
-        .as_ref()
-        .map_or_else(|| GmsBankWork::new(1, None), |r| r.bank);
+    let bank = GmsBankWork::new(1, None);
     let mut bank_acc: [GmsBankCellVar; 5] = std::array::from_fn(|_| GmsBankCellVar::for_mode(mode));
     let mut chroma_acc: [GmsBankCellVar; 5] =
         std::array::from_fn(|_| GmsBankCellVar::for_mode(mode));
@@ -3089,7 +2860,6 @@ fn gradient_block_kernel_canon<
             bv_lo,
             bv_hi,
             &mut acc,
-            &mut r4,
             bank,
             &mut bank_row,
             &mut chroma_row,
@@ -3144,7 +2914,6 @@ fn gradient_block_kernel_canon<
                         bank,
                         &mut bank_row,
                         &mut chroma_row,
-                        &mut r4,
                         q_gsrc,
                         q_gdst,
                         q_gms,
@@ -3188,7 +2957,6 @@ fn gradient_block_kernel_canon<
                     bank,
                     &mut bank_row,
                     &mut chroma_row,
-                    &mut r4,
                     &mut *r_gsrc,
                     &mut *r_gdst,
                     &mut *r_gms,
@@ -3217,7 +2985,6 @@ fn gradient_block_kernel_canon<
             bv_lo,
             bv_hi,
             &mut acc,
-            &mut r4,
             bank,
             &mut bank_row,
             &mut chroma_row,
@@ -3380,14 +3147,10 @@ fn gradient_block_kernel_canon64_vec<
     height: usize,
     bv_lo: f32,
     bv_hi: f32,
-    r4: Option<Rev4Grad<'_>>,
     mode: crate::featcanon::Mode,
 ) -> GradientAccum {
-    let mut r4 = r4;
     let mut acc = GradientAccum::default();
-    let bank = r4
-        .as_ref()
-        .map_or_else(|| GmsBankWork::new(1, None), |r| r.bank);
+    let bank = GmsBankWork::new(1, None);
     let mut bank_acc: [GmsBankCellVar; 5] = std::array::from_fn(|_| GmsBankCellVar::for_mode(mode));
     let mut chroma_acc: [GmsBankCellVar; 5] =
         std::array::from_fn(|_| GmsBankCellVar::for_mode(mode));
@@ -3478,7 +3241,6 @@ fn gradient_block_kernel_canon64_vec<
             bv_lo,
             bv_hi,
             &mut acc,
-            &mut r4,
             bank,
             &mut bank_row,
             &mut chroma_row,
@@ -3509,7 +3271,7 @@ fn gradient_block_kernel_canon64_vec<
             // one eight-wide step each (`edge8!`), whose lanes are the scalar
             // element's values, added in ascending x.
             let head_end = interior_end.min(8);
-            let vec_edges = !BANK && r4.is_none() && interior_end >= 9;
+            let vec_edges = !BANK && interior_end >= 9;
             macro_rules! edge8 {
                 ($xs:expr, $from:expr, $to:expr) => {{
                     let xs: usize = $xs;
@@ -3590,7 +3352,6 @@ fn gradient_block_kernel_canon64_vec<
                     bank,
                     &mut bank_row,
                     &mut chroma_row,
-                    &mut r4,
                     &mut *r_gsrc,
                     &mut *r_gdst,
                     &mut *r_gms,
@@ -3639,7 +3400,7 @@ fn gradient_block_kernel_canon64_vec<
             // eight-wide. Every term is element-wise and every pool lane adds
             // the same values in the same order, so the bits are unchanged.
             // The gmsbank and rev4 bank paths keep the eight-wide step.
-            let wide = rev7 && steps_sixteen::<Token>() && !BANK && r4.is_none() && n >= 3;
+            let wide = rev7 && steps_sixteen::<Token>() && !BANK && n >= 3;
             let m16 = if wide { (n - 1) / 2 } else { 0 };
             let mut k = 0usize;
             while k < n {
@@ -3823,22 +3584,6 @@ fn gradient_block_kernel_canon64_vec<
                 gpool_add!(r_gms, r_gms32, x0, g);
                 gpool_add!(r_gms2, r_gms232, x0, g2);
                 gpool_add!(r_ring, r_ring32, x0, ring_i);
-                if let Some(r4) = r4.as_mut() {
-                    let ra = ring_i.to_array();
-                    let gs = gsrc.to_array();
-                    let gd = gdst.to_array();
-                    for l in 0..8 {
-                        rev4_grad_pixel(
-                            r4,
-                            &RINGBASIS_UC,
-                            ra[l] as f64,
-                            gs[l] as f64,
-                            gd[l] as f64,
-                            act_row + x0 + l,
-                            l,
-                        );
-                    }
-                }
                 gpool_add!(r_band, r_band32, x0, band);
                 if BANDVIS {
                     gpool_add!(r_bv_gain, r_bv_gain32, x0, bv_gain);
@@ -3892,7 +3637,6 @@ fn gradient_block_kernel_canon64_vec<
                     bank,
                     &mut bank_row,
                     &mut chroma_row,
-                    &mut r4,
                     &mut *r_gsrc,
                     &mut *r_gdst,
                     &mut *r_gms,
@@ -3921,7 +3665,6 @@ fn gradient_block_kernel_canon64_vec<
             bv_lo,
             bv_hi,
             &mut acc,
-            &mut r4,
             bank,
             &mut bank_row,
             &mut chroma_row,
@@ -3970,11 +3713,10 @@ fn gradient_block_kernel_canon64_vec_scalar<
     height: usize,
     bv_lo: f32,
     bv_hi: f32,
-    r4: Option<Rev4Grad<'_>>,
     mode: crate::featcanon::Mode,
 ) -> GradientAccum {
     gradient_block_kernel_canon::<P, BANDVIS, BV_DSTACT, BANK, HPR, R7>(
-        src_h, dst_h, activity, act_dst, mu1, mu2, width, height, bv_lo, bv_hi, r4, mode,
+        src_h, dst_h, activity, act_dst, mu1, mu2, width, height, bv_lo, bv_hi,  mode,
     )
 }
 
@@ -3999,11 +3741,10 @@ fn gradient_block_kernel_canon64_vec_wasm128<
     height: usize,
     bv_lo: f32,
     bv_hi: f32,
-    r4: Option<Rev4Grad<'_>>,
     mode: crate::featcanon::Mode,
 ) -> GradientAccum {
     gradient_block_kernel_canon::<P, BANDVIS, BV_DSTACT, BANK, HPR, R7>(
-        src_h, dst_h, activity, act_dst, mu1, mu2, width, height, bv_lo, bv_hi, r4, mode,
+        src_h, dst_h, activity, act_dst, mu1, mu2, width, height, bv_lo, bv_hi,  mode,
     )
 }
 
@@ -4029,14 +3770,15 @@ fn gradient_block_kernel_canon64_vec_neon<
     height: usize,
     bv_lo: f32,
     bv_hi: f32,
-    r4: Option<Rev4Grad<'_>>,
     mode: crate::featcanon::Mode,
 ) -> GradientAccum {
     gradient_block_kernel_canon::<P, BANDVIS, BV_DSTACT, BANK, HPR, R7>(
-        src_h, dst_h, activity, act_dst, mu1, mu2, width, height, bv_lo, bv_hi, r4, mode,
+        src_h, dst_h, activity, act_dst, mu1, mu2, width, height, bv_lo, bv_hi,  mode,
     )
 }
 
+/// The gradient block kernel at `revision`: the 16-lane canonical body at revision 5 and 7
+/// (with revision 7's row lanes), the production SIMD bodies at revision 1.
 #[allow(clippy::too_many_arguments)]
 fn gradient_block_kernel_at_revision(
     src: &[f32],
@@ -4045,126 +3787,31 @@ fn gradient_block_kernel_at_revision(
     mu: Option<(&[f32], &[f32])>,
     width: usize,
     height: usize,
-    bandvis: Option<(f32, f32)>,
-    bv_act_dst: Option<&[f32]>,
-    r4: Option<Rev4Grad<'_>>,
-    gmsbank: bool,
     revision: FormulaRevision,
 ) -> GradientAccum {
-    // rev4canon: the computation's own mode routes through the scalar
-    // `Pool`-generic mirror (same halo contract, same borders) — `LanesF64`
-    // (the Rev4 canon) or the oracle arms under `ZENSIM_FEATCANON`.
-    // `compute_mode()` is `mode(comp_rev)` here (see it for the guarantee);
-    // `Off` below Rev4 keeps the shipped SIMD bodies byte-for-byte.
-    // `bv_act_dst` is ignored without `bandvis`, as in the production match
-    // below.
-    let mode = crate::featcanon::mode(revision);
-    // Revision 6 owns the high-pass ringing form; `ZENSIM_RING_FORM=hpm` is
-    // the per-process research arm of the same arithmetic at Rev4/Rev5.
-    let hp = revision.ring_high_pass() || active_ring_form() == RingForm::HighPassMu;
-    assert!(
-        !hp || ((matches!(mode, crate::featcanon::Mode::Canon64)) && mu.is_some()),
-        "the high-pass ringing form (revision 6 or ZENSIM_RING_FORM=hpm) is implemented on \
-         the canonical gradient kernel (formula revision 4 or later, default ZENSIM_FEATCANON, \
-         or the exact oracle) with local-mean planes only"
-    );
-    let (mu1, mu2) = mu.unwrap_or((&[], &[]));
-    if mode.active() {
-        use crate::featcanon::Mode;
-        let m = mode;
-        // canon64: the `LanesF64` arm, tier-dispatched — scalar/wasm128
-        // keep the generic scalar canonical body.
-        // `ZENSIM_RING_FORM` selects the ringing arm at compile time per
-        // instantiation (`HPR`), so the raw form's code is unchanged.
-        macro_rules! go64 {
-            ($b:literal, $v:literal, $k:literal, $act_dst:expr, $lo:expr, $hi:expr) => {
-                match (revision >= FormulaRevision::Rev5, hp, revision.row_lanes()) {
-                    (true, false, false) => incant!(
-                        gradient_block_kernel_canon64_vec::<crate::featcanon::Lanes16F64, $b, $v, $k, false, false>(
-                            src, dst, activity, $act_dst, mu1, mu2, width, height, $lo, $hi, r4, m,
-                        ),
-                        [v4x, v4, v3, neon, wasm128, scalar]
-                    ),
-                    (true, true, false) => incant!(
-                        gradient_block_kernel_canon64_vec::<crate::featcanon::Lanes16F64, $b, $v, $k, true, false>(
-                            src, dst, activity, $act_dst, mu1, mu2, width, height, $lo, $hi, r4, m,
-                        ),
-                        [v4x, v4, v3, neon, wasm128, scalar]
-                    ),
-                    // Revision 7 (`rowlanes`): raw ringing, as revision 5 (owner, 2026-10-25) ...
-                    (true, false, true) => incant!(
-                        gradient_block_kernel_canon64_vec::<crate::featcanon::Lanes16F64, $b, $v, $k, false, true>(
-                            src, dst, activity, $act_dst, mu1, mu2, width, height, $lo, $hi, r4, m,
-                        ),
-                        [v4x, v4, v3, neon, wasm128, scalar]
-                    ),
-                    // ... or the high-pass form under the `ZENSIM_RING_FORM=hpm` research arm.
-                    (true, true, true) => incant!(
-                        gradient_block_kernel_canon64_vec::<crate::featcanon::Lanes16F64, $b, $v, $k, true, true>(
-                            src, dst, activity, $act_dst, mu1, mu2, width, height, $lo, $hi, r4, m,
-                        ),
-                        [v4x, v4, v3, neon, wasm128, scalar]
-                    ),
-                    (false, _, true) => unreachable!("revision 7 implies revision 5's lanes"),
-                    (false, false, false) => incant!(
-                        gradient_block_kernel_canon64_vec::<crate::featcanon::LanesF64, $b, $v, $k, false, false>(
-                            src, dst, activity, $act_dst, mu1, mu2, width, height, $lo, $hi, r4, m,
-                        ),
-                        [v4x, v4, v3, neon, wasm128, scalar]
-                    ),
-                    (false, true, false) => incant!(
-                        gradient_block_kernel_canon64_vec::<crate::featcanon::LanesF64, $b, $v, $k, true, false>(
-                            src, dst, activity, $act_dst, mu1, mu2, width, height, $lo, $hi, r4, m,
-                        ),
-                        [v4x, v4, v3, neon, wasm128, scalar]
-                    ),
-                }
-            };
-        }
-        return match mode {
-            Mode::Canon64 => match (bandvis, bv_act_dst, gmsbank) {
-                (None, _, false) => go64!(false, false, false, &[], 0.0, 0.0),
-                (None, _, true) => go64!(false, false, true, &[], 0.0, 0.0),
-                (Some((lo, hi)), None, false) => go64!(true, false, false, &[], lo, hi),
-                (Some((lo, hi)), None, true) => go64!(true, false, true, &[], lo, hi),
-                (Some((lo, hi)), Some(ad), false) => go64!(true, true, false, ad, lo, hi),
-                (Some((lo, hi)), Some(ad), true) => go64!(true, true, true, ad, lo, hi),
-            },
-            Mode::Off => unreachable!("active() excludes Off"),
+    let m = crate::featcanon::mode(revision);
+    if m.active() {
+        let (mu1, mu2) = mu.unwrap_or((&[], &[]));
+        return if revision.row_lanes() {
+            incant!(
+                gradient_block_kernel_canon64_vec::<crate::featcanon::Lanes16F64, false, false, false, false, true>(
+                    src, dst, activity, &[], mu1, mu2, width, height, 0.0, 0.0, m,
+                ),
+                [v4x, v4, v3, neon, wasm128, scalar]
+            )
+        } else {
+            incant!(
+                gradient_block_kernel_canon64_vec::<crate::featcanon::Lanes16F64, false, false, false, false, false>(
+                    src, dst, activity, &[], mu1, mu2, width, height, 0.0, 0.0, m,
+                ),
+                [v4x, v4, v3, neon, wasm128, scalar]
+            )
         };
     }
-    match (bandvis, bv_act_dst, gmsbank) {
-        (None, _, false) => incant!(
-            gradient_block_kernel_entry(src, dst, activity, width, height, r4),
-            [v4x, v4, v3, neon, wasm128, scalar]
-        ),
-        (None, _, true) => incant!(
-            gradient_block_kernel_entry_gmsbank(src, dst, activity, width, height, r4),
-            [v4x, v4, v3, neon, wasm128, scalar]
-        ),
-        (Some((lo, hi)), None, false) => incant!(
-            gradient_block_kernel_entry_bandvis(src, dst, activity, width, height, lo, hi, r4),
-            [v4x, v4, v3, neon, wasm128, scalar]
-        ),
-        (Some((lo, hi)), None, true) => incant!(
-            gradient_block_kernel_entry_bandvis_gmsbank(
-                src, dst, activity, width, height, lo, hi, r4
-            ),
-            [v4x, v4, v3, neon, wasm128, scalar]
-        ),
-        (Some((lo, hi)), Some(act_dst), false) => incant!(
-            gradient_block_kernel_entry_bandvis_dstact(
-                src, dst, activity, act_dst, width, height, lo, hi, r4
-            ),
-            [v4x, v4, v3, neon, wasm128, scalar]
-        ),
-        (Some((lo, hi)), Some(act_dst), true) => incant!(
-            gradient_block_kernel_entry_bandvis_dstact_gmsbank(
-                src, dst, activity, act_dst, width, height, lo, hi, r4
-            ),
-            [v4x, v4, v3, neon, wasm128, scalar]
-        ),
-    }
+    incant!(
+        gradient_block_kernel_entry(src, dst, activity, width, height),
+        [v4x, v4, v3, neon, wasm128, scalar]
+    )
 }
 
 /// One row of the blockiness lattice, the shared step of every walk: the
