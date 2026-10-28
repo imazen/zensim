@@ -1051,6 +1051,3 @@ impl crate::metric::Zensim {
         self.compute_with_ref_and_diffmap(&precomputed, distorted, options)
     }
 }
-
-#[cfg(test)]
-mod tests {}

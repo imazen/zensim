@@ -177,15 +177,7 @@ pub const C_EDGEWIDTH: f64 = 1e-3;
 /// (`decay = mean_grad(coarser) / (mean_grad(finer) + C_GRAD_DECAY)`).
 pub const C_GRAD_DECAY: f64 = 1e-4;
 
-pub mod idx_append {}
-
 pub(crate) const C_BV: f64 = 1e-4;
-
-pub mod idx_append2 {}
-
-pub mod idx_csfw {}
-
-pub(crate) mod idx_arttype {}
 
 #[derive(Default)]
 struct Rev4CellAccum {}

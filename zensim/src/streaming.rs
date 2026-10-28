@@ -341,137 +341,6 @@ fn redistribute_pow2x_guided_add(
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum CoarseKernel {
-    Nearest,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct CoarseUpsample {
-    kernel: CoarseKernel,
-    mass: bool,
-}
-
-impl CoarseUpsample {
-    pub(crate) const NEAREST: Self = Self {
-        kernel: CoarseKernel::Nearest,
-        mass: false,
-    };
-}
-
-impl CoarseKernel {
-    fn support(self) -> f64 {
-        match self {
-            CoarseKernel::Nearest => 0.5,
-        }
-    }
-
-    fn weight(self, t: f64) -> f64 {
-        let a = t.abs();
-        match self {
-            CoarseKernel::Nearest => f64::from(u8::from(a < 0.5)),
-        }
-    }
-
-    /// Normalized taps `(index, weight)` for each of `n_out` output samples of a 1-D coarse line
-    /// of `n_in` samples upsampled by `factor`.
-    fn taps(self, n_in: usize, n_out: usize, factor: usize) -> Vec<Vec<(usize, f64)>> {
-        let support = self.support();
-        (0..n_out)
-            .map(|x| {
-                let u = (x as f64 + 0.5) / factor as f64 - 0.5;
-                let lo = (u - support).floor() as i64 + 1;
-                let hi = (u + support).ceil() as i64 - 1;
-                let mut taps: Vec<(usize, f64)> = (lo..=hi)
-                    .map(|i| {
-                        let w = self.weight(u - i as f64);
-                        (i.clamp(0, n_in as i64 - 1) as usize, w)
-                    })
-                    .filter(|&(_, w)| w != 0.0)
-                    .collect();
-                let sum: f64 = taps.iter().map(|&(_, w)| w).sum();
-                for t in &mut taps {
-                    t.1 /= sum;
-                }
-                taps
-            })
-            .collect()
-    }
-}
-
-/// Separable kernel upsample of one coarse plane by `factor`, over nearest-neighbour coverage:
-/// returns a `cover_h × dst_w` plane (columns past `src_w·factor` stay zero).
-fn interpolate_pow2x(
-    src: &[f32],
-    src_w: usize,
-    src_h: usize,
-    dst_w: usize,
-    dst_h: usize,
-    factor: usize,
-    kernel: CoarseKernel,
-) -> (Vec<f64>, usize) {
-    let cover_w = (src_w * factor).min(dst_w);
-    let cover_h = (src_h * factor).min(dst_h);
-    let col_taps = kernel.taps(src_w, cover_w, factor);
-    let row_taps = kernel.taps(src_h, cover_h, factor);
-    let mut horiz = vec![0.0f64; src_h * cover_w];
-    for sy in 0..src_h {
-        let srow = &src[sy * src_w..(sy + 1) * src_w];
-        for (x, taps) in col_taps.iter().enumerate() {
-            horiz[sy * cover_w + x] = taps.iter().map(|&(i, w)| w * srow[i] as f64).sum();
-        }
-    }
-    let mut out = vec![0.0f64; cover_h * dst_w];
-    for (y, taps) in row_taps.iter().enumerate() {
-        let orow = &mut out[y * dst_w..y * dst_w + cover_w];
-        for &(sy, w) in taps {
-            for (o, &h) in orow
-                .iter_mut()
-                .zip(&horiz[sy * cover_w..(sy + 1) * cover_w])
-            {
-                *o += w * h;
-            }
-        }
-    }
-    (out, cover_h)
-}
-
-/// Research counterpart of [`upsample_pow2x_add`] for an interpolating [`CoarseUpsample`]:
-/// adds `weight ×` the upsampled coarse plane into `dst`, or, for a `-mass` mode, each cell's
-/// exact nearest-neighbour mass distributed in proportion to the interpolated plane.
-fn upsample_pow2x_kernel_add(
-    src: &[f32],
-    src_w: usize,
-    src_h: usize,
-    dst: &mut [f32],
-    dst_w: usize,
-    dst_h: usize,
-    factor: usize,
-    weight: f32,
-    mode: CoarseUpsample,
-) {
-    debug_assert!(factor >= 2 && mode != CoarseUpsample::NEAREST);
-    let (interp, cover_h) = interpolate_pow2x(src, src_w, src_h, dst_w, dst_h, factor, mode.kernel);
-    if mode.mass {
-        // |interp| + ε as the guide of the mass-conserving redistribution; ε as in the E-JBU guide.
-        let mean_abs = interp.iter().map(|v| v.abs()).sum::<f64>() / interp.len().max(1) as f64;
-        let eps = (mean_abs * 1e-6) as f32 + 1e-20f32;
-        let mut guide = vec![eps; dst_w * dst_h];
-        for (g, v) in guide.iter_mut().zip(&interp) {
-            *g = v.abs() as f32 + eps;
-        }
-        redistribute_pow2x_guided_add(src, src_w, src_h, dst, dst_w, dst_h, factor, weight, &guide);
-        return;
-    }
-    let w = weight as f64;
-    for y in 0..cover_h {
-        let drow = &mut dst[y * dst_w..(y + 1) * dst_w];
-        for (d, &v) in drow.iter_mut().zip(&interp[y * dst_w..(y + 1) * dst_w]) {
-            *d += (w * v) as f32;
-        }
-    }
-}
-
 /// Track background deallocation thread to prevent accumulation on repeated calls.
 #[cfg(all(feature = "threads", not(target_arch = "wasm32")))]
 static DEALLOC_THREAD: Mutex<Option<std::thread::JoinHandle<()>>> = Mutex::new(None);
@@ -3640,11 +3509,6 @@ fn compute_diffmap_from_xyb(
         None
     };
 
-    let upsample = CoarseUpsample::NEAREST;
-    assert!(
-        guide.is_none() || upsample == CoarseUpsample::NEAREST,
-        "guided coarse redistribution and ZENSIM_DIFFMAP_UPSAMPLE are alternative upsamples; set one"
-    );
     for (scale, (dm, dm_w, dm_h)) in scale_diffmaps.iter().enumerate() {
         let blend = scale_blend_weights.get(scale).copied().unwrap_or(0.0);
         if blend <= 0.0 {
@@ -3656,9 +3520,6 @@ fn compute_diffmap_from_xyb(
         match &guide {
             Some(g) if factor > 1 => redistribute_pow2x_guided_add(
                 dm, *dm_w, *dm_h, &mut fused, full_w, full_h, factor, blend, g,
-            ),
-            _ if factor > 1 && upsample != CoarseUpsample::NEAREST => upsample_pow2x_kernel_add(
-                dm, *dm_w, *dm_h, &mut fused, full_w, full_h, factor, blend, upsample,
             ),
             _ => upsample_pow2x_add(dm, *dm_w, *dm_h, &mut fused, full_w, full_h, factor, blend),
         }
