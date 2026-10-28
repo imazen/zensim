@@ -14,7 +14,6 @@ pub(crate) struct BakeScorer<'a> {
     layout: crate::feature_layout::Layout,
     gathered: Vec<f64>,
     inputs: Vec<f32>,
-    standardized: Vec<f64>,
 }
 
 impl<'a> BakeScorer<'a> {
@@ -45,7 +44,6 @@ impl<'a> BakeScorer<'a> {
             layout: crate::feature_layout::declared_layout(model),
             gathered: Vec::new(),
             inputs: Vec::with_capacity(model.caller_input_width()),
-            standardized: Vec::new(),
         })
     }
 
@@ -71,7 +69,6 @@ impl<'a> BakeScorer<'a> {
             &self.layout,
             &mut self.gathered,
             &mut self.inputs,
-            &mut self.standardized,
             features,
             width,
             height,

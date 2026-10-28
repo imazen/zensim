@@ -4611,7 +4611,7 @@ impl VWin {
     /// Seed the initial window (row `y = 0`), `mirror_idx`-identical to the
     /// production init loop.
     fn new(blur: crate::featcanon::BlurMode, p: &VWinPlanes<'_>) -> Self {
-        let seed32 = |plane: &[f32], out: &mut Vec<f32>| {
+        let _seed32 = |plane: &[f32], out: &mut Vec<f32>| {
             if plane.is_empty() {
                 return;
             }
@@ -4666,14 +4666,6 @@ impl VWin {
     /// Advance the window from row `y` to `y + 1` (`vblur_add_idx` /
     /// `vblur_rem_idx` — the production index sequence).
     fn slide(&mut self, y: usize, p: &VWinPlanes<'_>) {
-        let slide32 = |plane: &[f32], out: &mut [f32], ab: usize, rb: usize| {
-            if plane.is_empty() {
-                return;
-            }
-            for x in 0..p.width {
-                out[x] = out[x] + plane[ab + x] - plane[rb + x];
-            }
-        };
         match self {
             Self::F64 {
                 m1,
@@ -6201,6 +6193,7 @@ fn fused_vblur_ssim_canon64_vec_scalar<P: crate::featcanon::Pool64>(
 }
 
 /// Wasm128 sibling of [`fused_vblur_ssim_canon64_vec_scalar`].
+#[cfg(target_arch = "wasm32")]
 #[allow(clippy::too_many_arguments)]
 fn fused_vblur_ssim_canon64_vec_wasm128<P: crate::featcanon::Pool64>(
     _token: archmage::Wasm128Token,
@@ -6287,6 +6280,7 @@ fn fused_vblur_ssim_canon64_vec_wasm128<P: crate::featcanon::Pool64>(
 
 /// NEON runs the scalar canonical body (2026-10-03): NEON vector `max`/`min` propagate NaN where the canon's `f32::max`/
 /// `f64::max` drop it (the REV4VEC CI aarch64 failure), so only the x86_64 fused tiers run a lane-parallel body.
+#[cfg(target_arch = "aarch64")]
 #[allow(clippy::too_many_arguments)]
 fn fused_vblur_ssim_canon64_vec_neon<P: crate::featcanon::Pool64>(
     _token: archmage::NeonToken,
@@ -6700,6 +6694,7 @@ fn fused_vblur_edge_canon64_vec_scalar(
 }
 
 /// Wasm128 sibling of [`fused_vblur_edge_canon64_vec_scalar`].
+#[cfg(target_arch = "wasm32")]
 #[allow(clippy::too_many_arguments)]
 fn fused_vblur_edge_canon64_vec_wasm128(
     _token: archmage::Wasm128Token,
@@ -6736,6 +6731,7 @@ fn fused_vblur_edge_canon64_vec_wasm128(
 
 /// NEON runs the scalar canonical body (2026-10-03): NEON vector `max`/`min` propagate NaN where the canon's `f32::max`/
 /// `f64::max` drop it (the REV4VEC CI aarch64 failure), so only the x86_64 fused tiers run a lane-parallel body.
+#[cfg(target_arch = "aarch64")]
 #[allow(clippy::too_many_arguments)]
 fn fused_vblur_edge_canon64_vec_neon(
     _token: archmage::NeonToken,

@@ -1166,7 +1166,7 @@ impl ComputeSet {
             .union(&SlotSet::from_slots(scattered))
             .clipped_to(layout_width);
         SlotSet::from_slots(slots.iter_slots().filter(|&id| {
-            ((!self.omit_pjnd_fragility
+            (!self.omit_pjnd_fragility
                 || !(v1_total..v2_end).contains(&id)
                 || (id - v1_total) % FEATURES_PER_CHANNEL_V2_TOTAL != idx::PJND_FRAGILITY)
                 && (!self.local_only
@@ -1184,7 +1184,7 @@ impl ComputeSet {
                 && !(self.v1_pools == V1PoolsMode::Full
                     && (peaks_end..v1_total).contains(&id)
                     && crate::feature_defs::def_at(id, n_scales)
-                        .is_some_and(|d| self.pools_at(usize::from(d.scale)) != V1PoolsMode::Full)))
+                        .is_some_and(|d| self.pools_at(usize::from(d.scale)) != V1PoolsMode::Full))
         }))
     }
 
@@ -1485,9 +1485,6 @@ fn run_blur_pass_inner(
     activity: &mut [f32],
     want_v2: bool,
     parallel: bool,
-    // Diagnostic-only: which `fold_timing` scale slot this call's v2-plane
-    // chain is attributed to. Never read by any kernel.
-    t_scale: usize,
     revision: FormulaRevision,
 ) {
 
@@ -1763,7 +1760,7 @@ struct GmsBankWork<'a> {
 }
 
 impl<'a> GmsBankWork<'a> {
-    fn new(channel: usize, chroma: Option<ChromaStrip<'a>>) -> Self {
+    fn new(_channel: usize, chroma: Option<ChromaStrip<'a>>) -> Self {
         Self {
             chroma,
         }
@@ -1847,7 +1844,7 @@ struct GmsBankCellVar {
 
 impl GmsBankCellVar {
     #[inline]
-    fn for_mode(mode: crate::featcanon::Mode) -> Self {
+    fn for_mode() -> Self {
         Self {
         }
     }
@@ -1943,7 +1940,6 @@ fn gradient_block_kernel_generic<T: F32x8Backend + Copy>(
     src_h: &[f32],
     dst_h: &[f32],
     activity: &[f32],
-    act_dst: &[f32],
     width: usize,
     height: usize,
     bv_delta_lo: f32,
@@ -1964,9 +1960,9 @@ fn gradient_block_kernel_generic<T: F32x8Backend + Copy>(
     let c_band_dst = V8::<T>::splat_t(token, C_BAND_DST as f32);
     let c_band_src = V8::<T>::splat_t(token, C_BAND_SRC as f32);
     // append2 BANDVIS constants (dead splats when `BANDVIS == false`).
-    let bv_lo = V8::<T>::splat_t(token, bv_delta_lo);
-    let bv_hi = V8::<T>::splat_t(token, bv_delta_hi);
-    let c_bv = V8::<T>::splat_t(token, C_BV as f32);
+    let _bv_lo = V8::<T>::splat_t(token, bv_delta_lo);
+    let _bv_hi = V8::<T>::splat_t(token, bv_delta_hi);
+    let _c_bv = V8::<T>::splat_t(token, C_BV as f32);
 
     let mut acc = GradientAccum::default();
 
@@ -1975,7 +1971,7 @@ fn gradient_block_kernel_generic<T: F32x8Backend + Copy>(
         debug_assert_eq!(chroma.reference.len(), width * height);
         debug_assert_eq!(chroma.distorted.len(), width * height);
     }
-    let chroma_pixel = |x: usize, y: usize, cells: &mut [GmsBankCell; 5]| {
+    let _chroma_pixel = |x: usize, y: usize, cells: &mut [GmsBankCell; 5]| {
         if let Some(chroma) = bank.chroma {
             let i = y * width + x;
             let h = i + width;
@@ -2002,8 +1998,8 @@ fn gradient_block_kernel_generic<T: F32x8Backend + Copy>(
     let scalar_pixel = |x: usize,
                         y: usize,
                         acc: &mut GradientAccum,
-                        bank_row: &mut [GmsBankCell; 5],
-                        chroma_row: &mut [GmsBankCell; 5]| {
+                        _bank_row: &mut [GmsBankCell; 5],
+                        _chroma_row: &mut [GmsBankCell; 5]| {
         let xl = x.saturating_sub(1);
         let xr = (x + 1).min(width - 1);
         let row = (y + 1) * width; // +1: src_h/dst_h carry 1 halo row up front
@@ -2066,7 +2062,7 @@ fn gradient_block_kernel_generic<T: F32x8Backend + Copy>(
 
             let (mut r_gms, mut r_gms2, mut r_ring, mut r_band) = (zero, zero, zero, zero);
             let (mut r_gsrc, mut r_gdst) = (zero, zero);
-            let (mut r_bv_gain, mut r_bv_loss) = (zero, zero);
+            let (mut _r_bv_gain, mut _r_bv_loss) = (zero, zero);
 
             let mut x = 1usize;
             while x < chunk_end {
@@ -2154,7 +2150,6 @@ fn gradient_block_kernel_entry(
         src,
         dst,
         activity,
-        &[],
         width,
         height,
         0.0,
@@ -2194,14 +2189,9 @@ pub(crate) fn gradient_terms64(
     src_h: &[f32],
     dst_h: &[f32],
     activity: &[f32],
-    act_dst: &[f32],
-    mu1: &[f32],
-    mu2: &[f32],
     width: usize,
     x: usize,
     y: usize,
-    bv_lo: f64,
-    bv_hi: f64,
     stable: bool,
 ) -> GradTerms64 {
     let xl = x.saturating_sub(1);
@@ -2240,7 +2230,7 @@ pub(crate) fn gradient_terms64(
     let src_smooth_b = 1.0 - saturate(gsrc, C_BAND_SRC);
     let band = edge_excess * src_smooth_b;
 
-    let (bv_gain, bv_loss) = (0.0, 0.0);
+    let (_bv_gain, _bv_loss) = (0.0, 0.0);
 
     GradTerms64 {
         gsrc,
@@ -2277,34 +2267,25 @@ fn gradient_border_pixel<
     src_h: &[f32],
     dst_h: &[f32],
     activity: &[f32],
-    act_dst: &[f32],
-    mu1: &[f32],
-    mu2: &[f32],
+    _act_dst: &[f32],
+    _mu1: &[f32],
+    _mu2: &[f32],
     width: usize,
     x: usize,
     y: usize,
-    bv_lo: f32,
-    bv_hi: f32,
+    _bv_lo: f32,
+    _bv_hi: f32,
     acc: &mut GradientAccum,
-    bank: GmsBankWork<'_>,
-    bank_row: &mut [GmsBankCellVar; 5],
-    chroma_row: &mut [GmsBankCellVar; 5],
 ) {
     let t = gradient_terms64(
         src_h,
         dst_h,
         activity,
-        act_dst,
-        mu1,
-        mu2,
         width,
         x,
         y,
-        bv_lo as f64,
-        bv_hi as f64,
         R7,
     );
-    let lane = x & 7;
     acc.sum_grad_src += t.gsrc;
     acc.sum_grad_dst += t.gdst;
     acc.sum_gms += t.g;
@@ -2327,28 +2308,28 @@ fn gradient_interior_elem_canon<
     src_h: &[f32],
     dst_h: &[f32],
     activity: &[f32],
-    act_dst: &[f32],
-    mu1: &[f32],
-    mu2: &[f32],
-    width: usize,
+    _act_dst: &[f32],
+    _mu1: &[f32],
+    _mu2: &[f32],
+    _width: usize,
     row: usize,
     row_u: usize,
     row_d: usize,
     act_row: usize,
     x: usize,
-    bv_lo: f32,
-    bv_hi: f32,
-    bank: GmsBankWork<'_>,
-    bank_row: &mut [GmsBankCellVar; 5],
-    chroma_row: &mut [GmsBankCellVar; 5],
+    _bv_lo: f32,
+    _bv_hi: f32,
+    _bank: GmsBankWork<'_>,
+    _bank_row: &mut [GmsBankCellVar; 5],
+    _chroma_row: &mut [GmsBankCellVar; 5],
     r_gsrc: &mut Q,
     r_gdst: &mut Q,
     r_gms: &mut Q,
     r_gms2: &mut Q,
     r_ring: &mut Q,
     r_band: &mut Q,
-    r_bv_gain: &mut Q,
-    r_bv_loss: &mut Q,
+    _r_bv_gain: &mut Q,
+    _r_bv_loss: &mut Q,
     // Revision 7's f32 row lanes: `r_gdst` takes `gdst − gsrc` (exact when
     // the two are within a factor of 2), and the fold adds `r_gsrc`'s lanes to
     // both sums, so the edge-width decay sees the difference summed directly.
@@ -2406,7 +2387,7 @@ fn gradient_pools_finish<P: crate::featcanon::Pool>(
     acc: &mut GradientAccum,
     pools: &[P; 8],
 ) {
-    let [gms, gms2, ring, band, gsrc, gdst, bv_gain, bv_loss] = *pools;
+    let [gms, gms2, ring, band, gsrc, gdst, _bv_gain, _bv_loss] = *pools;
     acc.sum_gms += gms.fin();
     acc.sum_gms2 += gms2.fin();
     acc.sum_ringing += ring.fin();
@@ -2432,13 +2413,13 @@ fn gradient_block_kernel_canon<
     height: usize,
     bv_lo: f32,
     bv_hi: f32,
-    mode: crate::featcanon::Mode,
+    _mode: crate::featcanon::Mode,
 ) -> GradientAccum {
     let mut acc = GradientAccum::default();
     let bank = GmsBankWork::new(1, None);
-    let mut bank_acc: [GmsBankCellVar; 5] = std::array::from_fn(|_| GmsBankCellVar::for_mode(mode));
-    let mut chroma_acc: [GmsBankCellVar; 5] =
-        std::array::from_fn(|_| GmsBankCellVar::for_mode(mode));
+    let mut _bank_acc: [GmsBankCellVar; 5] = std::array::from_fn(|_| GmsBankCellVar::for_mode());
+    let mut _chroma_acc: [GmsBankCellVar; 5] =
+        std::array::from_fn(|_| GmsBankCellVar::for_mode());
     // Revision 7: the interior pools' f64 lanes live for the whole call (each
     // row's f32 row lanes fold into them) and finish once, after the last row.
     let mut call_pools = [P::zero(); 8];
@@ -2448,9 +2429,9 @@ fn gradient_block_kernel_canon<
         let row_d = (y + 2) * width;
         let act_row = y * width;
         let mut bank_row: [GmsBankCellVar; 5] =
-            std::array::from_fn(|_| GmsBankCellVar::for_mode(mode));
+            std::array::from_fn(|_| GmsBankCellVar::for_mode());
         let mut chroma_row: [GmsBankCellVar; 5] =
-            std::array::from_fn(|_| GmsBankCellVar::for_mode(mode));
+            std::array::from_fn(|_| GmsBankCellVar::for_mode());
 
         gradient_border_pixel::<R7>(
             src_h,
@@ -2465,9 +2446,6 @@ fn gradient_block_kernel_canon<
             bv_lo,
             bv_hi,
             &mut acc,
-            bank,
-            &mut bank_row,
-            &mut chroma_row,
         );
         if width > 2 {
             let interior_end = width - 1;
@@ -2586,9 +2564,6 @@ fn gradient_block_kernel_canon<
             bv_lo,
             bv_hi,
             &mut acc,
-            bank,
-            &mut bank_row,
-            &mut chroma_row,
         );
     }
     if R7 && width > 2 {
@@ -2620,9 +2595,6 @@ fn gradient_terms32_v<V: Vf32>(
     s: V,
     dd: V,
     act: V,
-    actd: V,
-    m1: V,
-    m2: V,
     bv_lo: f32,
     bv_hi: f32,
     stable: bool,
@@ -2633,9 +2605,9 @@ fn gradient_terms32_v<V: Vf32>(
     let c_ring_edge = V::splat_t(token, C_RING_EDGE as f32);
     let c_band_dst = V::splat_t(token, C_BAND_DST as f32);
     let c_band_src = V::splat_t(token, C_BAND_SRC as f32);
-    let c_bv = V::splat_t(token, C_BV as f32);
-    let bv_lo_v = V::splat_t(token, bv_lo);
-    let bv_hi_v = V::splat_t(token, bv_hi);
+    let _c_bv = V::splat_t(token, C_BV as f32);
+    let _bv_lo_v = V::splat_t(token, bv_lo);
+    let _bv_hi_v = V::splat_t(token, bv_hi);
     let one = V::splat_t(token, 1.0);
     let zero = V::zero_t(token);
 
@@ -2692,13 +2664,13 @@ fn gradient_block_kernel_canon64_vec<
     height: usize,
     bv_lo: f32,
     bv_hi: f32,
-    mode: crate::featcanon::Mode,
+    _mode: crate::featcanon::Mode,
 ) -> GradientAccum {
     let mut acc = GradientAccum::default();
     let bank = GmsBankWork::new(1, None);
-    let mut bank_acc: [GmsBankCellVar; 5] = std::array::from_fn(|_| GmsBankCellVar::for_mode(mode));
-    let mut chroma_acc: [GmsBankCellVar; 5] =
-        std::array::from_fn(|_| GmsBankCellVar::for_mode(mode));
+    let mut _bank_acc: [GmsBankCellVar; 5] = std::array::from_fn(|_| GmsBankCellVar::for_mode());
+    let mut _chroma_acc: [GmsBankCellVar; 5] =
+        std::array::from_fn(|_| GmsBankCellVar::for_mode());
     // Revision 7 (`rowlanes`): the chunks' adds of the six non-cancelling
     // pools go to f32 row lanes, folded into the f64 lanes every
     // `ROW_LANES_FOLD` columns and at the end of the chunks (the scalar body's
@@ -2769,9 +2741,9 @@ fn gradient_block_kernel_canon64_vec<
         let row_d = (y + 2) * width;
         let act_row = y * width;
         let mut bank_row: [GmsBankCellVar; 5] =
-            std::array::from_fn(|_| GmsBankCellVar::for_mode(mode));
+            std::array::from_fn(|_| GmsBankCellVar::for_mode());
         let mut chroma_row: [GmsBankCellVar; 5] =
-            std::array::from_fn(|_| GmsBankCellVar::for_mode(mode));
+            std::array::from_fn(|_| GmsBankCellVar::for_mode());
 
         gradient_border_pixel::<R7>(
             src_h,
@@ -2786,9 +2758,6 @@ fn gradient_block_kernel_canon64_vec<
             bv_lo,
             bv_hi,
             &mut acc,
-            bank,
-            &mut bank_row,
-            &mut chroma_row,
         );
         if width > 2 {
             let interior_end = width - 1;
@@ -2826,8 +2795,8 @@ fn gradient_block_kernel_canon64_vec<
                             f32x8::load_t(token, $pl[o..o + 8].try_into().unwrap())
                         }};
                     }
-                    let actd = f32x8::zero_t(token);
-                    let (m1, m2) = (f32x8::zero_t(token), f32x8::zero_t(token));
+                    let _actd = f32x8::zero_t(token);
+                    let (_m1, _m2) = (f32x8::zero_t(token), f32x8::zero_t(token));
                     let (gsrc, gdst, g, g2, ring_i, band, bv_gain, bv_loss) =
                         gradient_terms32_v::<_>(
                             token,
@@ -2842,16 +2811,13 @@ fn gradient_block_kernel_canon64_vec<
                             ld8!(src_h, row + xs),
                             ld8!(dst_h, row + xs),
                             ld8!(activity, act_row + xs),
-                            actd,
-                            m1,
-                            m2,
                             bv_lo,
                             bv_hi,
                             R7,
                         );
                     let (gs, gd, ga, gb) = (gsrc.to_array(), gdst.to_array(), g.to_array(), g2.to_array());
                     let (ri, ba) = (ring_i.to_array(), band.to_array());
-                    let (bg, bl) = (bv_gain.to_array(), bv_loss.to_array());
+                    let (_bg, _bl) = (bv_gain.to_array(), bv_loss.to_array());
                     for x in $from..$to {
                         let (l, lane) = (x - xs, x & (P::LANES - 1));
                         r_gsrc.add(lane, gs[l]);
@@ -2924,8 +2890,7 @@ fn gradient_block_kernel_canon64_vec<
                 win!(dst_h, c0),
             );
             let w_act = win!(activity, a0);
-            let w_actd: &[[f32; 8]] = &[];
-            let (w_m1, w_m2): (&[[f32; 8]], &[[f32; 8]]) =
+            let (_w_m1, _w_m2): (&[[f32; 8]], &[[f32; 8]]) =
                 { (&[], &[]) };
             // Revision 7 on AVX-512 tiers: the chunks from x = 16 run two at a time,
             // sixteen columns per step, so element e of a step is lane
@@ -2961,8 +2926,7 @@ fn gradient_block_kernel_canon64_vec<
                         win16!(dst_h, c0),
                     );
                     let v_act = win16!(activity, a0);
-                    let v_actd: &[[f32; 16]] = &[];
-                    let (v_m1, v_m2): (&[[f32; 16]], &[[f32; 16]]) =
+                    let (_v_m1, _v_m2): (&[[f32; 16]], &[[f32; 16]]) =
                         { (&[], &[]) };
                     for j in 0..m16 {
                         let x0 = head_end + 8 + 16 * j;
@@ -2971,9 +2935,9 @@ fn gradient_block_kernel_canon64_vec<
                                 f32x16::load_t(token, &$w[j])
                             };
                         }
-                        let actd = f32x16::zero_t(token);
-                        let (m1, m2) = (f32x16::zero_t(token), f32x16::zero_t(token));
-                        let (gsrc, gdst, g, g2, ring_i, band, bv_gain, bv_loss) =
+                        let _actd = f32x16::zero_t(token);
+                        let (_m1, _m2) = (f32x16::zero_t(token), f32x16::zero_t(token));
+                        let (gsrc, gdst, g, g2, ring_i, band, _bv_gain, _bv_loss) =
                             gradient_terms32_v::<_>(
                                 token,
                                 ld!(v_sxl),
@@ -2987,9 +2951,6 @@ fn gradient_block_kernel_canon64_vec<
                                 ld!(v_s),
                                 ld!(v_d),
                                 ld!(v_act),
-                                actd,
-                                m1,
-                                m2,
                                 bv_lo,
                                 bv_hi,
                                 R7,
@@ -3048,12 +3009,11 @@ fn gradient_block_kernel_canon64_vec<
                 let s = f32x8::load_t(token, &w_s[k]);
                 let dd = f32x8::load_t(token, &w_d[k]);
                 let act = f32x8::load_t(token, &w_act[k]);
-                let actd = f32x8::zero_t(token);
-                let (m1, m2) = (f32x8::zero_t(token), f32x8::zero_t(token));
-                let (gsrc, gdst, g, g2, ring_i, band, bv_gain, bv_loss) =
+                let _actd = f32x8::zero_t(token);
+                let (_m1, _m2) = (f32x8::zero_t(token), f32x8::zero_t(token));
+                let (gsrc, gdst, g, g2, ring_i, band, _bv_gain, _bv_loss) =
                     gradient_terms32_v::<_>(
-                        token, sxl, sxr, syu, syd, dxl, dxr, dyu, dyd, s, dd, act, actd, m1, m2,
-                        bv_lo, bv_hi, R7,
+                        token, sxl, sxr, syu, syd, dxl, dxr, dyu, dyd, s, dd, act,                           bv_lo, bv_hi, R7,
                     );
 
                 if rev7 {
@@ -3143,9 +3103,6 @@ fn gradient_block_kernel_canon64_vec<
             bv_lo,
             bv_hi,
             &mut acc,
-            bank,
-            &mut bank_row,
-            &mut chroma_row,
         );
     }
     if R7 && width > 2 {
@@ -3179,6 +3136,7 @@ fn gradient_block_kernel_canon64_vec_scalar<
 }
 
 /// Wasm128 sibling of [`gradient_block_kernel_canon64_vec_scalar`].
+#[cfg(target_arch = "wasm32")]
 #[allow(clippy::too_many_arguments)]
 fn gradient_block_kernel_canon64_vec_wasm128<
     P: crate::featcanon::Pool64,
@@ -3204,6 +3162,7 @@ fn gradient_block_kernel_canon64_vec_wasm128<
 
 /// NEON runs the scalar canonical body (2026-10-03): NEON vector `max`/`min` propagate NaN where the canon's `f32::max`/
 /// `f64::max` drop it (the REV4VEC CI aarch64 failure), so only the x86_64 fused tiers run a lane-parallel body.
+#[cfg(target_arch = "aarch64")]
 #[allow(clippy::too_many_arguments)]
 fn gradient_block_kernel_canon64_vec_neon<
     P: crate::featcanon::Pool64,

@@ -609,7 +609,6 @@ fn scale_capacity_rows(scale: usize, plane_h: usize, advance_rows: usize) -> usi
 }
 
 impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
-
     /// [`Self::new_with_front_end`] with an optional pre-built source-side XYB
     /// pyramid (see the `ref_planes` field). `None` is byte-for-byte the
     /// non-cached constructor. `revision` is the walk's formula revision.
@@ -1255,12 +1254,6 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
         self.plane(side, ch, scale).rows(r0, r1)
     }
 
-    /// Peak rows held per scale (test telemetry).
-    #[cfg(test)]
-    pub(crate) fn max_held_rows(&self) -> &[usize] {
-        &self.max_held_rows
-    }
-
     /// Return every rolling-plane buffer to `pool` for the next pair.
     pub(crate) fn recycle(self, pool: &mut Vec<Vec<f32>>) {
         for side in self.lin.into_iter().flat_map(|lin| *lin) {
@@ -1549,5 +1542,4 @@ mod tests {
             }
         }
     }
-
 }

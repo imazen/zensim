@@ -134,8 +134,7 @@ impl RootForm {
     pub(crate) const fn for_revision(rev: FormulaRevision) -> Self {
         match rev {
             FormulaRevision::Rev1 => Self::LibmPowf,
-            FormulaRevision::Rev5
-            | FormulaRevision::Rev7 => Self::NestedSqrt,
+            FormulaRevision::Rev5 | FormulaRevision::Rev7 => Self::NestedSqrt,
         }
     }
 }
@@ -325,8 +324,7 @@ impl PowForm {
     pub const fn for_revision(rev: FormulaRevision) -> Self {
         match rev {
             FormulaRevision::Rev1 => Self::LibmPowf,
-            FormulaRevision::Rev5
-            | FormulaRevision::Rev7 => Self::PureRust,
+            FormulaRevision::Rev5 | FormulaRevision::Rev7 => Self::PureRust,
         }
     }
 }
@@ -456,35 +454,6 @@ pub(crate) fn cbrt_newton_f32(x: f32) -> f32 {
     } else {
         f32::from_bits(y.to_bits() | (x.to_bits() & 0x8000_0000))
     }
-}
-
-/// [`cbrt_newton_f32`] in sixteen lanes, on a tier whose `mul_add` is fused
-/// (x86-64 v3, v4, v4x): per lane the same IEEE operations in the same order.
-/// The opsin conversion, whose inputs are never negative, runs
-/// [`cbrt_newton_nonneg_x16`]; this full form is the reference the tier tests
-/// hold it to.
-#[cfg(test)]
-#[inline(always)]
-pub(crate) fn cbrt_newton_x16<T: magetypes::simd::backends::F32x16Convert>(
-    token: T,
-    x: magetypes::simd::generic::f32x16<T>,
-) -> magetypes::simd::generic::f32x16<T> {
-    use magetypes::simd::generic::{f32x16, i32x16};
-    let a = x.abs();
-    let third = f32x16::splat_t(token, 1.0 / 3.0);
-    let one = f32x16::splat_t(token, 1.0);
-    let q = (f32x16::from_i32_t(token, a.bitcast_to_i32()) * third).to_i32();
-    let r = f32x16::from_i32_bitcast_t(token, i32x16::splat_t(token, CBRT_NEWTON_MAGIC) - q);
-    let t = a * r;
-    let e = (-t).mul_add(r * r, one);
-    let r = (r * e).mul_add(third, r);
-    let y = (a * r) * r;
-    let y2 = y * y;
-    let res = (-y2).mul_add(y, a);
-    let y = y.mul_add(res / (y2 + y2).mul_add(y, a), y);
-    let sign = x & f32x16::splat_t(token, -0.0);
-    let zero = x.simd_eq(f32x16::zero_t(token));
-    f32x16::blend(zero, x, y | sign)
 }
 
 /// [`cbrt_newton_x16`] for inputs that are `+0` or positive (the opsin mix
@@ -980,7 +949,6 @@ mod tests {
             "the f64 arm must carry it: got {via_f64:e}"
         );
     }
-
 }
 
 /// REV4VEC gate: the `f32x16` midp methods the canonical leaves now call
@@ -1002,26 +970,6 @@ mod rev4vec_midp_gate {
     use super::*;
     use archmage::SimdToken as _;
     use archmage::magetypes;
-
-    /// One generic f32x16 batch — `#[magetypes]` emits
-    /// `midp_x16_vec_{v4x,v4,v3,neon}`; `which` selects the same function
-    /// the canonical leaves call (5,6 = `pow_midp` at the two PQ
-    /// exponents the canonical row decoder actually feeds it).
-    #[magetypes(define(f32x16), v4x, v4, v3, -scalar)]
-    fn midp_x16_vec(token: Token, which: u8, arr: [f32; 16]) -> [f32; 16] {
-        let v = f32x16::from_array_t(token, arr);
-        match which {
-            0 => v.log2_midp(),
-            1 => v.exp2_midp(),
-            2 => v.exp_midp(),
-            3 => v.log10_midp(),
-            4 => v.cbrt_midp(),
-            5 => v.pow_midp(1.0 / 78.843_75),
-            6 => v.pow_midp(1.0 / 0.159_301_75),
-            _ => cbrt_newton_x16(token, v),
-        }
-        .to_array()
-    }
 
     /// [`cbrt_newton_nonneg_x16`] in one tier, for the test below.
     #[magetypes(define(f32x16), v4x, v4, v3, -scalar)]
@@ -1079,42 +1027,4 @@ mod rev4vec_midp_gate {
             }
         }
     }
-
-    const WHICH_NAMES: [&str; 8] = [
-        "log2_midp",
-        "exp2_midp",
-        "exp_midp",
-        "log10_midp",
-        "cbrt_midp",
-        "pow_midp(1/78.84375)",
-        "pow_midp(1/0.15930175)",
-        "cbrt_newton",
-    ];
-
-    /// One compiled tier variant bound to its summoned token.
-    type TierFn = Box<dyn Fn(u8, [f32; 16]) -> [f32; 16] + Send + Sync>;
-
-    /// The compiled fused-tier variants of [`midp_x16_vec`] available on
-    /// this host — each bound to its own summoned token, so no global
-    /// dispatch state is touched (parallel-test safe).
-    fn compiled_tiers() -> Vec<(&'static str, TierFn)> {
-        let mut tiers: Vec<(&'static str, TierFn)> = Vec::new();
-        #[cfg(target_arch = "x86_64")]
-        {
-            if let Some(t) = archmage::X64V3Token::summon() {
-                tiers.push(("v3", Box::new(move |w, a| midp_x16_vec_v3(t, w, a))));
-            }
-            #[cfg(feature = "avx512")]
-            {
-                if let Some(t) = archmage::X64V4Token::summon() {
-                    tiers.push(("v4", Box::new(move |w, a| midp_x16_vec_v4(t, w, a))));
-                }
-                if let Some(t) = archmage::X64V4xToken::summon() {
-                    tiers.push(("v4x", Box::new(move |w, a| midp_x16_vec_v4x(t, w, a))));
-                }
-            }
-        }
-        tiers
-    }
-
 }

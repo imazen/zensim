@@ -275,7 +275,6 @@ pub struct ZensimConfig {
 
     /// Enable multi-threaded computation via rayon (default: true).
     pub allow_multithreading: bool,
-
 }
 
 impl ZensimConfig {
@@ -2328,7 +2327,7 @@ pub(crate) fn apply_mlp_scoring_with_codec(
     // no spline-carrying profile in this crate sets, so the shipped path
     // pays nothing.
     if !params.skip_score_mapping {
-        check_score_disposition(params, loader)?;
+        check_score_disposition(loader)?;
     }
     // **Identity-image short-circuit guard.** When the byte-identical
     // short-circuit in `compute_with_config_inner` /
@@ -2352,12 +2351,7 @@ pub(crate) fn apply_mlp_scoring_with_codec(
         return Ok(());
     }
     {
-        let raw = forward_one_bake_with_codec(
-            loader(),
-            result.features(),
-            width,
-            height,
-        )?;
+        let raw = forward_one_bake_with_codec(loader(), result.features(), width, height)?;
         let score = dispose_mlp_raw(raw, params);
         result.set_mlp_score(raw, score);
     }
@@ -2541,9 +2535,6 @@ fn apply_per_sample_alpha_runtime(h: &[f32], meta: &PerSampleAlphaMeta) -> f64 {
 //
 // The pool sigma floor is owned by `crate::score_math::POOL_STD_FLOOR`.
 
-impl HybridHeadMeta {
-}
-
 /// Forward one bake over `features` and return the raw output scalar.
 /// Handles the three accepted input-width shapes (n_inputs == features,
 /// n_inputs == features+4 with size-axes, n_inputs < features prefix)
@@ -2595,10 +2586,7 @@ fn bake_carries_output_spline(bytes: &'static [u8]) -> bool {
 ///
 /// The ensemble CLASSIFIER bake is deliberately not checked — its output is
 /// a routing logit that never reaches the score disposition.
-fn check_score_disposition(
-    params: &crate::profile::ProfileParams,
-    primary: fn() -> &'static [u8],
-) -> Result<(), ZensimError> {
+fn check_score_disposition(primary: fn() -> &'static [u8]) -> Result<(), ZensimError> {
     const MISCONFIGURED: &str = "bake carries zentrain.output_calibration_spline \
          (its raw output is already a calibrated 0-100 score) but \
          ProfileParams::skip_score_mapping is false, so the legacy 100-A*d^B \
@@ -2731,7 +2719,6 @@ fn forward_model_with_codec(
     layout: &crate::feature_layout::Layout,
     gathered: &mut Vec<f64>,
     f32_features: &mut Vec<f32>,
-    x_std: &mut Vec<f64>,
     features: &[f64],
     width: u32,
     height: u32,
@@ -2741,7 +2728,6 @@ fn forward_model_with_codec(
     let per_sample_alpha = bundle.per_sample_alpha.as_deref();
     let tanh_pin_scale = bundle.tanh_pin_scale;
     let output_spline = bundle.output_spline.as_deref();
-    let per_codec_affine: Option<(f32, f32)> = None;
 
     // **LAYOUT — resolved ONCE, before any head branches.** A bake declaring a
     // DENSE feature set reads its ids at packed positions, so the caller's
@@ -2894,12 +2880,7 @@ fn bake_dispatch_one(
             reason: "Predictor::predict failed",
         })?
     };
-    finish_network_output(
-        out,
-        per_sample_alpha,
-        tanh_pin_scale,
-        output_spline,
-    )
+    finish_network_output(out, per_sample_alpha, tanh_pin_scale, output_spline)
 }
 
 fn finish_network_output(
@@ -2942,9 +2923,7 @@ fn finish_network_output(
     // Otherwise pass through unchanged. The affine is monotone
     // (beta > 0 by parse) so within-codec rank ordering is
     // preserved bit-exact.
-    Ok({
-        y_after_spline
-    })
+    Ok({ y_after_spline })
 }
 
 /// Append `(log2(pixels), log2(min_dim), log2(max_dim), signed

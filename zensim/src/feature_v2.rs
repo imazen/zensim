@@ -354,8 +354,7 @@ pub mod idx_append2 {
 /// (`κ→0` makes them identical) — trainers must treat each (weighted,
 /// unweighted) pair as non-orthogonal; LOO on a 956 bake adjudicates
 /// slot-worth, exactly the BANDVIS discipline.
-pub mod idx_csfw {
-}
+pub mod idx_csfw {}
 
 // ============================================================================
 // REV4 candidate bank (2026-09-23 lane — `benchmarks/rev4_featbank_impl_
@@ -391,8 +390,7 @@ pub(crate) mod idx_arttype {}
 /// All rev4 state for one (scale, channel) cell. Untouched when every
 /// rev4 compute flag is off.
 #[derive(Default)]
-struct Rev4CellAccum {
-}
+struct Rev4CellAccum {}
 
 // ---------------------------------------------------------------------------
 // REV4 emission: one PerChannel cell = gridblk(8) + ringbasis(6) +
@@ -814,7 +812,6 @@ struct V1BasicSums {
 }
 
 impl V1BasicSums {
-
     fn at_revision(revision: FormulaRevision) -> Self {
         use crate::featcanon::SumVar;
         Self {
@@ -863,7 +860,6 @@ impl V1BasicSums {
             lum_wb_den: SumVar::f64_elems(crate::featcanon::mode(revision)),
         }
     }
-
 }
 
 impl V1BasicSums {
@@ -1715,7 +1711,6 @@ fn fold_v1_one_band(
 /// from `raw`, which is the memory-traffic shape (see that type's doc).
 /// SelfBlur requires `pools` (the band-local H buffer lives in the band's
 /// [`FoldPoolScratch`]) and is refused otherwise.
-
 #[allow(clippy::too_many_arguments)]
 fn fold_v1_basic_bands(
     width: usize,
@@ -3148,7 +3143,6 @@ fn stream_phase_a<S: ImageSource, D: ImageSource>(
         activity,
         want_v2,
         parallel,
-        info.scale,
         revision,
     );
     // BANDVIS dst self-mask (`append2_dst_activity`, Y channel only): the
@@ -3623,7 +3617,6 @@ pub(crate) fn compute_folded_v1_372_with_ref_stoppable(
             mean_offset: Some(&mut mo),
             ref_planes: Some(&precomputed.scales),
             compute: plan.map(|p| p.compute),
-            ..Default::default()
         },
     );
     Some((res.into_features(), mo.finish()))
@@ -3644,9 +3637,8 @@ pub(crate) fn ref_feed_admits(
     distorted: &impl ImageSource,
     plan: Option<&crate::feature_plan::Plan>,
 ) -> bool {
-    if plan.is_some_and(|p| {
-            (p.compute.v2_blocks && p.compute.formula_revision < FormulaRevision::Rev5)
-        })
+    if plan
+        .is_some_and(|p| p.compute.v2_blocks && p.compute.formula_revision < FormulaRevision::Rev5)
     {
         return false;
     }
@@ -3886,45 +3878,11 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
     // asserted, so the caller can set `v1_only` on top of any existing
     // toggle set and get the v1 blocks of that request — which is what
     // makes it a drop-in A/B in the bench.
-    let v2_blocks = compute.v2_blocks;
     // BAND PARALLELISM: the channel fan-out is only 3-way, and the fold was
     // MEASURED to saturate at exactly 3 threads (2.27x) and REGRESS beyond
     // it. Bands inside a channel are independent, so they are the next axis;
     // rayon nests fine inside the channel fan-out.
     let band_parallel = parallel;
-    assert!(
-        true,
-        "append2_dst_activity requires append2_block (it refines the BANDVIS lanes)"
-    );
-    assert!(
-        true,
-        "csfw_block requires append2_block (f944+ sits after the append2 block)"
-    );
-    assert!(true, "gmsbank requires the full f1322 prefix layout");
-    assert!(
-        true,
-        "mapdev requires the C8 layout (f1502 sits after f1501)"
-    );
-    assert!(
-        true,
-        "z1max requires the mapdev layout (f1562 sits after f1561)"
-    );
-    assert!(
-        true,
-        "gmsnative requires the z1max layout (f1790 sits after f1789)"
-    );
-    assert!(
-        true,
-        "globaff requires the gmsnative layout (f1867 sits after f1866)"
-    );
-    assert!(
-        true,
-        "globaff is computed only at formula revision 6, into its own layout"
-    );
-    assert!(
-        true,
-        "globaff is defined on the walk's own pyramid, not a sampled one"
-    );
     // Route-local derived φ: the SAME weighting mechanism on both routes,
     // pre-composed with each route's own encoding (design §6 — runtime
     // never inverts an encoding; the route-dependence lives entirely in
@@ -3970,7 +3928,6 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
         && rayon::current_num_threads() >= 2
         && h0 > STRIP_ROWS
     {
-        debug_assert!(true, "queued merges cover only Rev5's supported families");
         // If this entire walk fits the existing bounded queue, dispatch it
         // together instead of creating a full batch followed by a tiny tail.
         // The byte budget and canonical strip/merge order are unchanged.
@@ -4062,8 +4019,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
     // windows (`rev5_block_walk`); the streaming producer above is unused.
     #[cfg(feature = "threads")]
     let block_walk = {
-        let omit_xb = !compute.full_res_xb
-            && !crate::feature_v2_stream::linear_pyramid();
+        let omit_xb = !compute.full_res_xb && !crate::feature_v2_stream::linear_pyramid();
         batch_limit > 0
             && ref_planes.is_none()
             && matches!(front_end, crate::feature_v2_stream::FrontEnd::Sdr)
@@ -4074,9 +4030,8 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
     // strip jobs through the pipeline instead of batches: same merge order,
     // no barrier between batches, production overlapped with the jobs.
     #[cfg(feature = "threads")]
-    let mut pipeline =
-        (batch_limit > 0 && ref_planes.is_none() && !block_walk)
-            .then(|| Rev5Pipeline::new(compute, fold_v1, batch_limit, core::mem::take(rev5_jobs)));
+    let mut pipeline = (batch_limit > 0 && ref_planes.is_none() && !block_walk)
+        .then(|| Rev5Pipeline::new(compute, fold_v1, batch_limit, core::mem::take(rev5_jobs)));
 
     #[cfg(feature = "threads")]
     if block_walk {
@@ -4088,8 +4043,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
             toggles,
             fold_v1,
             batch_limit,
-            !compute.full_res_xb
-                && !crate::feature_v2_stream::linear_pyramid(),
+            !compute.full_res_xb && !crate::feature_v2_stream::linear_pyramid(),
             rev5_jobs,
             block_pool,
             &mut accums,
@@ -4379,11 +4333,9 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
             // X/B's activity STRIP rows, stashed into the (otherwise
             // idle) second/third scratch sets' activity buffers — a
             // 2×strip_n copy, bitwise-identical values.
-            let off = HALO_P * info.plane_w;
-            let strip_n = info.plane_w * info.strip_h;
             let (s0, s_rest) = scratch_strips.split_at_mut(1);
             let scr = &mut s0[0];
-            let (stash_x_buf, stash_b_buf) = s_rest.split_at_mut(1);
+            let (_stash_x_buf, _stash_b_buf) = s_rest.split_at_mut(1);
             for ch in [0usize, 2] {
                 if !ALL_CHANNELS && !compute.channel_active(scale, ch) {
                     continue;
@@ -4486,7 +4438,6 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
         let (width, height) = dims[scale];
         let n = width * height;
         let scale_base = scale * 3 * FEATURES_PER_CHANNEL_V2_TOTAL;
-        let app_scale_base = scale * 3 * FEATURES_PER_CHANNEL_APPEND;
         let mut grads: [(f64, f64); 3] = [(0.0, 0.0); 3];
 
         for (ch, acc) in accums.iter().enumerate() {
@@ -4541,7 +4492,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                 // variant is requested (caught by
                 // `class_c_extras_are_pure_addition_to_the_free_walk`).
                 if toggles.free_extras != V1FreeExtras::Off {
-                    let (globals, luma_mean) =
+                    let (_globals, _luma_mean) =
                         acc.v1[scale].finalize_free(n, toggles.formula_revision);
                     // `GLOBAL_*` live in the append block. The 944 walk skips
                     // the (B, scale 0) append cell entirely
@@ -4555,7 +4506,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                 // `clamp01(0/n) = 0.0` when `v2_blocks` is off, so this
                 // overwrite is the value's first and only real write.
                 if toggles.free_extras == V1FreeExtras::RawMomentsPlusBoundedErr {
-                    let (mse, lum) = acc.v1[scale].finalize_free_bounded(n);
+                    let (mse, _lum) = acc.v1[scale].finalize_free_bounded(n);
                     if !v2_blocks {
                         features_v12[v1_total
                             + scale_base

@@ -58,7 +58,6 @@ impl Mode {
     pub(crate) const fn active(self) -> bool {
         !matches!(self, Mode::Off)
     }
-
 }
 
 /// The canonical-leaf arithmetic for a computation at `revision`.
@@ -463,10 +462,4 @@ impl SumVar {
             _ => panic!("SumVar::merge_from across modes"),
         }
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
 }

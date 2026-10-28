@@ -7903,7 +7903,6 @@ mod tests {
             }
         }
     }
-
 }
 
 // Rev5 AVX-512 windows preserve the per-output tree while processing sixteen pixels.
@@ -8433,9 +8432,3 @@ fn activity_local11_wide(
         }
     }
 }
-
-#[cfg(feature = "threads")]
-#[path = "blur_local_rows.rs"]
-mod local_rows;
-#[cfg(feature = "threads")]
-pub(crate) use local_rows::box_blur_v_local_rows;

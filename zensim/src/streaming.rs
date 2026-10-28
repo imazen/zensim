@@ -369,7 +369,6 @@ impl CoarseUpsample {
         kernel: CoarseKernel::Nearest,
         mass: false,
     };
-
 }
 
 impl CoarseKernel {
@@ -383,7 +382,6 @@ impl CoarseKernel {
         let a = t.abs();
         match self {
             CoarseKernel::Nearest => f64::from(u8::from(a < 0.5)),
-            _ => 0.0,
         }
     }
 
@@ -586,7 +584,6 @@ pub(crate) struct ScaleAccumulators {
 }
 
 impl ScaleAccumulators {
-
     fn new() -> Self {
         Self {
             ssim_d: [0.0; 3],
@@ -2457,8 +2454,7 @@ pub(crate) struct AttrScaleRetention {
     pub mu2: [Vec<f32>; 3],
 }
 
-impl AttrScaleRetention {
-}
+impl AttrScaleRetention {}
 
 /// One band's in-place retention output slices (pre-split from the
 /// caller's [`AttrScaleRetention`] planes; row-range-disjoint per band).
@@ -5084,111 +5080,6 @@ mod tests {
         }
     }
 
-    /// The existing SSIM diagnostic's precision mode. This is an independent
-    /// direct-window f64 reference, never a serving or training implementation.
-    /// It holds the actual f32 XYB pyramid fixed to isolate moment arithmetic.
-    /// A deterministic document/screenshot-flavoured pair: flat paper, hard
-    /// glyph-like edges, a smooth photographic patch, and a near-lossless
-    /// distortion. Flat, high-contrast content is where the raw-moment
-    /// cancellation this control exists for is worst (issue #61).
-    fn locality_fixture(w: usize, h: usize) -> (Vec<[u8; 3]>, Vec<[u8; 3]>) {
-        let mut src = vec![[247u8, 246, 244]; w * h];
-        for y in 0..h {
-            for x in 0..w {
-                let i = y * w + x;
-                // Glyph-ish bars: hard edges on flat paper.
-                if (x / 7 + y / 11) % 5 == 0 && (x % 7) < 4 && (y % 11) < 8 {
-                    src[i] = [26, 24, 30];
-                }
-                // A smooth patch, so the fixture is not purely bi-level.
-                if x >= w / 2 {
-                    let v = (110 + ((x * 3 + y * 5) % 90)) as u8;
-                    src[i] = [v, v.wrapping_sub(6), v.wrapping_add(4)];
-                }
-            }
-        }
-        // Near-lossless distortion: +/-1 LSB ripple plus a few heavier cells.
-        let mut dst = src.clone();
-        for y in 0..h {
-            for x in 0..w {
-                let i = y * w + x;
-                let t = ((x * 13 + y * 29) % 7) as i32 - 3;
-                let heavy = if (x / 16 + y / 16) % 9 == 0 { 6 } else { 1 };
-                for ch in &mut dst[i] {
-                    *ch = (*ch as i32 + t * heavy).clamp(0, 255) as u8;
-                }
-            }
-        }
-        (src, dst)
-    }
-
-    /// Retained per-(scale, channel) SSIM planes for one distorted image,
-    /// through the REAL banded strip walk — not the standalone kernel.
-    /// `(scale, channel, width, height, reference, distorted, retained_sd)`.
-    type RetainedPlanes = Vec<(usize, usize, usize, usize, Vec<f32>, Vec<f32>, Vec<f32>)>;
-
-    /// Count retained signals that MOVED although every sample in their own
-    /// window is unchanged — the registered "out-of-support movement" of
-    /// `benchmarks/nonmax_diagnosis_2026-09-08.md`, computed here on the
-    /// integrated retention route rather than on isolated planes.
-    // read only by the v2-walk locality controls
-    fn out_of_support_movement(
-        base: &RetainedPlanes,
-        changed: &RetainedPlanes,
-        radius: usize,
-    ) -> (usize, f64) {
-        assert_eq!(base.len(), changed.len());
-        let rad = radius as isize;
-        let (mut count, mut max_abs) = (0usize, 0.0f64);
-        for (b, c) in base.iter().zip(changed) {
-            let (scale, ch, sw, sh, _br, bd, bs) = b;
-            let (_, _, _, _, _cr, cd, cs) = c;
-            assert_eq!((scale, ch), (&c.0, &c.1));
-            for y in 0..*sh {
-                for x in 0..*sw {
-                    let mut supported = false;
-                    for dy in -rad..=rad {
-                        for dx in -rad..=rad {
-                            let xx =
-                                crate::metric::reflect_index((x as isize + dx).unsigned_abs(), *sw);
-                            let yy =
-                                crate::metric::reflect_index((y as isize + dy).unsigned_abs(), *sh);
-                            supported |= bd[yy * sw + xx] != cd[yy * sw + xx];
-                        }
-                    }
-                    if !supported {
-                        let i = y * sw + x;
-                        if bs[i] != cs[i] {
-                            count += 1;
-                            max_abs = max_abs.max((bs[i] as f64 - cs[i] as f64).abs());
-                        }
-                    }
-                }
-            }
-        }
-        (count, max_abs)
-    }
-
-    /// Rectangle to overwrite with reference pixels, and the fixture size.
-    /// The height spans three 128-row strips at scale 0 and two at scale 1, so
-    /// the probe measures the BANDED walk's locality, not a single band's.
-    const LOCALITY_RECT: (usize, usize, usize, usize) = (96, 150, 112, 166);
-    const LOCALITY_DIMS: (usize, usize) = (192, 288);
-
-    /// REGISTERED bounded-error acceptance for the FUSED revision 3 (user
-    /// directive 2026-09-09: "bounded error is fine, speed above minor
-    /// flaws"). Each bound is ~3-5x above the value measured on this fixture
-    /// when it was registered, and every one is far under the shipped
-    /// revision 1 figure.
-    ///
-    /// | quantity | rev 1 (shipped) | fused rev 3 measured | bound |
-    /// |---|---:|---:|---:|
-    /// | peak out-of-support movement | 4.886e-4 | 4.277e-6 | 2e-5 |
-    /// | max abs error vs the exact f64 kernel | 3.378e-3 | printed by the test | 1e-3 |
-    /// | worst residue on an all-equal window | — | 3.689e-6 | 1e-5 |
-    const REV3_LOCALITY_PEAK_BOUND: f64 = 2e-5;
-    const REV3_ACCURACY_BOUND: f64 = 1e-3;
-
     // ── E-JBU: guided mass-conserving redistribution (kernel-level) ─────────
 
     /// Deterministic positive pseudo-random values (LCG) for guide/src planes.
@@ -5291,5 +5182,4 @@ mod tests {
     }
 
     // ── Research coarse-upsample kernels (`ZENSIM_DIFFMAP_UPSAMPLE`) ─────────
-
 }

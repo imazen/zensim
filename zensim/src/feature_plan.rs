@@ -249,7 +249,7 @@ impl Plan {
         // `globaff` reads every channel's planes at every scale but runs no
         // kernel: its slots are kept out of the channel and scale derivations
         // below (`kernel_want`), so asking for it never turns on X/B kernels.
-        let globaff = touches(ComputeToken::GlobAff);
+        let _globaff = touches(ComputeToken::GlobAff);
         let kernel_want =
             crate::feature_defs::family_slots(ComputeToken::GlobAff, ns).missing_from(&want);
         // `csfw_on` is `csfw_block && v2_blocks` in the walk, so a CSFW
@@ -602,7 +602,7 @@ impl Plan {
     pub(crate) fn toggles(&self) -> crate::feature_v2::V2NewFeatureToggles {
         let ns = crate::NUM_SCALES;
         let c = &self.compute;
-        let layout = LayoutBlocks::for_width(self.layout.walk_width(), ns);
+        let _layout = LayoutBlocks::for_width(self.layout.walk_width(), ns);
         crate::feature_v2::V2NewFeatureToggles {
             // THE revision this walk computes. Forwarded from the plan, so a
             // bake's declared revision reaches the finaliser rather than the
@@ -748,8 +748,7 @@ impl Plan {
 ///
 /// The chain is nested by construction: `append2` implies `append`, `csfw`
 /// these implications.
-struct LayoutBlocks {
-}
+struct LayoutBlocks {}
 
 impl LayoutBlocks {
     fn for_width(width: usize, ns: usize) -> Self {
@@ -764,9 +763,8 @@ impl LayoutBlocks {
         let mapdev = gmsbank && width > base_of(ComputeToken::Mapdev, ns);
         let z1max = mapdev && width > base_of(ComputeToken::Z1max, ns);
         let gmsnative = z1max && width > base_of(ComputeToken::Gmsnative, ns);
-        let globaff = gmsnative && width > base_of(ComputeToken::GlobAff, ns);
-        Self {
-        }
+        let _globaff = gmsnative && width > base_of(ComputeToken::GlobAff, ns);
+        Self {}
     }
 }
 

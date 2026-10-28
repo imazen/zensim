@@ -513,7 +513,6 @@ impl<'a, S: ImageSource + ?Sized> SubsetView<'a, S> {
             height,
         }
     }
-
 }
 
 impl<S: ImageSource + ?Sized> ImageSource for SubsetView<'_, S> {

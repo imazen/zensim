@@ -90,47 +90,4 @@ impl GlobAffAccum {
         [self.s, self.e, self.ss, self.ee, self.se] = acc;
         self.n += src.len();
     }
-
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn plane(w: usize, h: usize, seed: u32) -> Vec<f32> {
-        let mut state = seed.wrapping_mul(2654435761).wrapping_add(1);
-        (0..w * h)
-            .map(|i| {
-                state ^= state << 13;
-                state ^= state >> 17;
-                state ^= state << 5;
-                let (x, y) = ((i % w) as f32, (i / w) as f32);
-                0.3 + 0.2 * (x * 0.07).sin() * (y * 0.05).cos() + (state % 1000) as f32 * 1e-5
-            })
-            .collect()
-    }
-
-    fn accum(s: &[f32], d: &[f32], w: usize, strip: usize) -> GlobAffAccum {
-        let mut a = GlobAffAccum::default();
-        for (cs, cd) in s.chunks(w * strip).zip(d.chunks(w * strip)) {
-            a.add_rows(cs, cd, w);
-        }
-        a
-    }
-
-    /// Neumaier-compensated sum.
-    fn nsum(values: impl Iterator<Item = f64>) -> f64 {
-        let (mut sum, mut comp) = (0.0f64, 0.0f64);
-        for v in values {
-            let t = sum + v;
-            comp += if sum.abs() >= v.abs() {
-                (sum - t) + v
-            } else {
-                (v - t) + sum
-            };
-            sum = t;
-        }
-        sum + comp
-    }
-
 }

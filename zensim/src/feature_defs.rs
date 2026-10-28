@@ -67,14 +67,11 @@ pub(crate) enum Channel {
     Y,
     /// XYB B (blue-yellow chroma).
     B,
-    /// A per-scale slot with no channel axis.
-    Scalar,
 }
 
 impl Channel {
     /// The per-(scale, channel) blocks index channels in this order.
     pub(crate) const TRIPLE: [Channel; 3] = [Channel::X, Channel::Y, Channel::B];
-
 }
 
 /// How a signal pools its per-pixel term over the plane.
@@ -98,12 +95,9 @@ pub(crate) enum Statistic {
     Max,
     /// `Σw·v / Σw` — the canonical weighted pooling the masked/IW blocks use.
     WeightedMean,
-    /// A ratio of two pooled quantities (the HF gain/loss/mag family).
-    Ratio,
 }
 
-impl Statistic {
-}
+impl Statistic {}
 
 /// Whether a slot can be harvested by a v1-only walk that never runs the
 /// block the slot lives in — `feature_v2::V1FreeExtras`'s two tranches.
@@ -127,8 +121,7 @@ pub(crate) enum Tranche {
     ClassC,
 }
 
-impl Tranche {
-}
+impl Tranche {}
 
 /// Which (scale, channel) placements of a signal its [`Tranche`] can serve.
 ///
@@ -164,20 +157,16 @@ pub(crate) enum Form {
     ReferenceOnly,
 }
 
-impl Form {
-}
+impl Form {}
 
 /// The monotone expectation a dial gate may rely on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Direction {
     /// Larger value = more distortion.
     HigherIsWorse,
-    /// No signed expectation (reference-only conditioners, raw statistics).
-    Unsigned,
 }
 
-impl Direction {
-}
+impl Direction {}
 
 /// The kernel that owns a signal's accumulation — the "who computes this"
 /// link the plan follows to decide what must run.
@@ -196,26 +185,7 @@ pub(crate) enum KernelId {
     V2Gradient,
 }
 
-impl KernelId {
-}
-
-/// Whether a [`Revision`] has LANDED (the values moved) or is PROPOSED (the
-/// defect is known and modelled, the fix is not applied).
-///
-/// Modelling a proposed revision is not the same as making one. The
-/// architecture's job is to make "which slots would this change, and what
-/// would it cost to re-extract?" a lookup — so a fix can be scheduled with its
-/// blast radius known, instead of discovered after it lands.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum RevisionStatus {
-    /// The values moved; tables built before it read a different quantity.
-    Landed,
-    /// Registered, NOT applied. Shipped bytes are unchanged.
-    Proposed,
-}
-
-impl RevisionStatus {
-}
+impl KernelId {}
 
 /// A known defect in a signal's current definition.
 ///
@@ -228,24 +198,6 @@ pub(crate) struct Defect {
     /// The audit's id.
     pub id: &'static str,
     /// What is wrong, and what currently absorbs it.
-    pub note: &'static str,
-}
-
-/// One registered change to how a signal's value is computed.
-///
-/// The era axis the identity layer records per TABLE, recorded here per
-/// SIGNAL — so *"is my number affected by era X?"* is a lookup instead of a
-/// re-extraction. Append-only.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct Revision {
-    /// The `feature_set_id` era token this landed in, or the token a proposed
-    /// revision would create.
-    pub era: &'static str,
-    /// The byte-changing commit, or `"-"` for a proposal.
-    pub commit: &'static str,
-    /// Landed, or registered-not-applied.
-    pub status: RevisionStatus,
-    /// What changed (or would), and what it means for numbers read before it.
     pub note: &'static str,
 }
 
@@ -333,7 +285,6 @@ pub enum FormulaRevision {
 }
 
 impl FormulaRevision {
-
     /// Whether the `globaff` family (f1867..1890) is computed at this revision.
     pub(crate) const fn computes_globaff(self) -> bool {
         matches!(self, Self::Rev7)
@@ -386,12 +337,8 @@ impl FormulaRevision {
     /// remaining free-vs-append gap into a MEASUREMENT of the append route's
     /// own error (plan R4) rather than an unattributed disagreement.
     pub(crate) const fn paired_global_contrast(self) -> bool {
-        matches!(
-            self,
-            Self::Rev5 | Self::Rev7
-        )
+        matches!(self, Self::Rev5 | Self::Rev7)
     }
-
 }
 
 /// Internal dispatch family. Palette has no supported public token.
@@ -451,8 +398,7 @@ pub(crate) struct FeatureDef {
     pub channel: Channel,
 }
 
-impl FeatureDef {
-}
+impl FeatureDef {}
 
 // ============================================================================
 // The signal table
@@ -470,280 +416,7 @@ const DEFECT_RING_GLOBAL: Defect = Defect {
            (median 0.334 vs 0.139). imazen/zensimx#72.",
 };
 
-/// The `ringhpm` era: ringing measures the error after removing each image's
-/// SSIM local mean ([`FormulaRevision::Rev6`]).
-const REV_RINGHPM: Revision = Revision {
-    era: "ringhpm",
-    commit: "-",
-    status: RevisionStatus::Proposed,
-    note: "ringing's per-pixel error becomes `(src − mu1) − (dst − mu2)` with \
-           the SSIM local means the dense kernel already holds; the three \
-           saturations are unchanged. Moves only the 12 ringing slots \
-           (+8 shift median 0.334 -> 0.017, blur unchanged 0.139 -> 0.143). \
-           Rev5 keeps the raw form byte for byte, and Rev7 returns to it \
-           (owner, 2026-10-25); `ZENSIM_RING_FORM=hpm` is \
-           the per-process research arm of the same arithmetic. Record: \
-           benchmarks/byconstruction_2026-10-22.md.",
-};
-const RINGING_REVS: &[Revision] = &[REV_RINGHPM];
-
-/// **F4** — the one LIVE arithmetic defect
-/// (`docs/FEATURE_DEFECTS_AUDIT_2026-09-05.md`).
-const DEFECT_F4: Defect = Defect {
-    id: "F4",
-    note: "v1's SSIM per-pixel dissimilarity has a `.max(0)` floor and NO upper \
-           cap, and `num_m = 1 - (mu1-mu2)^2` carries no C1. L4 pooling then \
-           amplifies it: f313 reads 5,814,302 on scanned rows against a \
-           photographic p99.9 of 0.48. Absorbed today by the bake-side winsor \
-           guard, not by the feature. BLAST RADIUS CORRECTED 2026-09-05: the \
-           audit attached this to the masked and IW blocks only (72 slots); a \
-           bounded-form re-extraction MEASURES 132 — basic 36, peaks 24, \
-           masked 36, IW 36 — because every one of them is pooled from the \
-           SAME per-pixel `d`. The peaks pair is `ssim_max`/`ssim_l8`, which a \
-           per-block reading of the audit would not have predicted.",
-};
-
-/// The PROPOSED fix for [`DEFECT_F4`] — registered, deliberately NOT applied.
-const REV_F4_PROPOSED: &[Revision] = &[
-    Revision {
-        era: "v1postc",
-        commit: "56bbcda2",
-        status: RevisionStatus::Landed,
-        note: "option C: v1 stopped pooling mirror-padded phantom columns.",
-    },
-    REV_F4_ENTRY,
-    REV_SSIM_STABLE,
-];
-
-/// The PROPOSED fix for [`DEFECT_F18`] on a slot that ALSO carries F4 — the
-/// SSIM-derived `L4`/`L8` pools, which are in both eras.
-const REV_F4_AND_DETROOT: &[Revision] = &[
-    Revision {
-        era: "v1postc",
-        commit: "56bbcda2",
-        status: RevisionStatus::Landed,
-        note: "option C: v1 stopped pooling mirror-padded phantom columns.",
-    },
-    REV_F4_ENTRY,
-    REV_SSIM_STABLE,
-    REV_DETROOT,
-];
-
-/// The v2 block's SSIM-derived signals under revision 3. They read the same
-/// `sigma12` plane the v1 signal does, and under revision 3 that plane holds
-/// the direct error moment — so `feature_v2::ssim_d_local` forms the v2
-/// dissimilarity from it directly rather than as `cov = s12 - mu1*mu2`. A
-/// separate era from `v1ssimstable` because it names a different kernel and a
-/// different slot family; both are in revision 3's list.
-const REV_EXT_FUSED: Revision = Revision {
-    era: "v1extfused",
-    commit: "-",
-    status: RevisionStatus::Proposed,
-    note: "Rev3 (issue #61 perf campaign): the masked/IW extension is FUSED \
-           into the SSIM V sweep (`fused::ExtPoolsWork`). The activity is \
-           `blur(|src - H(src)|)` exactly as before — the H-only mu plane the \
-           H pass already wrote, H-blurred once, V-blurred inside the sweep \
-           by the same `sum + add - rem` recurrence — and every masked/IW \
-           pool is formed from the same per-pixel values the separate passes \
-           formed. What moves is the ORDER the f64 chunk sums are added in \
-           (column-group-major inside the sweep, row-major in the passes), so \
-           these slots move at the last f64 bits on every image. The masked/\
-           IW SSIM pools are already `v1ssimstable` movers; this era adds \
-           the v1 MASKED/IW `edge_art_4th`, `edge_det_4th` and `mse` slots. STILL PROPOSED: `SHIPPED_REVISION` \
-           is `Rev1`.",
-};
-/// `v1()`'s default list (`v1postc`) plus the fused-extension era: the v1
-/// MASKED/IW `mse` slots.
-const REV_OPTION_C_AND_EXT_FUSED: &[Revision] = &[
-    Revision {
-        era: "v1postc",
-        commit: "56bbcda2",
-        status: RevisionStatus::Landed,
-        note: "option C: v1 stopped pooling mirror-padded phantom columns.",
-    },
-    REV_EXT_FUSED,
-];
-/// `v1()`'s pooled-root list (`v1postc` + F18) plus the fused-extension era:
-/// the v1 MASKED/IW `edge_art_4th` / `edge_det_4th` slots.
-const REV_DETROOT_AND_EXT_FUSED: &[Revision] = &[
-    Revision {
-        era: "v1postc",
-        commit: "56bbcda2",
-        status: RevisionStatus::Landed,
-        note: "option C: v1 stopped pooling mirror-padded phantom columns.",
-    },
-    REV_DETROOT,
-    REV_EXT_FUSED,
-];
-
-const REV_V2_SSIM_STABLE: Revision = Revision {
-    era: "v2ssimstable",
-    commit: "-",
-    status: RevisionStatus::Proposed,
-    note: "Rev3 (issue #61): the v2 dense kernel's SSIM dissimilarity \
-           (`ssim_d_local` / `ssim_d_local_v`) reads the fourth moment plane \
-           as the DIRECT error `E[(a-b)^2]` and forms \
-           `(d(b-a) + a*err_var)/(b*d)` instead of recovering the covariance \
-           by subtraction. Same bounded-error contract as `v1ssimstable`. \
-           Registered after the first fused build was caught (by reading, \
-           not by a gate) still computing `cov = s12 - mu1*mu2` on the \
-           redefined plane; `rev3_moves_exactly_the_registered_slots_on_the_944_layout` \
-           now covers the v2 block. Proposed: nothing is trained against it.",
-};
-const REV_V2_SSIM: &[Revision] = &[REV_V2_SSIM_STABLE];
-/// `ssim_dev4` carries F18's pooled-root era AND the v2 SSIM era.
-const REV_V2_SSIM_AND_DETROOT: &[Revision] = &[REV_DETROOT, REV_V2_SSIM_STABLE];
-
-/// The one text of the `v1detroot` era, so the three lists above cannot drift.
-const REV_DETROOT: Revision = Revision {
-    era: "v1detroot",
-    commit: "-",
-    status: RevisionStatus::Proposed,
-    note: "F18 fix: evaluate the pooled 4th/8th roots as `sqrt.sqrt` and \
-           `sqrt.sqrt.sqrt`. THE ARM IS DERIVED, NOT CHOSEN - IEEE-754 \
-           requires `sqrt` to be correctly rounded, so for these two \
-           exponents the replacement is unique, bit-identical on every libc, \
-           and cheaper. NOT more accurate: `sqrt.sqrt` double-rounds where \
-           `powf` rounds once, and MEASURED over 4,000 log-uniform doubles \
-           against a 60-digit reference the two agree on 3,455 while glibc's \
-           `pow` is nearer the truth in 544 of the 545 that differ - so the \
-           case is determinism and a BOUNDED error, not accuracy (the \
-           discovery record's contrary claim is falsified in \
-           benchmarks/libc_determinism_2026-09-06.md section 3). Owner: \
-           `crate::det_math::RootForm`. Its cost is that it moves revision-1 \
-           bytes by up to one ULP - which is why it is an era item and not a \
-           plain fix. It rides in revision 2 with F4, F5 and F17 so \
-           there is ONE era boundary and one recalculation. MIGRATION: this \
-           era invalidates any `ZENSIM_FORMULA_REV=2` table extracted BEFORE \
-           it was registered (the R6b lane has some); \
-           `ZENSIM_ROOT_FORM=libm` reproduces those exactly. STILL PROPOSED: \
-           `ssim_form::SHIPPED_REVISION` is `Rev1`, so no shipped byte moves.",
-};
-
-/// **The one text of the `v1ssimcap` era.** Both [`REV_F4_PROPOSED`] (a slot
-/// in F4 alone) and [`REV_F4_AND_DETROOT`] (a slot in F4 *and* F18) name this
-/// constant, so the two lists cannot state the same era differently — the
-/// exact drift a second copy of the text would invite.
-const REV_SSIM_STABLE: Revision = Revision {
-    era: "v1ssimstable",
-    commit: "-",
-    status: RevisionStatus::Proposed,
-    note: "Rev3 (issue #61), FUSED form: the v1 SSIM dissimilarity is formed \
-           from a DIRECT error moment. `blur::fused_blur_h_ssim` accumulates \
-           `sum (a-b)^2` in the fourth plane in place of `sum a*b` (same two \
-           FMAs), and `fused::fused_vblur_ssim_inner` forms \
-           `loss + (1-loss)*E_err/(var1+var2+C2)` from the same four f32 \
-           planes it always V-blurred — no second traversal. Basic, peak, \
-           masked, IW and the attribution planes all read that one retained \
-           value. BOUNDED, not exact, by user directive 2026-09-09 (\"bounded \
-           error is fine, speed above minor flaws\"): registered on the \
-           locality fixture, peak out-of-support movement <= 2e-5 (measured \
-           4.277e-6; shipped rev 1 measures 4.886e-4), max abs error vs the \
-           exact f64 reference kernel <= 1e-3, all-equal-window residue \
-           <= 1e-5 (measured 3.689e-6). The exact f64 second-pass kernel \
-           `ssim_form::stable_ssim_plane` measured 0 movement but cost \
-           +27..87% of extraction (22% of the walk in perf) and is retained \
-           only as the reference the bounds are measured against. This era \
-           moves every SSIM-derived slot on every image, unlike `v1ssimcap`. \
-           STILL PROPOSED: `ssim_form::SHIPPED_REVISION` is `Rev1`, no table \
-           has been re-extracted and no bake refit against it.",
-};
-
-const REV_F4_ENTRY: Revision = Revision {
-    era: "v1ssimcap",
-    commit: "-",
-    status: RevisionStatus::Proposed,
-    note: "F4 fix: bound the per-pixel dissimilarity's luminance term. The \
-           ARM IS DECIDED — `SsimLumaForm::Clamp`, i.e. `max(0, 1 - D^2)` \
-           — by measurement over 217,756 rows \
-           (benchmarks/f4_arm_decision_2026-09-05.md). Clamp is \
-           BIT-IDENTICAL to revision 1 wherever `D^2 <= 1`, and no corpus \
-           with local pixels reaches past that, so this era moves NOTHING \
-           on content resembling the shipped corpora; the 5.8e6 outlier \
-           that motivates it lives in the bigcodec sweep. STILL PROPOSED, \
-           not landed: `ssim_form::SHIPPED_REVISION` is `Rev1` until the \
-           recalculation and refit land, and Proposed is what `shipped \
-           bytes are unchanged` means.",
-};
-
-const DEFECT_F17: Defect = Defect {
-    id: "F17",
-    note: "v1's `contrast_inc` = `max(0, var_dst/var_src - 1)` divides by the \
-           SOURCE term, so its numerator is unbounded by its denominator. Its \
-           two siblings in the same family divide by the source term too, but \
-           their numerators are `max(0, src - dst)`, which the denominator \
-           bounds — measured max exactly 1.000000 for both. The `> 1e-10` gate \
-           is a threshold, not a stabiliser. MEASURED over 216,756 real pairs \
-           on 8 corpora: the twelve `contrast_inc` slots are the TOP TWELVE of \
-           all 372 by maximum (worst 36,465.74) and the thirteenth is 1.972 — \
-           x105,127 the gold holdout's own p99.9 of 0.34687. Unlike F4 it \
-           fires on real corpora, on 0.0198 % of cells. Absorbed by a \
-           bake-side winsor guard on Profiles A and B ONLY: Profile D (the SDR \
-           default) has no transform block at all and reads f116 (max 1,380) \
-           and f155 (max 2,127) raw, and CHdr reads all twelve at `identity`.",
-};
-
-/// The PROPOSED fix for [`DEFECT_F17`] — registered, deliberately NOT applied.
-const REV_F17_PROPOSED: &[Revision] = &[
-    Revision {
-        era: "v1postc",
-        commit: "56bbcda2",
-        status: RevisionStatus::Landed,
-        note: "option C: v1 stopped pooling mirror-padded phantom columns.",
-    },
-    Revision {
-        era: "v1hfgain",
-        commit: "-",
-        status: RevisionStatus::Proposed,
-        note: "F17 fix: bound the HF-energy gain member. THE ARM IS DECIDED — \
-               `HfGainForm::SaturatingExcess`, i.e. `g/(g+1)` — by measurement \
-               over 216,756 rows, and it is the ONLY arm passing H3+H4+H5 \
-               (docs/PLAN_FEATURE_REV2_2026-09-05.md section 11, \
-               benchmarks/feature_rev2_2026-09-05.md section 11). Unlike \
-               `v1ssimcap` this era moves values on EVERY corpus with pixels — \
-               `contrast_inc` is nonzero on 12 % (CID22) to 52 % (KADID) of \
-               cells — so a rev2 flip re-extracts these twelve slots for real. \
-               MEASURED benefit and cost: LIVE 0.7357 -> 0.9500 (+0.214), TID \
-               +0.033, KADID +0.021, CID22 +0.0027..+0.0090 CI-excluding; and \
-               KonJND REGRESSES -0.013..-0.080 on EVERY arm, which makes it a \
-               property of bounding rather than of this arm. It rides in \
-               revision 2 with F4 and F5 so there is ONE era boundary and one \
-               recalculation. STILL PROPOSED: \
-               `ssim_form::SHIPPED_REVISION` is `Rev1`.",
-    },
-];
-
-/// **F15** — `PJND_FRAGILITY` is nonzero on an identity pair.
-const DEFECT_F15: Defect = Defect {
-    id: "F15",
-    note: "The identity-pair value is NOT a defect: the slot is \
-           1 − saturate(mean grad_src_mag), a property of the reference, and on \
-           the Rev4 bank's 88 identical keys it equals every same-reference \
-           sibling bit for bit (2,376 cells; REVIEW_PARTB 2026-09-25). The earlier \
-           premise that it should read 0 there was wrong. The defect is the other \
-           artifact: a v1-only 944 walk reads exactly 1.0 from zeroed \
-           accumulators, a value emitted without its inputs.",
-};
-
-/// **THE one owner of "does this slot use a pooled 4th/8th root?"** — derived
-/// from the slot's own [`Statistic`], never from a hand-kept list.
-///
-/// `L4` is `(sum x^4/n)^(1/4)` and `L8` is `(sum x^8/n)^(1/8)`; every other v1
-/// statistic is a mean, a max, a ratio or an `L2` (`sqrt`, correctly rounded
-/// by IEEE-754). So the registry's answer to "which slots does `v1detroot`
-/// move?" is a property of the statistic and cannot drift away from the
-/// kernels — which is the failure mode a second list would have.
-const fn uses_pooled_root(statistic: Statistic) -> bool {
-    matches!(statistic, Statistic::L4 | Statistic::L8)
-}
-
-const fn v1(
-    family: ComputeToken,
-    block_local: u16,
-    name: &'static str,
-    statistic: Statistic,
-    kernel: KernelId,
-) -> SignalDef {
+const fn v1(family: ComputeToken, name: &'static str) -> SignalDef {
     SignalDef {
         family: Family::Supported(family),
         name,
@@ -765,14 +438,7 @@ const fn v1(
 /// [`v1`] with an explicit revision list — for slots whose era membership is
 /// not implied by their statistic (the fused-extension pools). The F18
 /// defect is still derived from the statistic exactly as [`v1`] derives it.
-const fn v1_rev(
-    family: ComputeToken,
-    block_local: u16,
-    name: &'static str,
-    statistic: Statistic,
-    kernel: KernelId,
-    revisions: &'static [Revision],
-) -> SignalDef {
+const fn v1_rev(family: ComputeToken, name: &'static str) -> SignalDef {
     SignalDef {
         family: Family::Supported(family),
         name,
@@ -783,15 +449,7 @@ const fn v1_rev(
 }
 
 /// A v1 signal carrying a named defect and its proposed revision.
-const fn v1_with_defect(
-    family: ComputeToken,
-    block_local: u16,
-    name: &'static str,
-    statistic: Statistic,
-    kernel: KernelId,
-    defect: Defect,
-    revisions: &'static [Revision],
-) -> SignalDef {
+const fn v1_with_defect(family: ComputeToken, name: &'static str) -> SignalDef {
     SignalDef {
         family: Family::Supported(family),
         name,
@@ -804,40 +462,15 @@ const fn v1_with_defect(
 /// A v1 signal carrying the F4 defect and its proposed revision.
 const fn v1_defect(
     family: ComputeToken,
-    block_local: u16,
+    _block_local: u16,
     name: &'static str,
-    statistic: Statistic,
-    kernel: KernelId,
+    _statistic: Statistic,
+    _kernel: KernelId,
 ) -> SignalDef {
-    v1_with_defect(
-        family,
-        block_local,
-        name,
-        statistic,
-        kernel,
-        DEFECT_F4,
-        // An SSIM-derived `L4`/`L8` pool is in BOTH `v1ssimcap` (F4) and
-        // `v1detroot` (F18): the same slot, two independent arithmetic
-        // problems. The eras therefore OVERLAP, which is why
-        // `rev2_carries_all_eras_*` checks a union and not a sum.
-        if uses_pooled_root(statistic) {
-            REV_F4_AND_DETROOT
-        } else {
-            REV_F4_PROPOSED
-        },
-    )
+    v1_with_defect(family, name)
 }
 
-const fn v2sig(
-    block_local: u16,
-    name: &'static str,
-    statistic: Statistic,
-    form: Form,
-    direction: Direction,
-    kernel: KernelId,
-    tranche: Tranche,
-    defect: Option<Defect>,
-) -> SignalDef {
+const fn v2sig(name: &'static str, form: Form, tranche: Tranche) -> SignalDef {
     SignalDef {
         family: Family::Supported(ComputeToken::V2),
         name,
@@ -855,27 +488,17 @@ const fn v2sig(
 /// names by KERNEL rather than by statistic (the SSIM-derived six).
 #[allow(clippy::too_many_arguments)]
 const fn v2sig_rev(
-    block_local: u16,
+    _block_local: u16,
     name: &'static str,
-    statistic: Statistic,
+    _statistic: Statistic,
     form: Form,
-    direction: Direction,
-    kernel: KernelId,
+    _direction: Direction,
+    _kernel: KernelId,
     tranche: Tranche,
-    defect: Option<Defect>,
-    revisions: &'static [Revision],
+    _defect: Option<Defect>,
 ) -> SignalDef {
-    let base = v2sig(
-        block_local,
-        name,
-        statistic,
-        form,
-        direction,
-        kernel,
-        tranche,
-        defect,
-    );
-    SignalDef {  ..base }
+    let base = v2sig(name, form, tranche);
+    SignalDef { ..base }
 }
 
 /// The 13 v1 basic signals per (scale, channel), in `V1BasicSums::finalize_into`
@@ -883,7 +506,7 @@ const fn v2sig_rev(
 pub(crate) static BASIC: [SignalDef; 13] = {
     use ComputeToken::Basic as F;
     use KernelId::V1Fused as K;
-    use Statistic::{L2, L4, Mean, Ratio};
+    use Statistic::{L2, L4, Mean};
     [
         // F4 reaches EVERY slot built from the per-pixel SSIM dissimilarity,
         // not only the masked and IW blocks the audit named — MEASURED, see
@@ -891,29 +514,21 @@ pub(crate) static BASIC: [SignalDef; 13] = {
         v1_defect(F, 0, "ssim_mean", Mean, K),
         v1_defect(F, 1, "ssim_4th", L4, K),
         v1_defect(F, 2, "ssim_2nd", L2, K),
-        v1(F, 3, "edge_art_mean", Mean, K),
-        v1(F, 4, "edge_art_4th", L4, K),
-        v1(F, 5, "edge_art_2nd", L2, K),
-        v1(F, 6, "edge_det_mean", Mean, K),
-        v1(F, 7, "edge_det_4th", L4, K),
-        v1(F, 8, "edge_det_2nd", L2, K),
-        v1(F, 9, "mse", Mean, K),
+        v1(F, "edge_art_mean"),
+        v1(F, "edge_art_4th"),
+        v1(F, "edge_art_2nd"),
+        v1(F, "edge_det_mean"),
+        v1(F, "edge_det_4th"),
+        v1(F, "edge_det_2nd"),
+        v1(F, "mse"),
         // The HF-energy ratio family. The two `loss` members are bounded by
         // construction (their numerator is `max(0, src - dst)`, which their
         // own denominator bounds); the `gain` member's is `max(0, dst - src)`,
         // which it does not — that asymmetry IS F17, and it is why only the
         // third of these three carries a defect.
-        v1(F, 10, "var_loss", Ratio, K),
-        v1(F, 11, "tex_loss", Ratio, K),
-        v1_with_defect(
-            F,
-            12,
-            "contrast_inc",
-            Ratio,
-            K,
-            DEFECT_F17,
-            REV_F17_PROPOSED,
-        ),
+        v1(F, "var_loss"),
+        v1(F, "tex_loss"),
+        v1_with_defect(F, "contrast_inc"),
     ]
 };
 
@@ -925,11 +540,11 @@ pub(crate) static PEAKS: [SignalDef; 6] = {
     [
         // Same source expression as BASIC's ssim_* — see the F4 note there.
         v1_defect(F, 0, "ssim_max", Max, K),
-        v1(F, 1, "edge_art_max", Max, K),
-        v1(F, 2, "edge_det_max", Max, K),
+        v1(F, "edge_art_max"),
+        v1(F, "edge_det_max"),
         v1_defect(F, 3, "ssim_l8", L8, K),
-        v1(F, 4, "edge_art_l8", L8, K),
-        v1(F, 5, "edge_det_l8", L8, K),
+        v1(F, "edge_art_l8"),
+        v1(F, "edge_det_l8"),
     ]
 };
 
@@ -945,9 +560,9 @@ pub(crate) static MASKED: [SignalDef; 6] = {
         v1_defect(F, 0, "ssim_mean", Mean, K),
         v1_defect(F, 1, "ssim_4th", L4, K),
         v1_defect(F, 2, "ssim_2nd", L2, K),
-        v1_rev(F, 3, "edge_art_4th", L4, K, REV_DETROOT_AND_EXT_FUSED),
-        v1_rev(F, 4, "edge_det_4th", L4, K, REV_DETROOT_AND_EXT_FUSED),
-        v1_rev(F, 5, "mse", Mean, K, REV_OPTION_C_AND_EXT_FUSED),
+        v1_rev(F, "edge_art_4th"),
+        v1_rev(F, "edge_det_4th"),
+        v1_rev(F, "mse"),
     ]
 };
 
@@ -964,16 +579,16 @@ pub(crate) static IW: [SignalDef; 6] = {
         v1_defect(F, 0, "ssim_mean", Mean, K),
         v1_defect(F, 1, "ssim_4th", L4, K),
         v1_defect(F, 2, "ssim_2nd", L2, K),
-        v1_rev(F, 3, "edge_art_4th", L4, K, REV_DETROOT_AND_EXT_FUSED),
-        v1_rev(F, 4, "edge_det_4th", L4, K, REV_DETROOT_AND_EXT_FUSED),
-        v1_rev(F, 5, "mse", Mean, K, REV_OPTION_C_AND_EXT_FUSED),
+        v1_rev(F, "edge_art_4th"),
+        v1_rev(F, "edge_det_4th"),
+        v1_rev(F, "mse"),
     ]
 };
 
 /// The 29 v2 signals per (scale, channel), index-aligned with
 /// `feature_v2::idx`.
 pub(crate) static V2: [SignalDef; 29] = {
-    use Direction::{HigherIsWorse, Unsigned};
+    use Direction::HigherIsWorse;
     use Form::{Difference, ReferenceOnly};
     use KernelId::{V2Dense, V2Gradient};
     use Statistic::{L2, L4, Mean, WeightedMean};
@@ -988,7 +603,6 @@ pub(crate) static V2: [SignalDef; 29] = {
             V2Dense,
             Tranche::None,
             None,
-            REV_V2_SSIM,
         ),
         v2sig_rev(
             1,
@@ -999,7 +613,6 @@ pub(crate) static V2: [SignalDef; 29] = {
             V2Dense,
             Tranche::None,
             None,
-            REV_V2_SSIM,
         ),
         v2sig_rev(
             2,
@@ -1010,70 +623,15 @@ pub(crate) static V2: [SignalDef; 29] = {
             V2Dense,
             Tranche::None,
             None,
-            REV_V2_SSIM_AND_DETROOT,
         ),
-        v2sig(
-            3,
-            "art",
-            Mean,
-            Difference,
-            HigherIsWorse,
-            V2Dense,
-            Tranche::None,
-            None,
-        ),
-        v2sig(
-            4,
-            "det",
-            Mean,
-            Difference,
-            HigherIsWorse,
-            V2Dense,
-            Tranche::None,
-            None,
-        ),
+        v2sig("art", Difference, Tranche::None),
+        v2sig("det", Difference, Tranche::None),
         // Class C: harvestable from the fused kernel's saturating-MSE sum,
         // despite living in the most expensive block in the layout.
-        v2sig(
-            5,
-            "mse",
-            Mean,
-            Difference,
-            HigherIsWorse,
-            V2Dense,
-            Tranche::ClassC,
-            None,
-        ),
-        v2sig(
-            6,
-            "hf_gain",
-            Mean,
-            Difference,
-            HigherIsWorse,
-            V2Dense,
-            Tranche::None,
-            None,
-        ),
-        v2sig(
-            7,
-            "hf_loss",
-            Mean,
-            Difference,
-            HigherIsWorse,
-            V2Dense,
-            Tranche::None,
-            None,
-        ),
-        v2sig(
-            8,
-            "hf_mag_loss",
-            Mean,
-            Difference,
-            HigherIsWorse,
-            V2Dense,
-            Tranche::None,
-            None,
-        ),
+        v2sig("mse", Difference, Tranche::ClassC),
+        v2sig("hf_gain", Difference, Tranche::None),
+        v2sig("hf_loss", Difference, Tranche::None),
+        v2sig("hf_mag_loss", Difference, Tranche::None),
         // Soft-saliency peak block (idx 9..11).
         v2sig_rev(
             9,
@@ -1084,28 +642,9 @@ pub(crate) static V2: [SignalDef; 29] = {
             V2Dense,
             Tranche::None,
             None,
-            REV_V2_SSIM,
         ),
-        v2sig(
-            10,
-            "art_soft_peak",
-            WeightedMean,
-            Difference,
-            HigherIsWorse,
-            V2Dense,
-            Tranche::None,
-            None,
-        ),
-        v2sig(
-            11,
-            "det_soft_peak",
-            WeightedMean,
-            Difference,
-            HigherIsWorse,
-            V2Dense,
-            Tranche::None,
-            None,
-        ),
+        v2sig("art_soft_peak", Difference, Tranche::None),
+        v2sig("det_soft_peak", Difference, Tranche::None),
         // Masked block (idx 12..15).
         v2sig_rev(
             12,
@@ -1116,38 +655,10 @@ pub(crate) static V2: [SignalDef; 29] = {
             V2Dense,
             Tranche::None,
             None,
-            REV_V2_SSIM,
         ),
-        v2sig(
-            13,
-            "masked_art",
-            WeightedMean,
-            Difference,
-            HigherIsWorse,
-            V2Dense,
-            Tranche::None,
-            None,
-        ),
-        v2sig(
-            14,
-            "masked_det",
-            WeightedMean,
-            Difference,
-            HigherIsWorse,
-            V2Dense,
-            Tranche::None,
-            None,
-        ),
-        v2sig(
-            15,
-            "masked_mse",
-            WeightedMean,
-            Difference,
-            HigherIsWorse,
-            V2Dense,
-            Tranche::None,
-            None,
-        ),
+        v2sig("masked_art", Difference, Tranche::None),
+        v2sig("masked_det", Difference, Tranche::None),
+        v2sig("masked_mse", Difference, Tranche::None),
         // IW block (idx 16..19).
         v2sig_rev(
             16,
@@ -1158,104 +669,22 @@ pub(crate) static V2: [SignalDef; 29] = {
             V2Dense,
             Tranche::None,
             None,
-            REV_V2_SSIM,
         ),
-        v2sig(
-            17,
-            "iw_art",
-            WeightedMean,
-            Difference,
-            HigherIsWorse,
-            V2Dense,
-            Tranche::None,
-            None,
-        ),
-        v2sig(
-            18,
-            "iw_det",
-            WeightedMean,
-            Difference,
-            HigherIsWorse,
-            V2Dense,
-            Tranche::None,
-            None,
-        ),
-        v2sig(
-            19,
-            "iw_mse",
-            WeightedMean,
-            Difference,
-            HigherIsWorse,
-            V2Dense,
-            Tranche::None,
-            None,
-        ),
+        v2sig("iw_art", Difference, Tranche::None),
+        v2sig("iw_det", Difference, Tranche::None),
+        v2sig("iw_mse", Difference, Tranche::None),
         // Near-threshold core (idx 20..21). FRAGILITY is reference-only
         // masking-susceptibility — see `idx::PJND_FRAGILITY`'s own doc.
-        v2sig(
-            20,
-            "pjnd_transducer",
-            Mean,
-            Difference,
-            HigherIsWorse,
-            V2Dense,
-            Tranche::None,
-            None,
-        ),
+        v2sig("pjnd_transducer", Difference, Tranche::None),
         // F15: ReferenceOnly, and its nonzero identity-pair value is correct
         // (it equals the same-reference siblings). The defect is the 1.0 a
         // v1-only walk reads from zeroed accumulators.
-        v2sig(
-            21,
-            "pjnd_fragility",
-            Mean,
-            ReferenceOnly,
-            Unsigned,
-            V2Dense,
-            Tranche::None,
-            Some(DEFECT_F15),
-        ),
+        v2sig("pjnd_fragility", ReferenceOnly, Tranche::None),
         // Phase-2 additions (idx 22..28).
-        v2sig(
-            22,
-            "gms",
-            Mean,
-            Difference,
-            HigherIsWorse,
-            V2Gradient,
-            Tranche::None,
-            None,
-        ),
-        v2sig(
-            23,
-            "pjnd_transducer_low_k",
-            Mean,
-            Difference,
-            HigherIsWorse,
-            V2Dense,
-            Tranche::None,
-            None,
-        ),
-        v2sig(
-            24,
-            "pjnd_transducer_high_k",
-            Mean,
-            Difference,
-            HigherIsWorse,
-            V2Dense,
-            Tranche::None,
-            None,
-        ),
-        v2sig(
-            25,
-            "blockiness",
-            Mean,
-            Difference,
-            HigherIsWorse,
-            V2Gradient,
-            Tranche::None,
-            None,
-        ),
+        v2sig("gms", Difference, Tranche::None),
+        v2sig("pjnd_transducer_low_k", Difference, Tranche::None),
+        v2sig("pjnd_transducer_high_k", Difference, Tranche::None),
+        v2sig("blockiness", Difference, Tranche::None),
         v2sig_rev(
             26,
             "ringing",
@@ -1265,30 +694,11 @@ pub(crate) static V2: [SignalDef; 29] = {
             V2Gradient,
             Tranche::None,
             Some(DEFECT_RING_GLOBAL),
-            RINGING_REVS,
         ),
-        v2sig(
-            27,
-            "banding",
-            Mean,
-            Difference,
-            HigherIsWorse,
-            V2Gradient,
-            Tranche::None,
-            None,
-        ),
+        v2sig("banding", Difference, Tranche::None),
         // The one scale-level (not per-pixel) signal in the set — see
         // `idx::EDGE_WIDTH_CHANGE`'s doc and the v2 spec.
-        v2sig(
-            28,
-            "edge_width_change",
-            Mean,
-            Difference,
-            HigherIsWorse,
-            V2Gradient,
-            Tranche::None,
-            None,
-        ),
+        v2sig("edge_width_change", Difference, Tranche::None),
     ]
 };
 
@@ -1456,7 +866,7 @@ pub(crate) fn family_slots(family: impl Into<Family>, n_scales: usize) -> SlotSe
 }
 
 /// Does this signal's [`Placement`] admit `(scale, channel)`?
-fn placement_admits(placement: Placement, scale: usize, channel: Channel) -> bool {
+fn placement_admits(placement: Placement) -> bool {
     match placement {
         Placement::AllCells => true,
     }
@@ -1479,9 +889,7 @@ pub(crate) fn tranche_slots(tranche: Tranche, n_scales: usize) -> SlotSet {
         let Some(d) = def_at(id, n_scales) else {
             continue;
         };
-        if d.signal.tranche == tranche
-            && placement_admits(d.signal.placement, usize::from(d.scale), d.channel)
-        {
+        if d.signal.tranche == tranche && placement_admits(d.signal.placement) {
             out.push(id);
         }
     }
@@ -1543,7 +951,6 @@ mod tests {
             raw.intersect(&bounded)
         );
     }
-
 }
 
 /// Cross-checks against the `feature_v2` owners — the gates that make the
@@ -1555,7 +962,6 @@ mod tests {
 #[cfg(test)]
 mod owner_gates {
     use super::*;
-    use crate::feature_set_id::ComputeToken as T;
     use crate::feature_v2;
 
     const NS: usize = crate::NUM_SCALES;
@@ -1596,76 +1002,5 @@ mod owner_gates {
             feature_v2::V1PoolsMode::CARRIER_SLOTS,
             "carrier slot list disagrees with V1PoolsMode::CARRIER_SLOTS"
         );
-    }
-
-    /// A minimal field reader for the committed registry JSON — this crate
-    /// has no serde dep and is not getting one for a test.
-    fn json_str_field(obj: &str, key: &str) -> Option<String> {
-        let pat = format!("\"{key}\"");
-        let at = obj.find(&pat)? + pat.len();
-        let rest = &obj[at..];
-        let colon = rest.find(':')? + 1;
-        let rest = rest[colon..].trim_start();
-        // A JSON `null` is a real value here (a `kind: "class"` entry pins the
-        // class and deliberately records no slot set), not a missing field —
-        // returning the NEXT field's string for it is how a naive scan lies.
-        if rest.starts_with("null") {
-            return None;
-        }
-        let open = rest.find('"')? + 1;
-        let rest = &rest[open..];
-        let close = rest.find('"')?;
-        Some(rest[..close].to_string())
-    }
-
-    /// Each `sets` entry as `(key, object-text)`.
-    fn registry_sets(json: &str) -> Vec<(String, String)> {
-        let sets_at = json.find("\"sets\"").expect("registry has a sets section");
-        let body = &json[sets_at..];
-        let mut out = Vec::new();
-        let bytes = body.as_bytes();
-        let mut i = 0usize;
-        while i < bytes.len() {
-            // A key is a quoted string containing "@w" followed by `: {`.
-            if bytes[i] == b'"' {
-                let Some(close) = body[i + 1..].find('"') else {
-                    break;
-                };
-                let key = &body[i + 1..i + 1 + close];
-                let after = &body[i + 1 + close + 1..];
-                let trimmed = after.trim_start();
-                if key.contains("@w") && trimmed.starts_with(':') {
-                    let obj_rel = after.find('{');
-                    if let Some(rel) = obj_rel {
-                        let obj_start = i + 1 + close + 1 + rel;
-                        let mut depth = 0i32;
-                        let mut j = obj_start;
-                        while j < bytes.len() {
-                            match bytes[j] {
-                                b'{' => depth += 1,
-                                b'}' => {
-                                    depth -= 1;
-                                    if depth == 0 {
-                                        break;
-                                    }
-                                }
-                                _ => {}
-                            }
-                            j += 1;
-                        }
-                        out.push((
-                            key.to_string(),
-                            body[obj_start..=j.min(bytes.len() - 1)].to_string(),
-                        ));
-                        i = j + 1;
-                        continue;
-                    }
-                }
-                i += 1 + close + 1;
-                continue;
-            }
-            i += 1;
-        }
-        out
     }
 }

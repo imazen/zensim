@@ -2554,32 +2554,6 @@ pub(crate) fn composite_srgb16_rgba_to_linear(
     }
 }
 
-/// Test helper: true when `incant!` dispatch of the bulk XYB conversions lands on the scalar
-/// tier on this host (no vector token available, or all disabled by a test).
-#[cfg(test)]
-#[cfg(target_arch = "x86_64")]
-pub(crate) fn dispatches_scalar() -> bool {
-    use archmage::SimdToken as _;
-    archmage::X64V3Token::summon().is_none()
-}
-#[cfg(test)]
-#[cfg(target_arch = "aarch64")]
-pub(crate) fn dispatches_scalar() -> bool {
-    use archmage::SimdToken as _;
-    archmage::NeonToken::summon().is_none()
-}
-#[cfg(test)]
-#[cfg(target_arch = "wasm32")]
-pub(crate) fn dispatches_scalar() -> bool {
-    use archmage::SimdToken as _;
-    archmage::Wasm128Token::summon().is_none()
-}
-#[cfg(test)]
-#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64", target_arch = "wasm32")))]
-pub(crate) fn dispatches_scalar() -> bool {
-    true
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

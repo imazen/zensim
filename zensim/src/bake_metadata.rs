@@ -77,35 +77,6 @@ pub fn parse_output_calibration_spline(payload: &[u8]) -> Option<OutputCalibrati
     Some(OutputCalibrationSpline { xs, ys, derivs })
 }
 
-/// Parsed min-max monotone head: `k` outer-min groups × `j` inner-max pieces,
-/// each a sign-constrained linear over `n` standardized features.
-#[derive(Clone, Debug)]
-pub struct MinMaxHeadMeta {
-    pub k: usize,
-    pub j: usize,
-    pub n: usize,
-    /// Row-major `[g][h][f]`, length `k·j·n`.
-    pub w: Vec<f32>,
-    /// Row-major `[g][h]`, length `k·j`.
-    pub b: Vec<f32>,
-}
-
-/// One per-codec affine entry parsed from the metadata payload.
-#[derive(Clone, Debug)]
-pub(crate) struct PerCodecAffineEntry {
-    /// Lowercase ASCII codec name (matched case-insensitively).
-    pub name: String,
-    /// `score = alpha + beta · raw`. Beta is positive by construction.
-    pub alpha: f32,
-    pub beta: f32,
-}
-
-/// Parsed per-codec calibration payload.
-#[derive(Clone, Debug)]
-pub(crate) struct PerCodecCalibration {
-    pub entries: Vec<PerCodecAffineEntry>,
-}
-
 /// Parsed per-sample α head metadata payload.
 #[derive(Clone, Debug)]
 pub struct PerSampleAlphaMeta {
@@ -156,17 +127,6 @@ pub(crate) fn parse_per_sample_alpha_meta(
         reducer_b,
         p_norm,
     })
-}
-
-/// Parsed hybrid-head metadata payload.
-#[derive(Clone, Debug)]
-pub struct HybridHeadMeta {
-    pub rank_w: Vec<f32>,
-    pub rank_b: f32,
-    pub alpha_logit: f32,
-    pub reducer_w: [f32; 4],
-    pub reducer_b: f32,
-    pub p_norm: f32,
 }
 
 /// Lazily-parsed bake metadata bundle. One instance per distinct

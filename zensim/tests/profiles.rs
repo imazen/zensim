@@ -185,9 +185,10 @@ fn rev7_scores_are_identical_across_simd_tiers() {
     let p = pair("333x251-photo-blur");
     for profile in [ZensimProfile::E, ZensimProfile::ECodec] {
         let mut scores = Vec::new();
-        for_each_token_permutation(CompileTimePolicy::Warn, |perm| {
+        let report = for_each_token_permutation(CompileTimePolicy::Warn, |perm| {
             scores.push((perm.label.clone(), score(profile, &p)));
         });
+        assert!(!scores.is_empty(), "no tier ran: {report:?}");
         let first = scores[0].1;
         for (label, s) in &scores {
             assert_eq!(

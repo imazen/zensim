@@ -913,7 +913,7 @@ fn dense_elem_canon<P: crate::featcanon::Pool>(
     p_kd: &mut [P; 3],
 ) -> f32 {
     let lane = x & (P::LANES - 1);
-    let (t, art_i, det_i, mse_i, m_w, i_w, mv, iv, kn, kd) =
+    let (t, _art_i, _det_i, _mse_i, m_w, i_w, mv, iv, kn, kd) =
         dense_terms32(s, dd, m1, m2, q, p, act, transducer_bank, direct, stable);
     for j in 0..13 {
         r[j].add(lane, t[j]);
@@ -1288,7 +1288,7 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64, const R7: bool>(
                     for h in 0..2 {
                         let bufs: [[f32; 8]; 29] =
                             std::array::from_fn(|j| arrs[j][8 * h..8 * h + 8].try_into().unwrap());
-                        let act8: [f32; 8] = act16[8 * h..8 * h + 8].try_into().unwrap();
+                        let _act8: [f32; 8] = act16[8 * h..8 * h + 8].try_into().unwrap();
                         chunk8_post!(c + h, bufs, &act8);
                     }
                 }
@@ -1305,7 +1305,7 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64, const R7: bool>(
                 let qv = f32x8::load_t(token, qrow[i..i + 8].try_into().unwrap());
                 let pv = f32x8::load_t(token, prow[i..i + 8].try_into().unwrap());
                 let actv = f32x8::load_t(token, arow[i..i + 8].try_into().unwrap());
-                let (t, art_i, det_i, mse_i, m_w, i_w, mv, iv, kn, kd, act_v) = dense_terms32_v(
+                let (t, _art_i, _det_i, _mse_i, m_w, i_w, mv, iv, kn, kd, _act_v) = dense_terms32_v(
                     token,
                     sv,
                     dv,
@@ -1546,6 +1546,7 @@ fn dense_block_kernel_canon64_vec_scalar<P: crate::featcanon::Pool64, const R7: 
 }
 
 /// Wasm128 sibling of [`dense_block_kernel_canon64_vec_scalar`].
+#[cfg(target_arch = "wasm32")]
 #[allow(clippy::too_many_arguments)]
 fn dense_block_kernel_canon64_vec_wasm128<P: crate::featcanon::Pool64, const R7: bool>(
     _token: archmage::Wasm128Token,
@@ -1578,6 +1579,7 @@ fn dense_block_kernel_canon64_vec_wasm128<P: crate::featcanon::Pool64, const R7:
 
 /// NEON runs the scalar canonical body (2026-10-03): NEON vector `max`/`min` propagate NaN where the canon's `f32::max`/
 /// `f64::max` drop it (the REV4VEC CI aarch64 failure), so only the x86_64 fused tiers run a lane-parallel body.
+#[cfg(target_arch = "aarch64")]
 #[allow(clippy::too_many_arguments)]
 fn dense_block_kernel_canon64_vec_neon<P: crate::featcanon::Pool64, const R7: bool>(
     _token: archmage::NeonToken,

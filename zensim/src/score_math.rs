@@ -54,7 +54,7 @@
 //! The head parameters arrive in two different owned layouts — `metric.rs`
 //! parses them into private structs, `zensim-validate` into public tuples —
 //! so the entry points here take **borrowed** parameter views
-//! ([`PerSampleAlphaParams`], [`HybridHeadParams`]). Both callers build one
+//! ([`PerSampleAlphaParams`]). Both callers build one
 //! for free; neither allocates, and neither has to adopt the other's storage.
 //!
 //! The [`PowForm`] is an explicit argument rather than a
@@ -95,27 +95,6 @@ pub struct PerSampleAlphaParams<'a> {
     pub rank_w: &'a [f32],
     /// Rank-head bias.
     pub rank_b: f32,
-    /// Pool-head reducer weights over `[μ, σ, max, p-norm]`.
-    pub reducer_w: [f32; 4],
-    /// Pool-head reducer bias.
-    pub reducer_b: f32,
-    /// The pool head's p-norm exponent.
-    pub p_norm: f32,
-}
-
-/// Borrowed hybrid-head parameters.
-///
-/// Same mix as [`PerSampleAlphaParams`] but `α = σ(alpha_logit)` is a single
-/// LEARNED SCALAR rather than a per-sample gate. Provenance:
-/// `zensim-train-core::hybrid_head`.
-#[derive(Debug, Clone, Copy)]
-pub struct HybridHeadParams<'a> {
-    /// Rank-head weights, one per hidden unit.
-    pub rank_w: &'a [f32],
-    /// Rank-head bias.
-    pub rank_b: f32,
-    /// The scalar gate logit.
-    pub alpha_logit: f32,
     /// Pool-head reducer weights over `[μ, σ, max, p-norm]`.
     pub reducer_w: [f32; 4],
     /// Pool-head reducer bias.

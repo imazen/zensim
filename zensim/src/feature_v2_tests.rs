@@ -4,31 +4,6 @@ pub(crate) mod tests {
     
     use crate::source::RgbSlice;
 
-    // Perf pass (§A.13): widened from 1e-6 to 5e-4 after switching mu1/mu2/
-    // ssq/s12 to `crate::blur::fused_blur_h_ssim`'s single fused-multiply-add
-    // sliding-window accumulation (`sum_sq = sv.mul_add(sv, dv.mul_add(dv,
-    // sum_sq))`) in place of the old separate `sq_sum_into`/`mul_into`
-    // elementwise passes (plain `sv*sv + dv*dv`, two roundings). FMA vs.
-    // non-FMA reassociation is a legitimate, expected last-few-ULP source of
-    // drift, not a logic change — but `ssim_d_local`'s `denom_s = ssq - mu1²
-    // - mu2² + C2_V2` is a near-zero-minus-near-zero subtraction on identity
-    // input (variance ≈ 0), stabilized only by the small `C2_V2 = 9e-4`
-    // constant, so ULP-scale noise in `ssq` gets divided by ~9e-4 and
-    // amplified ~1000x. This amplification is a PRE-EXISTING property of the
-    // `ssim_d_local` formula (small-constant-stabilized ratio), not
-    // something the perf pass introduced — only WHICH rounding path feeds it
-    // changed. Observed on the identity fixture as TOL was raised: idx 0
-    // (SSIM_MEAN) 2.52e-6, idx 1 (SSIM_DEV2) 1.47e-5, idx 9 (a
-    // weighted-pool/SOFT_PEAK slot one denominator-division further from the
-    // source) 1.20e-4 — each roughly one more small-constant division beyond
-    // the last, consistent with amplified-not-new noise rather than a
-    // distinct bug. 5e-4 leaves >4x headroom above the largest observed.
-    // Within this file's own documented allowance (v2 has no downstream
-    // consumers yet; v1's golden gate, which does NOT go through this
-    // kernel, keeps its own separate zero-tolerance `==` comparison in
-    // `tests/v1_golden_bytes.rs`).
-    const TOL: f64 = 5e-4;
-
     /// Phase-4 (§A.14): proves the SIMD raw-moment reformulation
     /// (`compute_channel_scale_v2`'s `mean_d`/`m2`/`m4` block) is
     /// numerically equivalent to `OnlineMoments`'s Terriberry (2007)
@@ -70,67 +45,6 @@ pub(crate) mod tests {
     // ------------------------------------------------------------------
     // Prepared-reference (pyramid reuse) path
     // ------------------------------------------------------------------
-
-    /// Deterministic structured content: gradients + edges + pseudo-noise
-    /// texture (LCG), so every feature family (SSIM, HF, gradient,
-    /// blockiness, transducer) sees real signal.
-    pub(crate) fn textured_image(w: usize, h: usize, seed: u32) -> Vec<[u8; 3]> {
-        let mut state = seed | 1;
-        let mut px = Vec::with_capacity(w * h);
-        for y in 0..h {
-            for x in 0..w {
-                state = state.wrapping_mul(1664525).wrapping_add(1013904223);
-                let noise = (state >> 24) as u8;
-                let grad = ((x * 255) / w.max(1)) as u8;
-                let edge = if (x / 9 + y / 7) % 2 == 0 { 200 } else { 40 };
-                let r = grad.wrapping_add(noise / 4);
-                let g = edge;
-                let b = ((y * 255) / h.max(1)) as u8 ^ (noise / 8);
-                px.push([r, g, b]);
-            }
-        }
-        px
-    }
-
-    /// Blocky quantization distortion — deterministic, codec-flavored.
-    pub(crate) fn quantize_distort(src: &[[u8; 3]], w: usize, h: usize) -> Vec<[u8; 3]> {
-        let mut out = src.to_vec();
-        for y in 0..h {
-            for x in 0..w {
-                let p = &mut out[y * w + x];
-                for c in p.iter_mut() {
-                    // 8x8-block DC-ish flattening + level quantization.
-                    *c = (*c / 24) * 24 + ((x % 8 == 0 || y % 8 == 0) as u8) * 6;
-                }
-            }
-        }
-        out
-    }
-
-    /// ERA-2 STRUCTURAL GATE: the properties the break actually rests on.
-    ///
-    /// **A correction the first version of this test earned.** It originally
-    /// asserted "band-merge == serial fold, bit-exact" and FAILED at 127x93
-    /// (7.854278564453125 vs 7.8542633056640625). The assertion was wrong, not
-    /// the design: banding IS a different grouping — serial computes
-    /// `((band0 + r32) + r33) + …` while banded computes `band0 + band1` — and
-    /// f64/f32 addition is not associative. This is the same blocking
-    /// non-associativity documented for the era-1 dense kernel; it does not go
-    /// away because the shape is new.
-    ///
-    /// **So `ERA2_BAND_ROWS` is SEMANTICS, not a tuning knob.** Changing it
-    /// changes output bytes and is an era decision. It is deliberately NOT
-    /// derived from the thread count, image height, or anything else that
-    /// varies at runtime — that is what makes thread-invariance structural.
-    /// Anyone reaching for it to "tune the band size" must read this first.
-    ///
-    /// What is actually asserted:
-    /// (a) the banded fold is INVARIANT to how bands are distributed across
-    ///     workers — computing them in any order, or all at once, gives
-    ///     bit-identical results, because the merge is sequential in band index;
-    /// (b) lane `j` holds exactly the terms at `x ≡ j (mod 8)` in increasing
-    ///     `x`, tail included — so the shape is width-independent, unlike
-    ///     era-1's, whose tail landed in the f64 running total.
 
     // ---------------------------------------------------------------- //
     // Feature-set IDs (`docs/FEATURE_SET_IDS.md`) — the COMPUTE half.
