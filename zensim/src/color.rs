@@ -69,23 +69,15 @@ const BT2020_TO_SRGB: [[f32; 3]; 3] = [
     [-0.018_151_0, -0.100_578_6,  1.118_729_6],
 ];
 
-use crate::source::{ColorPrimaries, GamutMapping};
+use crate::source::ColorPrimaries;
 
 /// Apply a gamut conversion matrix to a linear RGB pixel.
 ///
 /// Converts from the source color primaries to sRGB linear light.
-/// For [`ColorPrimaries::Srgb`] this is a no-op. Out-of-gamut handling
-/// follows `mapping` (issue #17): [`GamutMapping::Clip`] clamps to
-/// \[0, 1\] (post-display-clamp semantics, the default);
-/// [`GamutMapping::Preserve`] lets negative / >1 components flow into
-/// XYB (the opsin stage's `max(0)` on the post-mix sum keeps the
-/// cube-root domain valid), making codec gamut clipping detectable.
+/// For [`ColorPrimaries::Srgb`] this is a no-op. Out-of-gamut components
+/// are clamped to \[0, 1\] (post-display-clamp semantics).
 #[inline]
-pub(crate) fn apply_gamut_matrix(
-    rgb: &mut [f32; 3],
-    primaries: ColorPrimaries,
-    mapping: GamutMapping,
-) {
+pub(crate) fn apply_gamut_matrix(rgb: &mut [f32; 3], primaries: ColorPrimaries) {
     #[allow(unreachable_patterns)]
     let m = match primaries {
         ColorPrimaries::Srgb => return,
@@ -94,26 +86,9 @@ pub(crate) fn apply_gamut_matrix(
         _ => return, // future variants: pass through unchanged
     };
     let [r, g, b] = *rgb;
-    let out = [
-        m[0][0] * r + m[0][1] * g + m[0][2] * b,
-        m[1][0] * r + m[1][1] * g + m[1][2] * b,
-        m[2][0] * r + m[2][1] * g + m[2][2] * b,
-    ];
-    #[allow(unreachable_patterns)]
-    match mapping {
-        GamutMapping::Clip => {
-            rgb[0] = out[0].clamp(0.0, 1.0);
-            rgb[1] = out[1].clamp(0.0, 1.0);
-            rgb[2] = out[2].clamp(0.0, 1.0);
-        }
-        GamutMapping::Preserve => *rgb = out,
-        // Future variants behave as the documented default (Clip).
-        _ => {
-            rgb[0] = out[0].clamp(0.0, 1.0);
-            rgb[1] = out[1].clamp(0.0, 1.0);
-            rgb[2] = out[2].clamp(0.0, 1.0);
-        }
-    }
+    rgb[0] = (m[0][0] * r + m[0][1] * g + m[0][2] * b).clamp(0.0, 1.0);
+    rgb[1] = (m[1][0] * r + m[1][1] * g + m[1][2] * b).clamp(0.0, 1.0);
+    rgb[2] = (m[2][0] * r + m[2][1] * g + m[2][2] * b).clamp(0.0, 1.0);
 }
 
 /// Convert sRGB u8 to linear f32 via lookup table.
@@ -405,8 +380,8 @@ fn linear_xyb_canon_body<const CLAMP: bool>(
 // those tiers keep the scalar canonical body for EVERY pixel: routing them
 // through the generic vector would double-round every `mul_add`.
 //
-// [`CanonChunk`] is the [`OpsinChunk`] pattern widened to `f32x16` and
-// extended with the PU21 canon constants; the `*_canon_vec` functions are
+// [`CanonChunk`] is the [`OpsinChunk`] pattern widened to `f32x16`; the
+// `*_canon_vec` functions are
 // the per-leaf `#[magetypes]` chunk drivers; the `*_vec_scalar` /
 // `*_vec_wasm128` siblings are hand-written stubs that run the per-element
 // scalar bodies (the `-scalar` in each tier list keeps `#[magetypes]` from
@@ -414,7 +389,7 @@ fn linear_xyb_canon_body<const CLAMP: bool>(
 // `n mod 16` remainder through the identical scalar body, so a pixel's bits
 // never depend on where it sits in a band.
 
-/// Splatted canonical constants (opsin + PU21) plus the arithmetic of one
+/// Splatted canonical opsin constants plus the arithmetic of one
 /// 16-pixel chunk, in the generic magetypes `f32x16` vector. The single
 /// definition every fused tier runs — on v3 and NEON `f32x16` decomposes
 /// into two/four fused-FMA ops per lane, which is per-lane identical to one
@@ -434,12 +409,6 @@ struct CanonChunk<T: F32x16Convert> {
     x_bias: GenericF32x16<T>,
     y_bias: GenericF32x16<T>,
     b_bias: GenericF32x16<T>,
-    // PU21 canon (`pu21_encode_canon` + `/ PU_WHITE` + `PU_X_SCALE`).
-    l_min: GenericF32x16<T>,
-    l_max: GenericF32x16<T>,
-    p: [GenericF32x16<T>; 7],
-    pu_white: GenericF32x16<T>,
-    pu_x_scale: GenericF32x16<T>,
 }
 
 #[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))]
@@ -470,19 +439,6 @@ impl<T: F32x16Convert> CanonChunk<T> {
             x_bias: splat(0.42),
             y_bias: splat(0.01),
             b_bias: splat(0.55),
-            l_min: splat(crate::pu21::PU21_L_MIN),
-            l_max: splat(crate::pu21::PU21_L_MAX),
-            p: [
-                splat(crate::pu21::P[0]),
-                splat(crate::pu21::P[1]),
-                splat(crate::pu21::P[2]),
-                splat(crate::pu21::P[3]),
-                splat(crate::pu21::P[4]),
-                splat(crate::pu21::P[5]),
-                splat(crate::pu21::P[6]),
-            ],
-            pu_white: splat(PU_WHITE),
-            pu_x_scale: splat(PU_X_SCALE),
         }
     }
 
@@ -594,41 +550,6 @@ impl<T: F32x16Convert> CanonChunk<T> {
         )
     }
 
-    /// [`crate::pu21::pu21_encode_canon`] lane-parallel: identical clamp
-    /// and midp formula chain through the generated `f32x16`
-    /// transcendentals, which are the same op sequence as the `det_math`
-    /// scalar bodies on a fused tier.
-    #[inline(always)]
-    #[allow(clippy::manual_clamp)] // must match the scalar .max().min() lanes
-    fn pu_encode(&self, v: GenericF32x16<T>) -> GenericF32x16<T> {
-        let [p0, p1, p2, p3, p4, p5, p6] = self.p;
-        let y = v.max(self.l_min).min(self.l_max);
-        let yp = (p3 * y.log2_midp()).exp2_midp();
-        let inner = (p0 + p1 * yp) / (self.one + p2 * yp);
-        (p6 * ((p4 * inner.log2_midp()).exp2_midp() - p5)).max(self.zero)
-    }
-
-    /// [`pu_xyb_pixel_canon`] lane-parallel: the mix, canonical PU21 per
-    /// channel divided by `PU_WHITE`, and the positive-XYB shift.
-    #[inline(always)]
-    fn pu_xyb(
-        &self,
-        r: GenericF32x16<T>,
-        g: GenericF32x16<T>,
-        b: GenericF32x16<T>,
-    ) -> (GenericF32x16<T>, GenericF32x16<T>, GenericF32x16<T>) {
-        let [m0, m1, m2] = self.mixed(r, g, b);
-        let c0 = self.pu_encode(m0) / self.pu_white;
-        let c1 = self.pu_encode(m1) / self.pu_white;
-        let c2 = self.pu_encode(m2) / self.pu_white;
-        let x = self.half * (c0 - c1);
-        let y = self.half * (c0 + c1);
-        (
-            x.mul_add(self.pu_x_scale, self.x_bias),
-            y + self.y_bias,
-            (c2 - y) + self.b_bias,
-        )
-    }
 }
 
 /// Lane-parallel canonical sRGB8 → positive-XYB: [`srgb_xyb_canon_body`]'s
@@ -2604,399 +2525,6 @@ fn linear_to_positive_xyb_planar_inner(
     linear_positive_xyb_generic::<_, true>(token, pixels, x_out, y_out, b_out);
 }
 
-/// Unclamped sibling of [`linear_to_positive_xyb_planar_into`],
-/// used ONLY by the [`GamutMapping::Preserve`](crate::source::GamutMapping)
-/// conversion path (issue #17).
-///
-/// Input components may be negative or > 1 (out-of-sRGB-gamut linear light
-/// after a wide-gamut primaries matrix) — the clamped kernels would clip
-/// them back to the gamut boundary, re-masking exactly the difference
-/// `Preserve` exists to expose. The opsin mix's `max(0)` keeps the
-/// cube-root domain valid for arbitrary finite input; inputs must be
-/// finite (u8-linearized wide-gamut rows always are; `LinearF32Rgba`
-/// callers own their float hygiene in this opt-in mode).
-///
-/// Follows the same tail policy as its clamped sibling ([`PaddedTail`]):
-/// - **scalar tier**: the [`OpsinChunk`] arithmetic without the input clamp — full
-///   8-pixel chunks plus a zero-padded remainder chunk
-///   ([`linear_positive_xyb_generic`] with `CLAMP = false`), so for in-`[0,1]` inputs the
-///   output is bit-identical to the clamped entry at every position;
-/// - **every other tier** (v3/v4/v4x, neon, wasm128): the per-pixel form below for every
-///   pixel — same `mul_add` chains, same [`cbrtf_fast`], same biases — which is
-///   bit-identical to the clamped kernels' per-pixel remainder for in-`[0,1]` inputs.
-///
-/// Both locked by `unclamped_matches_clamped_scalar_for_in_gamut` and
-/// `scalar_tier_unclamped_matches_clamped_at_every_position` below.
-///
-/// `revision` as for [`linear_to_positive_xyb_planar_into`].
-pub(crate) fn linear_to_positive_xyb_planar_into_unclamped(
-    pixels: &[[f32; 3]],
-    x_out: &mut [f32],
-    y_out: &mut [f32],
-    b_out: &mut [f32],
-    revision: crate::feature_defs::FormulaRevision,
-) {
-    let mode = crate::featcanon::mode(revision);
-    if mode.active() {
-        linear_xyb_canon::<false>(pixels, x_out, y_out, b_out, mode, revision.cbrt_newton());
-        return;
-    }
-    incant!(
-        linear_positive_unclamped_inner(pixels, x_out, y_out, b_out),
-        [v3, neon, wasm128, scalar]
-    );
-}
-
-#[magetypes(v3, neon, wasm128, scalar)]
-fn linear_positive_unclamped_inner(
-    token: Token,
-    pixels: &[[f32; 3]],
-    x_out: &mut [f32],
-    y_out: &mut [f32],
-    b_out: &mut [f32],
-) {
-    linear_positive_unclamped_generic(token, pixels, x_out, y_out, b_out);
-}
-
-/// Tail policy of the unclamped converter: chunk arithmetic where the tier pads its tail,
-/// the per-pixel form everywhere else.
-#[inline(always)]
-fn linear_positive_unclamped_generic<T: F32x8Convert + PaddedTail>(
-    token: T,
-    pixels: &[[f32; 3]],
-    x_out: &mut [f32],
-    y_out: &mut [f32],
-    b_out: &mut [f32],
-) {
-    if T::PAD_TAIL {
-        linear_positive_xyb_generic::<_, false>(token, pixels, x_out, y_out, b_out);
-    } else {
-        linear_positive_unclamped_per_pixel(pixels, x_out, y_out, b_out);
-    }
-}
-
-/// The per-pixel unclamped form (see [`linear_to_positive_xyb_planar_into_unclamped`]).
-#[inline(always)]
-fn linear_positive_unclamped_per_pixel(
-    pixels: &[[f32; 3]],
-    x_out: &mut [f32],
-    y_out: &mut [f32],
-    b_out: &mut [f32],
-) {
-    let absorbance_bias = -cbrtf_fast(K_B0);
-    for (i, p) in pixels.iter().enumerate() {
-        let [r, g, b] = *p;
-
-        let mixed0 = K_M00
-            .mul_add(r, K_M01.mul_add(g, K_M02.mul_add(b, K_B0)))
-            .max(0.0);
-        let mixed1 = K_M10
-            .mul_add(r, K_M11.mul_add(g, K_M12.mul_add(b, K_B0)))
-            .max(0.0);
-        let mixed2 = K_M20
-            .mul_add(r, K_M21.mul_add(g, K_M22.mul_add(b, K_B0)))
-            .max(0.0);
-
-        let c0 = cbrtf_fast(mixed0) + absorbance_bias;
-        let c1 = cbrtf_fast(mixed1) + absorbance_bias;
-        let c2 = cbrtf_fast(mixed2);
-
-        let x = 0.5 * (c0 - c1);
-        let y = 0.5 * (c0 + c1);
-
-        x_out[i] = x.mul_add(14.0, 0.42);
-        y_out[i] = y + 0.01;
-        b_out[i] = (c2 - y) + 0.55;
-    }
-}
-
-/// HDR PU-XYB conversion (scalar): **absolute-luminance** linear RGB (cd/m²,
-/// NOT clamped to `[0,1]`) → PU-encoded XYB-like planes.
-///
-/// The HDR-path analog of [`linear_to_positive_xyb_planar_into`]: identical
-/// opsin mix + opponent structure, but each opsin-mixed channel goes through
-/// **PU21** (normalized so 100 cd/m² → ~1.0, matching the cube-root white
-/// point) instead of the cube root. The cube-root-domain absorbance centering
-/// (`-cbrt(K_B0)`) is dropped — in PU space `K_B0` clamps below `PU21_L_MIN`,
-/// so its contribution is ~0. See `docs/HDR_PLAN.md` §2b for the design
-/// rationale and the validation gate. Scalar only (HDR is a minority path;
-/// SIMD is a later optimization).
-/// PU21(100 cd/m²) ≈ 256.3 — normalizes a 100-nit reference white to ~1.0,
-/// the range the cube-root XYB white point sits in, so the downstream
-/// opponent biases + feature kernels stay in calibration.
-const PU_WHITE: f32 = 256.3;
-/// Opponent X amplification in PU space. The cube-root path uses 14× to make
-/// the tiny red-green cube-root difference visible; PU-space opsin
-/// differences are already large, and HDR validation favors
-/// luminance-dominant weighting (see docs/HDR_PLAN.md §2b).
-const PU_X_SCALE: f32 = 4.0;
-
-/// Scalar per-pixel PU-XYB (also the SIMD kernels' tail path and the
-/// parity-test reference).
-#[inline]
-fn pu_xyb_pixel(p: [f32; 3]) -> (f32, f32, f32) {
-    use crate::pu21::pu21_encode;
-    let mixed0 = K_M00
-        .mul_add(p[0], K_M01.mul_add(p[1], K_M02.mul_add(p[2], K_B0)))
-        .max(0.0);
-    let mixed1 = K_M10
-        .mul_add(p[0], K_M11.mul_add(p[1], K_M12.mul_add(p[2], K_B0)))
-        .max(0.0);
-    let mixed2 = K_M20
-        .mul_add(p[0], K_M21.mul_add(p[1], K_M22.mul_add(p[2], K_B0)))
-        .max(0.0);
-    let c0 = pu21_encode(mixed0) / PU_WHITE;
-    let c1 = pu21_encode(mixed1) / PU_WHITE;
-    let c2 = pu21_encode(mixed2) / PU_WHITE;
-    let x = 0.5 * (c0 - c1);
-    let y = 0.5 * (c0 + c1);
-    (x.mul_add(PU_X_SCALE, 0.42), y + 0.01, (c2 - y) + 0.55)
-}
-
-/// Canonical per-pixel PU-XYB (REV4SERVE): [`pu_xyb_pixel`]'s structure with
-/// the PU21 encode replaced by [`crate::pu21::pu21_encode_canon`] — the
-/// production SIMD `pu` closure's midp formula chain replicated scalar-side
-/// with always-fused `mul_add`. One body, every pixel, every tier.
-#[inline(always)]
-fn pu_xyb_pixel_canon(p: [f32; 3]) -> (f32, f32, f32) {
-    let mixed0 = K_M00
-        .mul_add(p[0], K_M01.mul_add(p[1], K_M02.mul_add(p[2], K_B0)))
-        .max(0.0);
-    let mixed1 = K_M10
-        .mul_add(p[0], K_M11.mul_add(p[1], K_M12.mul_add(p[2], K_B0)))
-        .max(0.0);
-    let mixed2 = K_M20
-        .mul_add(p[0], K_M21.mul_add(p[1], K_M22.mul_add(p[2], K_B0)))
-        .max(0.0);
-    let c0 = crate::pu21::pu21_encode_canon(mixed0) / PU_WHITE;
-    let c1 = crate::pu21::pu21_encode_canon(mixed1) / PU_WHITE;
-    let c2 = crate::pu21::pu21_encode_canon(mixed2) / PU_WHITE;
-    let x = 0.5 * (c0 - c1);
-    let y = 0.5 * (c0 + c1);
-    (x.mul_add(PU_X_SCALE, 0.42), y + 0.01, (c2 - y) + 0.55)
-}
-
-/// Canonical linear-absolute-nits → PU-XYB driver; `mode` as for
-/// [`srgb_xyb_canon`]. REV4VEC: full 16-pixel chunks run
-/// [`pu_xyb_canon_vec`] on the fused-FMA tiers; the scalar canonical body
-/// runs the remainder and every pixel on the non-fused tiers.
-pub(crate) fn pu_xyb_canon(
-    pixels: &[[f32; 3]],
-    x_out: &mut [f32],
-    y_out: &mut [f32],
-    b_out: &mut [f32],
-    mode: crate::featcanon::Mode,
-) {
-    let _ = mode;
-    incant!(
-        pu_xyb_canon_vec(pixels, x_out, y_out, b_out),
-        [v4x, v4, v3, neon, wasm128, scalar]
-    );
-}
-
-/// The per-element scalar canonical PU-XYB body — the fused tiers'
-/// remainder and the non-fused tiers' whole input, as
-/// [`srgb_xyb_canon_body`].
-fn pu_xyb_canon_body(pixels: &[[f32; 3]], x_out: &mut [f32], y_out: &mut [f32], b_out: &mut [f32]) {
-    for (i, p) in pixels.iter().enumerate() {
-        let (x, y, bb) = pu_xyb_pixel_canon(*p);
-        x_out[i] = x;
-        y_out[i] = y;
-        b_out[i] = bb;
-    }
-}
-
-/// [`pu_xyb_pixel_canon`] lane-parallel over [`CanonChunk::pu_xyb`] — the
-/// canonical opsin mix, canonical PU21, `/ PU_WHITE`, positive shift — for
-/// full 16-pixel chunks; the scalar body covers the remainder.
-/// `-scalar` as for [`srgb_xyb_canon_vec`].
-#[magetypes(define(f32x16), v4x, v4, v3, -scalar)]
-fn pu_xyb_canon_vec(
-    token: Token,
-    pixels: &[[f32; 3]],
-    x_out: &mut [f32],
-    y_out: &mut [f32],
-    b_out: &mut [f32],
-) {
-    let k = CanonChunk::new(token);
-    let n = pixels.len();
-    let chunks = n / 16;
-    for c in 0..chunks {
-        let base = c * 16;
-        let px: &[[f32; 3]; 16] = pixels[base..base + 16]
-            .try_into()
-            .expect("16 pixels per chunk");
-        let (r, g, b) = k.linear_lanes::<false>(px);
-        let (x, y, bb) = k.pu_xyb(r, g, b);
-        x_out[base..base + 16].copy_from_slice(&x.to_array());
-        y_out[base..base + 16].copy_from_slice(&y.to_array());
-        b_out[base..base + 16].copy_from_slice(&bb.to_array());
-    }
-    for i in (chunks * 16)..n {
-        let (x, y, bb) = pu_xyb_pixel_canon(pixels[i]);
-        x_out[i] = x;
-        y_out[i] = y;
-        b_out[i] = bb;
-    }
-}
-
-fn pu_xyb_canon_vec_scalar(
-    _token: archmage::ScalarToken,
-    pixels: &[[f32; 3]],
-    x_out: &mut [f32],
-    y_out: &mut [f32],
-    b_out: &mut [f32],
-) {
-    pu_xyb_canon_body(pixels, x_out, y_out, b_out);
-}
-
-#[cfg(target_arch = "wasm32")]
-fn pu_xyb_canon_vec_wasm128(
-    _token: archmage::Wasm128Token,
-    pixels: &[[f32; 3]],
-    x_out: &mut [f32],
-    y_out: &mut [f32],
-    b_out: &mut [f32],
-) {
-    pu_xyb_canon_body(pixels, x_out, y_out, b_out);
-}
-
-/// NEON runs the scalar canonical body (2026-10-03): its vector `max`/`min` propagate NaN, while the canon clamps with
-/// `f32::max`/`min`, which drop it, so a lane-parallel NEON chunk differed from the scalar canon on NaN inputs (CI aarch64).
-#[cfg(target_arch = "aarch64")]
-fn pu_xyb_canon_vec_neon(
-    _token: archmage::NeonToken,
-    pixels: &[[f32; 3]],
-    x_out: &mut [f32],
-    y_out: &mut [f32],
-    b_out: &mut [f32],
-) {
-    pu_xyb_canon_body(pixels, x_out, y_out, b_out);
-}
-
-/// [`linear_to_pu_xyb_planar_into`] at an explicit formula revision:
-/// the tier-dispatched production kernel through Rev3, the canonical body
-/// ([`pu_xyb_canon`]) at Rev4 — the same convention
-/// [`srgb_to_positive_xyb_planar_into_at_revision`] uses.
-pub(crate) fn linear_to_pu_xyb_planar_into_at_revision(
-    pixels: &[[f32; 3]],
-    x_out: &mut [f32],
-    y_out: &mut [f32],
-    b_out: &mut [f32],
-    revision: crate::feature_defs::FormulaRevision,
-) {
-    let mode = crate::featcanon::mode(revision);
-    if mode.active() {
-        pu_xyb_canon(pixels, x_out, y_out, b_out, mode);
-        return;
-    }
-    linear_to_pu_xyb_planar_into(pixels, x_out, y_out, b_out);
-}
-
-/// Absolute-luminance linear RGB → positive PU-XYB planes, SIMD-dispatched
-/// (8 px/iter via the generic magetypes tiers; `x^p = exp2_midp_precise(p·log2_midp_precise(x))`
-/// — the midp_precise transcendentals hold the scalar↔SIMD divergence to
-/// ≤ 2e-3 per channel; `simd_matches_scalar_within_band` pins it).
-pub(crate) fn linear_to_pu_xyb_planar_into(
-    pixels: &[[f32; 3]],
-    x_out: &mut [f32],
-    y_out: &mut [f32],
-    b_out: &mut [f32],
-) {
-    incant!(
-        pu_xyb_rows_inner(pixels, x_out, y_out, b_out),
-        [v3, neon, wasm128, scalar]
-    );
-}
-
-#[magetypes(v3, neon, wasm128, scalar)]
-fn pu_xyb_rows_inner(
-    token: Token,
-    pixels: &[[f32; 3]],
-    x_out: &mut [f32],
-    y_out: &mut [f32],
-    b_out: &mut [f32],
-) {
-    #[allow(non_camel_case_types)]
-    type f32x8 = GenericF32x8<Token>;
-    // PU21 banding_glare parameters — single source: `pu21::P`.
-    const P0: f32 = crate::pu21::P[0];
-    const P1: f32 = crate::pu21::P[1];
-    const P2: f32 = crate::pu21::P[2];
-    const P3: f32 = crate::pu21::P[3];
-    const P4: f32 = crate::pu21::P[4];
-    const P5: f32 = crate::pu21::P[5];
-    const P6: f32 = crate::pu21::P[6];
-    let l_min = f32x8::splat_t(token, crate::pu21::PU21_L_MIN);
-    let l_max = f32x8::splat_t(token, crate::pu21::PU21_L_MAX);
-    let zero = f32x8::splat_t(token, 0.0);
-    let one = f32x8::splat_t(token, 1.0);
-    let p0 = f32x8::splat_t(token, P0);
-    let p1 = f32x8::splat_t(token, P1);
-    let p2 = f32x8::splat_t(token, P2);
-    let p3 = f32x8::splat_t(token, P3);
-    let p4 = f32x8::splat_t(token, P4);
-    let p5 = f32x8::splat_t(token, P5);
-    let p6 = f32x8::splat_t(token, P6);
-    let inv_white = f32x8::splat_t(token, 1.0 / PU_WHITE);
-    let pu = |v: f32x8| -> f32x8 {
-        let y = v.max(l_min).min(l_max);
-        let yp = (p3 * y.log2_midp_precise()).exp2_midp_precise();
-        let inner = (p0 + p1 * yp) / (one + p2 * yp);
-        (p6 * ((p4 * inner.log2_midp_precise()).exp2_midp_precise() - p5)).max(zero)
-    };
-
-    let n = pixels.len();
-    let chunks = n / 8;
-    let mut r = [0.0f32; 8];
-    let mut g = [0.0f32; 8];
-    let mut b = [0.0f32; 8];
-    for c in 0..chunks {
-        let base = c * 8;
-        for (j, px) in pixels[base..base + 8].iter().enumerate() {
-            r[j] = px[0];
-            g[j] = px[1];
-            b[j] = px[2];
-        }
-        let vr = f32x8::from_array_t(token, r);
-        let vg = f32x8::from_array_t(token, g);
-        let vb = f32x8::from_array_t(token, b);
-        let kb0 = f32x8::splat_t(token, K_B0);
-        let m0 = (f32x8::splat_t(token, K_M00) * vr
-            + f32x8::splat_t(token, K_M01) * vg
-            + f32x8::splat_t(token, K_M02) * vb
-            + kb0)
-            .max(zero);
-        let m1 = (f32x8::splat_t(token, K_M10) * vr
-            + f32x8::splat_t(token, K_M11) * vg
-            + f32x8::splat_t(token, K_M12) * vb
-            + kb0)
-            .max(zero);
-        let m2 = (f32x8::splat_t(token, K_M20) * vr
-            + f32x8::splat_t(token, K_M21) * vg
-            + f32x8::splat_t(token, K_M22) * vb
-            + kb0)
-            .max(zero);
-        let c0 = pu(m0) * inv_white;
-        let c1 = pu(m1) * inv_white;
-        let c2 = pu(m2) * inv_white;
-        let half = f32x8::splat_t(token, 0.5);
-        let x = half * (c0 - c1);
-        let y = half * (c0 + c1);
-        (x * f32x8::splat_t(token, PU_X_SCALE) + f32x8::splat_t(token, 0.42))
-            .store((&mut x_out[base..base + 8]).try_into().unwrap());
-        (y + f32x8::splat_t(token, 0.01)).store((&mut y_out[base..base + 8]).try_into().unwrap());
-        ((c2 - y) + f32x8::splat_t(token, 0.55))
-            .store((&mut b_out[base..base + 8]).try_into().unwrap());
-    }
-    for i in (chunks * 8)..n {
-        let (x, y, bb) = pu_xyb_pixel(pixels[i]);
-        x_out[i] = x;
-        y_out[i] = y;
-        b_out[i] = bb;
-    }
-}
-
 // ---------------------------------------------------------------------------
 // RGBA/BGRA compositing helpers — all produce linear f32 RGB output
 // ---------------------------------------------------------------------------
@@ -3193,52 +2721,6 @@ mod tests {
     use super::*;
     use crate::source::ColorPrimaries;
 
-    /// Gated-mirror parity (issue #17): the unclamped scalar converter
-    /// must be BIT-identical to the clamped entry's scalar remainder for
-    /// in-gamut input. n = 7 (< the 8-wide SIMD chunk) forces the clamped
-    /// entry onto its scalar remainder, where the clamp is an arithmetic
-    /// no-op on in-[0,1] values — any divergence means the mirror drifted.
-    #[test]
-    fn unclamped_matches_clamped_scalar_for_in_gamut() {
-        let pixels: Vec<[f32; 3]> = vec![
-            [0.0, 0.0, 0.0],
-            [1.0, 1.0, 1.0],
-            [0.25, 0.5, 0.75],
-            [0.999, 0.001, 0.5],
-            [0.1, 0.9, 0.3],
-            [0.66, 0.33, 0.0],
-            [0.5, 0.5, 0.5],
-        ];
-        let n = pixels.len();
-        // Production (Rev1–3) and canonical (Rev4) arithmetic alike.
-        for rev in [
-            crate::feature_defs::FormulaRevision::Rev3,
-            crate::feature_defs::FormulaRevision::Rev4,
-        ] {
-            let (mut xc, mut yc, mut bc) = (vec![0.0f32; n], vec![0.0f32; n], vec![0.0f32; n]);
-            let (mut xu, mut yu, mut bu) = (vec![0.0f32; n], vec![0.0f32; n], vec![0.0f32; n]);
-            linear_to_positive_xyb_planar_into(&pixels, &mut xc, &mut yc, &mut bc, rev);
-            linear_to_positive_xyb_planar_into_unclamped(&pixels, &mut xu, &mut yu, &mut bu, rev);
-            for i in 0..n {
-                assert_eq!(
-                    xc[i].to_bits(),
-                    xu[i].to_bits(),
-                    "{rev:?}: X differs at px {i}"
-                );
-                assert_eq!(
-                    yc[i].to_bits(),
-                    yu[i].to_bits(),
-                    "{rev:?}: Y differs at px {i}"
-                );
-                assert_eq!(
-                    bc[i].to_bits(),
-                    bu[i].to_bits(),
-                    "{rev:?}: B differs at px {i}"
-                );
-            }
-        }
-    }
-
     /// featcanon D1: the opsin leaf follows the revision it is GIVEN, in any
     /// process. Rev4 is the canonical body; Rev1–3 is the production dispatch.
     /// Run in a Rev3 and a Rev4 process, so the process switch provably does
@@ -3326,42 +2808,6 @@ mod tests {
         opsin_leaf_follows_the_passed_revision();
     }
 
-    /// Scalar tier: the unclamped converter runs the clamped converter's chunk arithmetic
-    /// (2026-09-25), so on in-gamut input the two agree bit for bit at EVERY position of a
-    /// band, chunks as well as remainder. Calls the scalar variants directly, so it runs on
-    /// every host. Bands of 1..=40 pixels cover every remainder and up to 5 full chunks.
-    #[test]
-    fn scalar_tier_unclamped_matches_clamped_at_every_position() {
-        use archmage::SimdToken as _;
-        let token = archmage::ScalarToken::summon().expect("scalar token is infallible");
-        let mut state = 0x9E37_79B9_7F4A_7C15u64;
-        let mut next = || {
-            state ^= state << 13;
-            state ^= state >> 7;
-            state ^= state << 17;
-            (state >> 40) as f32 / (1u64 << 24) as f32
-        };
-        // In-gamut: every component in [0, 1], including the exact endpoints.
-        let mut pixels: Vec<[f32; 3]> = vec![[0.0, 0.0, 0.0], [1.0, 1.0, 1.0], [1.0, 0.0, 0.5]];
-        pixels.extend((0..500).map(|_| [next(), next(), next()]));
-        for n in 1..=40usize {
-            for start in 0..(pixels.len() - n).min(16) {
-                let band = &pixels[start..start + n];
-                let (mut xc, mut yc, mut bc) = (vec![0.0f32; n], vec![0.0f32; n], vec![0.0f32; n]);
-                let (mut xu, mut yu, mut bu) = (vec![0.0f32; n], vec![0.0f32; n], vec![0.0f32; n]);
-                linear_to_positive_xyb_planar_inner_scalar(token, band, &mut xc, &mut yc, &mut bc);
-                linear_positive_unclamped_inner_scalar(token, band, &mut xu, &mut yu, &mut bu);
-                for i in 0..n {
-                    assert_eq!(
-                        (xc[i].to_bits(), yc[i].to_bits(), bc[i].to_bits()),
-                        (xu[i].to_bits(), yu[i].to_bits(), bu[i].to_bits()),
-                        "n={n} start={start}: unclamped differs from clamped at px {i}"
-                    );
-                }
-            }
-        }
-    }
-
     /// Scalar tier: a pixel gets the same bits in a full 8-pixel chunk and in the
     /// remainder (2026-09-25 fix). Calls the scalar variants directly, so it runs on
     /// every host, not only where dispatch lands on scalar. `mul_add` is unfused on
@@ -3439,158 +2885,11 @@ mod tests {
         });
     }
 
-    /// rev4canon C1: at [`FormulaRevision::Rev4`] every pixel's XYB is
-    /// position-independent — identical bits in a full SIMD chunk and in the
-    /// row tail, on EVERY dispatch tier, at band widths not divisible by the
-    /// lane count. The canonical body ([`srgb_xyb_canon`]/[`linear_xyb_canon`])
-    /// is one scalar per-pixel form, so this holds by construction; the gate
-    /// exists so no later change can route Rev4's opsin leaf back to a
-    /// tier-dispatched kernel whose remainder runs different arithmetic (the
-    /// 2026-09-25 chunk-vs-remainder defect).
-    #[test]
-    fn rev4_xyb_body_tail_bits_identical_across_tiers() {
-        // The permutation disables SIMD tokens PROCESS-WIDE, and the archmage
-        // lock only serialises its own holders, so in this shared lib test
-        // binary it would race every tier-sensitive test. The test therefore
-        // re-executes itself as a child process (the repo's self-re-exec
-        // pattern, e.g. `metric::bake`) and the permutation runs there alone.
-        const CHILD: &str = "ZENSIM_XYB_TIER_CHILD";
-        const SENTINEL: &str = "REV4-XYB-BODY-TAIL permutations=";
-        if std::env::var_os(CHILD).is_none() {
-            let exe = std::env::current_exe().expect("test binary path");
-            let t0 = std::time::Instant::now();
-            let out = std::process::Command::new(exe)
-                .args([
-                    "color::tests::rev4_xyb_body_tail_bits_identical_across_tiers",
-                    "--exact",
-                    "--nocapture",
-                    "--test-threads=1",
-                ])
-                .env(CHILD, "1")
-                .output()
-                .expect("re-exec the test binary");
-            let (so, se) = (
-                String::from_utf8_lossy(&out.stdout),
-                String::from_utf8_lossy(&out.stderr),
-            );
-            assert!(out.status.success(), "child failed\n{so}\n{se}");
-            assert!(so.contains(SENTINEL), "the child never ran its body\n{so}");
-            println!(
-                "rev4 XYB body==tail child: {:.2?}; {}",
-                t0.elapsed(),
-                so.lines().find(|l| l.contains(SENTINEL)).unwrap_or("")
-            );
-            return;
-        }
-        let _tier_lock = archmage::testing::lock_token_testing();
-        use crate::feature_defs::FormulaRevision::Rev4;
-        use archmage::testing::{CompileTimePolicy, for_each_token_permutation};
-
-        let mut state = 0x2545_F491_4F6C_DD1Du64;
-        let mut next = || {
-            state ^= state << 13;
-            state ^= state >> 7;
-            state ^= state << 17;
-            state
-        };
-        let mut srgb: Vec<[u8; 3]> = vec![[0, 0, 0], [255, 255, 255], [255, 0, 0], [0, 0, 255]];
-        srgb.extend((0..1500).map(|_| {
-            let v = next();
-            [v as u8, (v >> 8) as u8, (v >> 16) as u8]
-        }));
-        let lin: Vec<[f32; 3]> = (0..1500)
-            .map(|_| {
-                let f = |v: u64| (v & 0xFF_FFFF) as f32 / (1u64 << 24) as f32 * 1.5 - 0.25;
-                let v = next();
-                [f(v), f(v >> 20), f(v.rotate_left(7))]
-            })
-            .collect();
-
-        type Convert<'a, P> = &'a dyn Fn(&[P], &mut [f32], &mut [f32], &mut [f32]);
-        fn check<P: Copy>(what: &str, px: &[P], convert: Convert<'_, P>) {
-            let one = |p: P| {
-                let band = [p; 8];
-                let (mut x, mut y, mut b) = ([0f32; 8], [0f32; 8], [0f32; 8]);
-                convert(&band, &mut x, &mut y, &mut b);
-                for l in 1..8 {
-                    assert_eq!(
-                        (x[0].to_bits(), y[0].to_bits(), b[0].to_bits()),
-                        (x[l].to_bits(), y[l].to_bits(), b[l].to_bits()),
-                        "{what}: lanes of one full chunk disagree"
-                    );
-                }
-                (x[0].to_bits(), y[0].to_bits(), b[0].to_bits())
-            };
-            let reference: Vec<_> = px.iter().map(|&p| one(p)).collect();
-            // widths with a nonempty remainder under both the 8- and 16-wide
-            // chunkings the SIMD kernels used.
-            for n in [9usize, 13, 17, 23, 29, 31, 33, 37, 41] {
-                for start in 0..px.len().saturating_sub(n).min(48) {
-                    let band = &px[start..start + n];
-                    let (mut x, mut y, mut b) = (vec![0f32; n], vec![0f32; n], vec![0f32; n]);
-                    convert(band, &mut x, &mut y, &mut b);
-                    for i in 0..n {
-                        assert_eq!(
-                            (x[i].to_bits(), y[i].to_bits(), b[i].to_bits()),
-                            reference[start + i],
-                            "{what}: n={n} start={start} pos {i}: tail/body bits differ"
-                        );
-                    }
-                }
-            }
-        }
-
-        let report = for_each_token_permutation(CompileTimePolicy::Warn, |perm| {
-            check("srgb_to_positive_xyb@rev4", &srgb, &|p, x, y, b| {
-                srgb_to_positive_xyb_planar_into_at_revision(p, x, y, b, Rev4)
-            });
-            check("linear_to_positive_xyb@rev4", &lin, &|p, x, y, b| {
-                linear_to_positive_xyb_planar_into(p, x, y, b, Rev4)
-            });
-            check(
-                "linear_to_positive_xyb_unclamped@rev4",
-                &lin,
-                &|p, x, y, b| linear_to_positive_xyb_planar_into_unclamped(p, x, y, b, Rev4),
-            );
-            eprintln!("rev4 XYB body==tail: permutation {} clean", perm.label);
-        });
-        assert!(report.permutations_run >= 1);
-        println!(
-            "REV4-XYB-BODY-TAIL permutations={} all position-identical",
-            report.permutations_run
-        );
-    }
-
-    /// The unclamped converter handles out-of-gamut input without NaN/inf:
-    /// the opsin mix's `max(0)` keeps the cube-root domain valid.
-    #[test]
-    fn unclamped_out_of_gamut_stays_finite() {
-        let pixels: Vec<[f32; 3]> = vec![
-            [1.66, -0.125, -0.018], // BT.2020 red through the matrix
-            [-0.51, 1.04, -0.31],
-            [2.0, -1.0, 3.0],
-        ];
-        let n = pixels.len();
-        for rev in [
-            crate::feature_defs::FormulaRevision::Rev3,
-            crate::feature_defs::FormulaRevision::Rev4,
-        ] {
-            let (mut x, mut y, mut b) = (vec![0.0f32; n], vec![0.0f32; n], vec![0.0f32; n]);
-            linear_to_positive_xyb_planar_into_unclamped(&pixels, &mut x, &mut y, &mut b, rev);
-            for i in 0..n {
-                assert!(
-                    x[i].is_finite() && y[i].is_finite() && b[i].is_finite(),
-                    "{rev:?}"
-                );
-            }
-        }
-    }
-
     /// Verify P3→sRGB matrix: sRGB white (1,1,1) should stay (1,1,1).
     #[test]
     fn p3_to_srgb_preserves_white() {
         let mut rgb = [1.0f32, 1.0, 1.0];
-        apply_gamut_matrix(&mut rgb, ColorPrimaries::DisplayP3, GamutMapping::Clip);
+        apply_gamut_matrix(&mut rgb, ColorPrimaries::DisplayP3);
         for (c, &val) in rgb.iter().enumerate() {
             assert!(
                 (val - 1.0).abs() < 1e-4,
@@ -3603,7 +2902,7 @@ mod tests {
     #[test]
     fn bt2020_to_srgb_preserves_white() {
         let mut rgb = [1.0f32, 1.0, 1.0];
-        apply_gamut_matrix(&mut rgb, ColorPrimaries::Bt2020, GamutMapping::Clip);
+        apply_gamut_matrix(&mut rgb, ColorPrimaries::Bt2020);
         for (c, &val) in rgb.iter().enumerate() {
             assert!(
                 (val - 1.0).abs() < 1e-4,
@@ -3617,7 +2916,7 @@ mod tests {
     #[test]
     fn p3_red_clamps_to_srgb_gamut() {
         let mut rgb = [1.0f32, 0.0, 0.0];
-        apply_gamut_matrix(&mut rgb, ColorPrimaries::DisplayP3, GamutMapping::Clip);
+        apply_gamut_matrix(&mut rgb, ColorPrimaries::DisplayP3);
         assert_eq!(rgb[0], 1.0, "R should be clamped to 1.0");
         assert_eq!(rgb[1], 0.0, "G should be clamped to 0.0");
         assert_eq!(rgb[2], 0.0, "B should be clamped to 0.0");
@@ -3628,7 +2927,7 @@ mod tests {
     fn srgb_is_noop() {
         let mut rgb = [0.5f32, 0.3, 0.8];
         let original = rgb;
-        apply_gamut_matrix(&mut rgb, ColorPrimaries::Srgb, GamutMapping::Clip);
+        apply_gamut_matrix(&mut rgb, ColorPrimaries::Srgb);
         assert_eq!(rgb, original);
     }
 
@@ -3637,7 +2936,7 @@ mod tests {
     #[test]
     fn p3_grey_stays_grey() {
         let mut rgb = [0.5f32, 0.5, 0.5];
-        apply_gamut_matrix(&mut rgb, ColorPrimaries::DisplayP3, GamutMapping::Clip);
+        apply_gamut_matrix(&mut rgb, ColorPrimaries::DisplayP3);
         for (c, &val) in rgb.iter().enumerate() {
             assert!(
                 (val - 0.5).abs() < 1e-3,
@@ -3650,7 +2949,7 @@ mod tests {
     #[test]
     fn bt2020_red_clamps_to_srgb_gamut() {
         let mut rgb = [1.0f32, 0.0, 0.0];
-        apply_gamut_matrix(&mut rgb, ColorPrimaries::Bt2020, GamutMapping::Clip);
+        apply_gamut_matrix(&mut rgb, ColorPrimaries::Bt2020);
         assert_eq!(rgb[0], 1.0, "R should be clamped to 1.0");
         assert_eq!(rgb[1], 0.0, "G should be clamped to 0.0");
         assert_eq!(rgb[2], 0.0, "B should be clamped to 0.0");
@@ -3675,41 +2974,6 @@ mod tests {
 mod pu_simd_parity_tests {
     use super::*;
 
-    /// SIMD (incant-dispatched) vs scalar per-pixel PU-XYB: the lowp
-    /// transcendentals must stay within a tight band of the scalar powf
-    /// path across the full luminance range (incl. HDR extremes), so the
-    /// dispatched conversion cannot shift scores between machines.
-    #[test]
-    fn simd_matches_scalar_within_band() {
-        // 1031 px (not a multiple of 8 — exercises the tail) spanning
-        // 0.001..12000 nits log-spaced with chroma variation.
-        let n = 1031;
-        let pixels: Vec<[f32; 3]> = (0..n)
-            .map(|i| {
-                let t = i as f32 / (n - 1) as f32;
-                let y = 0.001 * (12_000.0f32 / 0.001).powf(t);
-                [y * 1.2, y, y * 0.7]
-            })
-            .collect();
-        let mut xs = vec![0.0f32; n];
-        let mut ys = vec![0.0f32; n];
-        let mut bs = vec![0.0f32; n];
-        linear_to_pu_xyb_planar_into(&pixels, &mut xs, &mut ys, &mut bs);
-        let mut max_d = 0.0f32;
-        for (i, p) in pixels.iter().enumerate() {
-            let (x, y, b) = pu_xyb_pixel(*p);
-            for (got, want) in [(xs[i], x), (ys[i], y), (bs[i], b)] {
-                let d = (got - want).abs();
-                if d > max_d {
-                    max_d = d;
-                }
-            }
-        }
-        // Outputs live in ~[0, 2.5]; 2e-3 abs keeps score impact negligible
-        // while leaving room for the midp_precise transcendental error budget
-        // compounding through two pow chains.
-        assert!(max_d <= 2e-3, "SIMD vs scalar max |delta| = {max_d}");
-    }
 }
 
 #[cfg(test)]
@@ -3738,45 +3002,6 @@ mod rev4vec_tests {
         fn f32_bits(&mut self) -> f32 {
             f32::from_bits(self.next() as u32)
         }
-    }
-
-    /// Every f32 special class the gate calls out, plus the canonical
-    /// clamp/opsin bounds, as literal pixels (each repeated into all three
-    /// channels and rotated across them).
-    fn special_linear_pixels() -> Vec<[f32; 3]> {
-        let vals: Vec<f32> = vec![
-            0.0,
-            -0.0,
-            1.0,
-            -1.0,
-            f32::MIN_POSITIVE,
-            f32::EPSILON,
-            f32::from_bits(1),           // smallest denormal
-            f32::from_bits(0x007F_FFFF), // largest denormal
-            f32::INFINITY,
-            f32::NEG_INFINITY,
-            f32::NAN,
-            f32::from_bits(0x7FC0_0001), // a different NaN payload
-            crate::pu21::PU21_L_MIN,
-            crate::pu21::PU21_L_MAX,
-            crate::pu21::PU21_L_MIN * 0.5,
-            crate::pu21::PU21_L_MAX * 2.0,
-            K_B0,
-            10000.0,
-            1e-30,
-            1e30,
-            -1e30,
-            0.5,
-            0.25,
-        ];
-        let mut px = Vec::new();
-        for (i, &a) in vals.iter().enumerate() {
-            for (j, &b) in vals.iter().enumerate().take(vals.len()).skip(i % 3).take(3) {
-                px.push([a, b, vals[(i + j) % vals.len()]]);
-            }
-            px.push([a, a, a]);
-        }
-        px
     }
 
     /// `(pixels, x_out, y_out, b_out)` converter under test.
@@ -3891,189 +3116,4 @@ mod rev4vec_tests {
         }
     }
 
-    /// linear f32 → XYB, both clamp variants: 10^7 random bit patterns
-    /// (all special classes reached) + the explicit special-class pixels,
-    /// n ≡ 15 (mod 16) so the remainder path is covered too.
-    #[test]
-    fn linear_xyb_canon_vec_matches_scalar_body_on_every_compiled_tier() {
-        let mut rng = Rng(0x2545_F491_4F6C_DD1D);
-        let mut px: Vec<[f32; 3]> = special_linear_pixels();
-        let target = px.len() + 10_000_000;
-        while px.len() < target {
-            px.push([rng.f32_bits(), rng.f32_bits(), rng.f32_bits()]);
-        }
-        while px.len() % 16 != 15 {
-            px.push([rng.f32_bits(), rng.f32_bits(), rng.f32_bits()]);
-        }
-        let n = px.len();
-
-        for (clamp, cbrt7) in [(true, false), (false, false), (true, true), (false, true)] {
-            let (mut xe, mut ye, mut be) = (vec![0f32; n], vec![0f32; n], vec![0f32; n]);
-            if clamp {
-                linear_xyb_canon_body::<true>(&px, &mut xe, &mut ye, &mut be, cbrt7);
-            } else {
-                linear_xyb_canon_body::<false>(&px, &mut xe, &mut ye, &mut be, cbrt7);
-            }
-            let tag = if clamp { "clamped" } else { "unclamped" };
-            let run = |name: &str, f: &mut PlanarFn<'_, [f32; 3]>| {
-                let (mut x, mut y, mut b) = (vec![0f32; n], vec![0f32; n], vec![0f32; n]);
-                f(&px, &mut x, &mut y, &mut b);
-                for i in 0..n {
-                    assert_eq!(
-                        (x[i].to_bits(), y[i].to_bits(), b[i].to_bits()),
-                        (xe[i].to_bits(), ye[i].to_bits(), be[i].to_bits()),
-                        "{tag}/{name} cbrt7={cbrt7}: differs at px {i}"
-                    );
-                }
-            };
-            run("scalar", &mut |p, x, y, b| {
-                if clamp {
-                    linear_xyb_canon_vec_scalar::<true>(
-                        archmage::ScalarToken::summon().unwrap(),
-                        p,
-                        x,
-                        y,
-                        b,
-                        cbrt7,
-                    )
-                } else {
-                    linear_xyb_canon_vec_scalar::<false>(
-                        archmage::ScalarToken::summon().unwrap(),
-                        p,
-                        x,
-                        y,
-                        b,
-                        cbrt7,
-                    )
-                }
-            });
-            #[cfg(target_arch = "x86_64")]
-            {
-                if let Some(t) = archmage::X64V3Token::summon() {
-                    run("v3", &mut |p, x, y, b| {
-                        if clamp {
-                            linear_xyb_canon_vec_v3::<true>(t, p, x, y, b, cbrt7)
-                        } else {
-                            linear_xyb_canon_vec_v3::<false>(t, p, x, y, b, cbrt7)
-                        }
-                    });
-                }
-                #[cfg(feature = "avx512")]
-                {
-                    if let Some(t) = archmage::X64V4Token::summon() {
-                        run("v4", &mut |p, x, y, b| {
-                            if clamp {
-                                linear_xyb_canon_vec_v4::<true>(t, p, x, y, b, cbrt7)
-                            } else {
-                                linear_xyb_canon_vec_v4::<false>(t, p, x, y, b, cbrt7)
-                            }
-                        });
-                    }
-                    if let Some(t) = archmage::X64V4xToken::summon() {
-                        run("v4x", &mut |p, x, y, b| {
-                            if clamp {
-                                linear_xyb_canon_vec_v4x::<true>(t, p, x, y, b, cbrt7)
-                            } else {
-                                linear_xyb_canon_vec_v4x::<false>(t, p, x, y, b, cbrt7)
-                            }
-                        });
-                    }
-                }
-            }
-            #[cfg(target_arch = "aarch64")]
-            {
-                if let Some(t) = archmage::NeonToken::summon() {
-                    run("neon", &mut |p, x, y, b| {
-                        if clamp {
-                            linear_xyb_canon_vec_neon::<true>(t, p, x, y, b, cbrt7)
-                        } else {
-                            linear_xyb_canon_vec_neon::<false>(t, p, x, y, b, cbrt7)
-                        }
-                    });
-                }
-            }
-            #[cfg(target_arch = "wasm32")]
-            {
-                if let Some(t) = archmage::Wasm128Token::summon() {
-                    run("wasm128", &mut |p, x, y, b| {
-                        if clamp {
-                            linear_xyb_canon_vec_wasm128::<true>(t, p, x, y, b, cbrt7)
-                        } else {
-                            linear_xyb_canon_vec_wasm128::<false>(t, p, x, y, b, cbrt7)
-                        }
-                    });
-                }
-            }
-        }
-    }
-
-    /// PU-XYB: same input space as the unclamped linear leaf, plus the
-    /// log-spaced nits ramp the PU tests use.
-    #[test]
-    fn pu_xyb_canon_vec_matches_scalar_body_on_every_compiled_tier() {
-        let mut rng = Rng(0xB529_7A4D_E969_A4F1);
-        let mut px: Vec<[f32; 3]> = special_linear_pixels();
-        for i in 0..1031usize {
-            let t = i as f32 / 1030.0;
-            let y = 0.001f32 * (12_000.0f32 / 0.001).powf(t);
-            px.push([y * 1.2, y, y * 0.7]);
-        }
-        let target = px.len() + 10_000_000;
-        while px.len() < target {
-            px.push([rng.f32_bits(), rng.f32_bits(), rng.f32_bits()]);
-        }
-        while px.len() % 16 != 15 {
-            px.push([rng.f32_bits(), rng.f32_bits(), rng.f32_bits()]);
-        }
-        let n = px.len();
-
-        let (mut xe, mut ye, mut be) = (vec![0f32; n], vec![0f32; n], vec![0f32; n]);
-        pu_xyb_canon_body(&px, &mut xe, &mut ye, &mut be);
-        let run = |name: &str, f: &mut PlanarFn<'_, [f32; 3]>| {
-            let (mut x, mut y, mut b) = (vec![0f32; n], vec![0f32; n], vec![0f32; n]);
-            f(&px, &mut x, &mut y, &mut b);
-            for i in 0..n {
-                assert_eq!(
-                    (x[i].to_bits(), y[i].to_bits(), b[i].to_bits()),
-                    (xe[i].to_bits(), ye[i].to_bits(), be[i].to_bits()),
-                    "{name}: differs at px {i} ({:?})",
-                    px[i]
-                );
-            }
-        };
-        run("scalar", &mut |p, x, y, b| {
-            pu_xyb_canon_vec_scalar(archmage::ScalarToken::summon().unwrap(), p, x, y, b)
-        });
-        #[cfg(target_arch = "x86_64")]
-        {
-            if let Some(t) = archmage::X64V3Token::summon() {
-                run("v3", &mut |p, x, y, b| pu_xyb_canon_vec_v3(t, p, x, y, b));
-            }
-            #[cfg(feature = "avx512")]
-            {
-                if let Some(t) = archmage::X64V4Token::summon() {
-                    run("v4", &mut |p, x, y, b| pu_xyb_canon_vec_v4(t, p, x, y, b));
-                }
-                if let Some(t) = archmage::X64V4xToken::summon() {
-                    run("v4x", &mut |p, x, y, b| pu_xyb_canon_vec_v4x(t, p, x, y, b));
-                }
-            }
-        }
-        #[cfg(target_arch = "aarch64")]
-        {
-            if let Some(t) = archmage::NeonToken::summon() {
-                run("neon", &mut |p, x, y, b| {
-                    pu_xyb_canon_vec_neon(t, p, x, y, b)
-                });
-            }
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            if let Some(t) = archmage::Wasm128Token::summon() {
-                run("wasm128", &mut |p, x, y, b| {
-                    pu_xyb_canon_vec_wasm128(t, p, x, y, b)
-                });
-            }
-        }
-    }
 }

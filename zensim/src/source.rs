@@ -10,9 +10,7 @@
 /// stage — the opsin matrix and SIMD kernels remain untouched.
 ///
 /// **SDR pixel range:** All primaries assume input values in `[0, 1]` after
-/// linearization. HDR content is scored through the PU entry points
-/// ([`Zensim::compute_pu_linear`](crate::Zensim::compute_pu_linear)) instead;
-/// sources carrying HDR-coded pixels signal it via [`ImageSource::is_hdr`].
+/// linearization; out-of-gamut colours are clipped to the sRGB gamut.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum ColorPrimaries {
@@ -31,46 +29,6 @@ pub enum ColorPrimaries {
     /// (approximately gamma 2.4), which differs from sRGB by ~2% in mid-tones.
     /// For exact results, linearize externally and use `LinearF32Rgba`.
     Bt2020,
-}
-
-/// How colors outside the sRGB gamut are handled when converting from
-/// wide-gamut [`ColorPrimaries`] (Display P3 / BT.2020) to the metric's
-/// internal sRGB-linear space (issue #17).
-///
-/// Irrelevant for [`ColorPrimaries::Srgb`] sources (no conversion runs).
-#[non_exhaustive]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub enum GamutMapping {
-    /// Clip out-of-gamut colors to `[0, 1]` after the primaries matrix
-    /// (default — matches every zensim release to date).
-    ///
-    /// This measures **post-display-clamp** perception: an sRGB display
-    /// cannot show out-of-gamut colors, so a codec that destructively
-    /// clips them to the sRGB gamut produces output *visually identical
-    /// on that display* — and zensim scores it ≈100. The trade-off: such
-    /// gamut-clipping regressions are below the metric's measurement
-    /// floor in this mode.
-    #[default]
-    Clip,
-    /// Preserve out-of-gamut values — negative / >1 sRGB-linear
-    /// components flow into the XYB transform unclamped (the opsin
-    /// stage's own `max(0)` on the post-mix sum keeps the cube-root
-    /// domain valid).
-    ///
-    /// This makes **codec gamut clipping detectable**: a faithful
-    /// wide-gamut encode and one that clipped to sRGB gamut before
-    /// encoding produce different XYB, hence a score < 100. Scores for
-    /// wide-gamut content with saturated colors shift relative to
-    /// `Clip` mode, and no shipped profile was *trained* on preserved
-    /// out-of-gamut input — treat the absolute score as a regression
-    /// *signal*, not a calibrated perceptual value.
-    ///
-    /// Numeric note: this mode routes gamut-converted rows through an
-    /// unclamped scalar XYB converter (the SIMD kernels clamp input to
-    /// `[0, 1]`), so even in-gamut wide-gamut content scores differ from
-    /// `Clip` mode by cube-root-precision amounts (~0.05 score points
-    /// measured). Input must be finite in this mode.
-    Preserve,
 }
 
 /// Pixel format describing the channel layout, bit depth, and transfer function.
@@ -164,30 +122,6 @@ pub trait ImageSource: Sync {
     /// Defaults to [`ColorPrimaries::Srgb`]. Override for Display P3 or BT.2020 content.
     fn color_primaries(&self) -> ColorPrimaries {
         ColorPrimaries::Srgb
-    }
-    /// How out-of-sRGB-gamut colors are handled when converting from
-    /// wide-gamut [`ColorPrimaries`] (issue #17). Defaults to
-    /// [`GamutMapping::Clip`] (post-display-clamp semantics — every
-    /// release to date). Return [`GamutMapping::Preserve`] to make codec
-    /// gamut-clipping regressions detectable. Ignored for
-    /// [`ColorPrimaries::Srgb`] sources.
-    fn gamut_mapping(&self) -> GamutMapping {
-        GamutMapping::Clip
-    }
-    /// True if the pixel data is HDR-coded (PQ/HLG code values, or linear
-    /// absolute luminance). Defaults to `false`; SDR pipelines never need to
-    /// implement this.
-    ///
-    /// The SDR entry points refuse HDR-flagged sources with
-    /// [`ZensimError::HdrInputRequiresPuPath`](crate::ZensimError::HdrInputRequiresPuPath)
-    /// rather than silently scoring HDR-coded values on the SDR pipeline —
-    /// without this flag, HDR pixels in a `LinearF32Rgba` source are
-    /// indistinguishable from SDR and would be silently clamped to `[0, 1]`.
-    /// Score HDR pairs via
-    /// [`Zensim::compute_pu_linear`](crate::Zensim::compute_pu_linear) (or
-    /// its planar variant) after decoding to absolute-luminance nits.
-    fn is_hdr(&self) -> bool {
-        false
     }
     /// Raw bytes for row `y`. Length must be at least `width() * pixel_format().bytes_per_pixel()`.
     fn row_bytes(&self, y: usize) -> &[u8];
@@ -391,7 +325,6 @@ pub struct StridedBytes<'a> {
     pixel_format: PixelFormat,
     alpha_mode: AlphaMode,
     color_primaries: ColorPrimaries,
-    gamut_mapping: GamutMapping,
 }
 
 impl<'a> StridedBytes<'a> {
@@ -483,7 +416,6 @@ impl<'a> StridedBytes<'a> {
             pixel_format,
             alpha_mode,
             color_primaries: ColorPrimaries::Srgb,
-            gamut_mapping: GamutMapping::Clip,
         })
     }
 
@@ -512,15 +444,6 @@ impl<'a> StridedBytes<'a> {
         self.color_primaries = primaries;
         self
     }
-
-    /// Set how out-of-sRGB-gamut colors are handled during the
-    /// wide-gamut → sRGB primaries conversion (issue #17). Default:
-    /// [`GamutMapping::Clip`]. No effect for [`ColorPrimaries::Srgb`]
-    /// sources.
-    pub fn with_gamut_mapping(mut self, mapping: GamutMapping) -> Self {
-        self.gamut_mapping = mapping;
-        self
-    }
 }
 
 impl ImageSource for StridedBytes<'_> {
@@ -539,10 +462,6 @@ impl ImageSource for StridedBytes<'_> {
     #[inline]
     fn alpha_mode(&self) -> AlphaMode {
         self.alpha_mode
-    }
-    #[inline]
-    fn gamut_mapping(&self) -> GamutMapping {
-        self.gamut_mapping
     }
 
     #[inline]
@@ -625,10 +544,6 @@ impl<S: ImageSource + ?Sized> ImageSource for SubsetView<'_, S> {
         self.parent.color_primaries()
     }
     #[inline]
-    fn gamut_mapping(&self) -> GamutMapping {
-        self.parent.gamut_mapping()
-    }
-    #[inline]
     fn row_bytes(&self, y: usize) -> &[u8] {
         debug_assert!(y < self.height);
         self.parent.row_bytes(self.y_start + y)
@@ -695,146 +610,3 @@ mod imgref_impls {
     }
 }
 
-#[cfg(test)]
-mod hdr_flag_tests {
-    use super::*;
-
-    #[test]
-    fn built_in_sources_default_sdr() {
-        // The built-in sources are SDR by construction and must inherit
-        // the default `is_hdr() == false` so they pass the SDR guard.
-        let rgb = [[255u8, 0, 0]; 4];
-        assert!(!RgbSlice::new(&rgb, 2, 2).is_hdr());
-        let rgba = [[255u8, 0, 0, 255]; 4];
-        assert!(!RgbaSlice::new(&rgba, 2, 2).is_hdr());
-    }
-
-    /// Define a minimal HDR-flagged source so the metric-level
-    /// refusal tests below can build one without re-declaring the
-    /// boilerplate impl.
-    pub(super) struct PqHdrSource<'a> {
-        pub data: &'a [u8],
-        pub width: usize,
-        pub height: usize,
-    }
-    impl<'a> ImageSource for PqHdrSource<'a> {
-        fn width(&self) -> usize {
-            self.width
-        }
-        fn height(&self) -> usize {
-            self.height
-        }
-        fn pixel_format(&self) -> PixelFormat {
-            PixelFormat::LinearF32Rgba
-        }
-        fn alpha_mode(&self) -> AlphaMode {
-            AlphaMode::Opaque
-        }
-        fn color_primaries(&self) -> ColorPrimaries {
-            ColorPrimaries::Bt2020
-        }
-        fn is_hdr(&self) -> bool {
-            true
-        }
-        fn row_bytes(&self, y: usize) -> &[u8] {
-            let bpp = self.pixel_format().bytes_per_pixel();
-            let start = y * self.width * bpp;
-            &self.data[start..start + self.width * bpp]
-        }
-    }
-
-    /// A custom implementor flags HDR with one method override and
-    /// nothing else in the trait changes.
-    #[test]
-    fn custom_impl_can_flag_hdr() {
-        let data = vec![0u8; 2 * 2 * 16]; // LinearF32Rgba = 16 bytes/pixel
-        let src = PqHdrSource {
-            data: &data,
-            width: 2,
-            height: 2,
-        };
-        assert!(src.is_hdr());
-        assert_eq!(src.color_primaries(), ColorPrimaries::Bt2020);
-    }
-}
-
-#[cfg(test)]
-mod hdr_refusal_tests {
-    //! Defense-in-depth: every public Zensim entry point must refuse HDR
-    //! input (PQ/HLG) rather than silently run the SDR pipeline on
-    //! HDR-coded values. These tests pin the contract so a future
-    //! refactor can't accidentally remove the guard.
-    use super::hdr_flag_tests::PqHdrSource;
-    use super::*;
-    use crate::{Zensim, ZensimError};
-
-    fn sdr_8x8_rgba() -> RgbaSlice<'static> {
-        // Static lifetime via leaked Vec — small, fine for tests.
-        let buf: &'static [[u8; 4]] =
-            Box::leak(vec![[128u8, 128, 128, 255]; 8 * 8].into_boxed_slice());
-        RgbaSlice::new(buf, 8, 8)
-    }
-
-    fn hdr_8x8_pq_linearf32() -> PqHdrSource<'static> {
-        // 8×8 × 16 bytes/pixel (LinearF32Rgba). Values don't matter —
-        // the guard fires on transfer-function metadata, before any
-        // pixel data is touched.
-        let buf: &'static [u8] = Box::leak(vec![0u8; 8 * 8 * 16].into_boxed_slice());
-        PqHdrSource {
-            data: buf,
-            width: 8,
-            height: 8,
-        }
-    }
-
-    #[test]
-    fn compute_refuses_mixed_sdr_hdr_pair() {
-        // SDR source, HDR distorted: the guard fires when EITHER side is
-        // HDR-flagged — a mixed pair can't be scored by the SDR pipeline
-        // any more than an all-HDR one.
-        let z = Zensim::new(crate::ZensimProfile::codec_target());
-        let src = sdr_8x8_rgba();
-        let dst = hdr_8x8_pq_linearf32();
-        let err = z.compute(&src, &dst).unwrap_err();
-        assert_eq!(err, ZensimError::HdrInputRequiresPuPath);
-    }
-
-    #[test]
-    fn precompute_reference_refuses_pq_source() {
-        let z = Zensim::new(crate::ZensimProfile::codec_target());
-        let src = hdr_8x8_pq_linearf32();
-        // `PrecomputedReference` doesn't implement Debug, so unwrap_err
-        // needs a manual match. Result-shape variant counted, not value
-        // (variant equality covered for the `compute` paths above where
-        // the OK type IS Debug).
-        match z.precompute_reference(&src) {
-            Ok(_) => panic!("expected HdrInputRequiresPuPath, got Ok"),
-            Err(e) => assert_eq!(e, ZensimError::HdrInputRequiresPuPath),
-        }
-    }
-
-    #[test]
-    fn compute_with_ref_refuses_pq_distorted() {
-        // Reference precomputed from SDR (passes the guard), but a
-        // later call with a PQ-signaled distorted must still error.
-        let z = Zensim::new(crate::ZensimProfile::codec_target());
-        let sdr_src = sdr_8x8_rgba();
-        let pre = z.precompute_reference(&sdr_src).expect("SDR precompute ok");
-        let hdr_dst = hdr_8x8_pq_linearf32();
-        let err = z.compute_with_ref(&pre, &hdr_dst).unwrap_err();
-        assert!(
-            matches!(err, ZensimError::HdrInputRequiresPuPath),
-            "expected HdrInputRequiresPuPath, got {err:?}"
-        );
-    }
-
-    #[test]
-    fn sdr_compute_still_works() {
-        // Guardrail: the HDR guard must NOT break the SDR path.
-        let z = Zensim::new(crate::ZensimProfile::codec_target());
-        let src = sdr_8x8_rgba();
-        let dst = sdr_8x8_rgba();
-        let res = z.compute(&src, &dst);
-        assert!(res.is_ok(), "SDR compute should still succeed, got {res:?}");
-    }
-}

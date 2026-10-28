@@ -600,24 +600,6 @@ pub(crate) struct ScaleStats {
     pub(crate) iw_det_4th: [f64; 3],
     /// IW MSE per channel = 3 values
     pub(crate) iw_mse: [f64; 3],
-    /// Mean IW **weight** per channel: `Σw / n`, where `w_i = 1 + k_iw · a_i`.
-    ///
-    /// NOT a feature — diagnostic only, and deliberately so. Every `iw_*` field
-    /// above is pooled by `1/n` while a weighted mean is `Σ(w·v)/Σw`, so each
-    /// carries a factor of `mean_w^p` (p = 1 for means, 0.5 for 2nd moments,
-    /// 0.25 for 4th). Since the weights come from the REFERENCE only, `mean_w`
-    /// is a per-reference constant: it cancels within an image and does not
-    /// cancel across images, so it lands entirely on pooled (cross-image) rank.
-    ///
-    /// This field exists to MEASURE that factor against the weights we actually
-    /// ship, rather than against `iw_pool.rs`'s different estimator. See
-    /// `benchmarks/iw_pooling_normalization_2026-07-15.md`.
-    // Read only by the `iw_mean_weight_spread_across_references` diagnostic
-    // test (iw_pool.rs); non-test builds only WRITE it, under every feature
-    // combination (the old `iw-diagnostics` gate no longer has a non-test
-    // reader).
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) iw_mean_w: [f64; 3],
 }
 
 /// Result from a zensim comparison.
@@ -700,20 +682,12 @@ impl ZensimResult {
     }
 
     /// Create a NaN sentinel result (for error/placeholder paths).
-    ///
-    /// Research / sibling-tooling helper. Used by zensim-validate's
-    /// per-pair eval pipeline when a row's image can't be decoded —
-    /// the NaN propagates downstream without crashing the sweep. Not
-    /// part of the stable public surface.
-    #[doc(hidden)]
     pub fn nan() -> Self {
         Self {
             score: f64::NAN,
             raw_distance: f64::NAN,
             features: vec![],
-            // Placeholder tag on a NaN result — the canonical codec-target
-            // profile (`B`); never the deprecated `A`.
-            profile: crate::profile::ZensimProfile::codec_target(),
+            profile: crate::profile::ZensimProfile::PreviewV0_1,
             mean_offset: [f64::NAN; 3],
             is_identical: false,
         }
@@ -1279,15 +1253,12 @@ impl Zensim {
     /// # Errors
     ///
     /// Returns [`ZensimError`] if dimensions are mismatched or too small.
-    pub fn compute_with_codec_hint(
+    pub(crate) fn compute_with_codec_hint(
         &self,
         source: &impl ImageSource,
         distorted: &impl ImageSource,
         codec_hint: Option<&str>,
     ) -> Result<ZensimResult, ZensimError> {
-        if source.is_hdr() || distorted.is_hdr() {
-            return Err(ZensimError::HdrInputRequiresPuPath);
-        }
         let params = self.profile.params();
         validate_pair(source, distorted)?;
         check_within_max_pixels(source.width(), source.height(), self.max_pixels)?;
@@ -1330,7 +1301,6 @@ impl Zensim {
         // Sub-64px sources are reflect-padded inside `PrecomputedReference::new`
         // (matching the buffered path), so no 8px floor here.
         check_within_max_pixels(source.width(), source.height(), self.max_pixels)?;
-        reject_hdr_input(source)?;
         Ok(crate::streaming::PrecomputedReference::new(
             source,
             params.num_scales,
@@ -1452,7 +1422,6 @@ impl Zensim {
         // The precomputed reference was built via `precompute_reference`,
         // which already rejected HDR — so only check the distorted side
         // here. Symmetry across the call path is preserved.
-        reject_hdr_input(distorted)?;
         let config = config_from_params(params, self.parallel_now());
         check_profile_route(params, &config)?;
         validate_cached_revision(precomputed, config.revision())?;
@@ -1500,7 +1469,6 @@ impl Zensim {
         }
         validate_ref_match(precomputed, distorted)?;
         check_within_max_pixels(distorted.width(), distorted.height(), self.max_pixels)?;
-        reject_hdr_input(distorted)?;
         let config = config_from_params(params, self.parallel_now());
         check_profile_route(params, &config)?;
         validate_cached_revision(precomputed, config.revision())?;
@@ -1893,13 +1861,6 @@ fn compute_rounding_bias(delta_stats: &DeltaStats) -> RoundingBias {
     }
 }
 
-pub(crate) fn reject_hdr_input(source: &impl ImageSource) -> Result<(), ZensimError> {
-    if source.is_hdr() {
-        return Err(ZensimError::HdrInputRequiresPuPath);
-    }
-    Ok(())
-}
-
 pub(crate) fn validate_pair(
     source: &impl ImageSource,
     distorted: &impl ImageSource,
@@ -1907,8 +1868,6 @@ pub(crate) fn validate_pair(
     validate_pair_dims(source, distorted)?;
     // Refuse HDR-flagged input on either side — a mixed SDR/HDR pair is
     // just as unscorable by the SDR pipeline as an all-HDR one.
-    reject_hdr_input(source)?;
-    reject_hdr_input(distorted)?;
     Ok(())
 }
 
@@ -2143,7 +2102,6 @@ pub(crate) struct OwnedImage {
     format: crate::source::PixelFormat,
     alpha: crate::source::AlphaMode,
     primaries: crate::source::ColorPrimaries,
-    gamut_mapping: crate::source::GamutMapping,
 }
 
 impl ImageSource for OwnedImage {
@@ -2161,9 +2119,6 @@ impl ImageSource for OwnedImage {
     }
     fn color_primaries(&self) -> crate::source::ColorPrimaries {
         self.primaries
-    }
-    fn gamut_mapping(&self) -> crate::source::GamutMapping {
-        self.gamut_mapping
     }
     fn row_bytes(&self, y: usize) -> &[u8] {
         let stride = self.width * self.format.bytes_per_pixel();
@@ -2215,7 +2170,6 @@ pub(crate) fn reflect_pad_to_size(src: &impl ImageSource, min_dim: usize) -> Own
         format: src.pixel_format(),
         alpha: src.alpha_mode(),
         primaries: src.color_primaries(),
-        gamut_mapping: src.gamut_mapping(),
     }
 }
 
@@ -2962,15 +2916,6 @@ fn forward_one_bake(
     height: u32,
 ) -> Result<f64, ZensimError> {
     forward_one_bake_with_codec(bytes, features, width, height, None)
-}
-
-/// The PU-linear route [`Zensim::pu_fold_route`] resolved for one call.
-pub(crate) struct PuFoldRoute {
-    plan: Option<std::sync::Arc<crate::feature_plan::Plan>>,
-    /// Below Rev5 a wide-plan pair of identical pixels returns 100 with zeros
-    /// at the plan width, without walking, as SDR `compute` does. At Rev5
-    /// identity features come from the canonical walk.
-    short_circuit_identity: bool,
 }
 
 /// The parsed [`crate::mlp::Model`] of a `&'static` profile bake, interned by

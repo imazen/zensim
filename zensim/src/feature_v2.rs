@@ -559,12 +559,6 @@ pub const C_GRADM: f64 = 0.02;
 pub(crate) const BV_DELTA_LO_SDR: f32 = 0.00169;
 /// Upper half-point, SDR route: ≈5× the one-code step.
 pub(crate) const BV_DELTA_HI_SDR: f32 = 0.0169;
-/// BANDVIS lower half-point, HDR/PU route: ≈0.5× the PU-Y |∇| of one
-/// 10-bit PQ code step at 100 cd/m² (PU uniformity makes one constant
-/// serve all luminances — the derivation table shows the spread).
-pub(crate) const BV_DELTA_LO_PU: f32 = 0.00124;
-/// Upper half-point, HDR/PU route: ≈5× the one-step gradient.
-pub(crate) const BV_DELTA_HI_PU: f32 = 0.0124;
 /// Stabilizer for the BANDVIS FR `bounded_excess` pair (indicators are
 /// [0,1] products — same class as `C_EDGE`).
 pub(crate) const C_BV: f64 = 1e-4;
@@ -693,12 +687,6 @@ pub mod idx_append2 {
 /// in favor of the live coordinate, and `csfw_phi_derivation_table`
 /// recomputes this exact fit and pins the constants to it.
 pub(crate) const CSFW_PHI_Y_SDR: [f64; 3] = [1.77430, -5.81908, 4.04916];
-/// HDR/PU-route achromatic weight quadratic, `y` the LIVE reference
-/// PU-Y plane value (`pu21(mix)/PU_WHITE + 0.01`). LSQ over L ∈
-/// [1, 4000] cd/m² log-uniform, this refit: rms 0.082, max 0.329 —
-/// within 0.016 of the design §5.3 values (the doc's PU coordinate was
-/// already live-accurate up to the +0.01 bias).
-pub(crate) const CSFW_PHI_Y_PU: [f64; 3] = [0.78830, -1.10402, 0.30460];
 /// Fitted amplitude for the achromatic luminance modulation — SEED 1.0
 /// (design §5.3: `κ = 1` applies the derived castleCSF curve exactly;
 /// `κ = 0` reproduces the unweighted features bit-for-bit). Stage-1/2
@@ -771,7 +759,6 @@ pub mod idx_csfw {
 /// Registered base of the rev4 candidate bank (`feature_defs::BLOCKS`
 /// derives the same number — asserted in `rev4_base_matches_registry`).
 #[cfg_attr(not(test), allow(dead_code))] // the registered rev4 base — read by the parity/layout gates
-pub(crate) const REV4_BASE: usize = 986;
 pub(crate) const GMSBANK_PER_CELL: usize = 15;
 /// mapdev slots per (scale, channel) cell (`feature_defs::MAPDEV_SIGNALS`).
 pub(crate) const MAPDEV_PER_CELL: usize = 5;
@@ -1197,8 +1184,6 @@ struct Rev4CellAccum {
     tail: TailAccum,
     flat: FlatAccum,
     bleed: BleedAccum,
-    bank: [GmsBankCell; 5],
-    chroma: [GmsBankCell; 5],
 }
 
 /// REV4 hook bundle for the dense kernel — carries C3 (`tail`) and C4's
@@ -1345,29 +1330,6 @@ struct Rev4Work<'a> {
 /// and B cells; they reuse the same per-channel stabilisers and accumulators.
 fn gmsbank_cell_live(local: &ComputeSet, scale: usize, ch: usize) -> bool {
     (local.gmsbank && (scale > 0 || ch == 1)) || (local.gmsnative && scale == 0 && ch != 1)
-}
-
-/// Materialized-path REV4 work order for one (scale, channel) — the
-/// [`ComputeSet::rev4_work`] analogue for [`compute_channel_scale_v2`],
-/// which resolves flags itself and owns the strip loop the bleed mask is
-/// built inside. `bleed_y` is the same-scale dst LUMA plane (full
-/// `width*height`), `Some` only on the chroma channels when `arttype` is
-/// on; the mask is gathered + built per strip from it.
-struct Rev4CellArgs<'a> {
-    /// The (scale, channel)'s accumulator — every enabled hook writes here.
-    cell: &'a mut Rev4CellAccum,
-    /// Same semantics as [`Rev4Work::gridblk_period`].
-    gridblk_period: usize,
-    /// Same semantics as [`Rev4Work::ringbasis`].
-    ringbasis: bool,
-    /// Same semantics as [`Rev4Work::tailhist`].
-    tailhist: bool,
-    /// Same semantics as [`Rev4Work::flat`].
-    flat: bool,
-    /// Same-scale dst-Y plane for the C4 mask — see the struct doc.
-    bleed_y: Option<&'a [f32]>,
-    gmsbank: bool,
-    bank: GmsBankWork<'a>,
 }
 
 // ---------------------------------------------------------------------------
@@ -3574,7 +3536,6 @@ fn prepare_v2_reference_impl_inner(
     if source.width() == 0 || source.height() == 0 {
         return Err(ZensimError::ImageTooSmall);
     }
-    crate::metric::reject_hdr_input(source)?;
     crate::metric::check_within_max_pixels(source.width(), source.height(), max_pixels)?;
 
     let (orig_width, orig_height) = (source.width(), source.height());
@@ -6142,9 +6103,6 @@ pub(crate) fn compute_folded_v1_372_streaming_stoppable(
 ) -> Result<(Vec<f64>, [f64; 3]), ZensimError> {
     crate::metric::validate_pair_dims(source, distorted)?;
     crate::metric::check_within_max_pixels(source.width(), source.height(), max_pixels)?;
-    if source.is_hdr() || distorted.is_hdr() {
-        return Err(ZensimError::HdrInputRequiresPuPath);
-    }
     let toggles = match plan {
         // A plan asks for its own (compute, layout) pair — which is how a
         // bake declaring a layout wider than 372 becomes servable at all.
@@ -6325,7 +6283,6 @@ pub(crate) fn ref_feed_admits(
                 || p.compute.mapdev
                 || p.compute.z1max
         })
-        || distorted.is_hdr()
     {
         return false;
     }
@@ -6621,12 +6578,6 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                 hl_bins: false,
                 dst_activity: toggles.append2_dst_activity,
             },
-            FrontEnd::Hdr(_) => Append2Params {
-                bv_delta_lo: BV_DELTA_LO_PU,
-                bv_delta_hi: BV_DELTA_HI_PU,
-                hl_bins: true,
-                dst_activity: toggles.append2_dst_activity,
-            },
         }
     });
     let csfw_on = toggles.csfw_block && v2_blocks;
@@ -6671,7 +6622,6 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
         use crate::feature_v2_stream::FrontEnd;
         match front_end {
             FrontEnd::Sdr => CsfwParams::for_phi(CSFW_PHI_Y_SDR),
-            FrontEnd::Hdr(_) => CsfwParams::for_phi(CSFW_PHI_Y_PU),
         }
     });
     let n_scales = crate::NUM_SCALES;

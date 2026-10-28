@@ -156,7 +156,7 @@ pub struct ProfileParams {
     /// for V0_5+ bakes, which are affine-calibrated to the
     /// MCOS-aligned 0–100 scale during baking. Set `false` for V0_1 /
     /// V0_2 linear profiles whose raw output is a distance.
-    pub skip_score_mapping: bool,
+    pub(crate) skip_score_mapping: bool,
     /// MLP scorer for non-linear profiles. When `Some`, the scoring
     /// path replaces the linear `dot(features, weights)` with a forward
     /// pass through the MLP loaded from these bytes (`ZNPK` v1 format).
@@ -204,7 +204,7 @@ pub struct ProfileParams {
     /// Added 2026-05-15 to enable V_20 extended-shaping profile
     /// (PreviewV0_5_Extended at 300-feat input) after the V_20a IW
     /// (372-feat) path was falsified for CID22 transfer.
-    pub extended_features: bool,
+    pub(crate) extended_features: bool,
 
     /// When `true`, the runtime also computes the **IW pool** block
     /// (300 → 372 features — adds 72 IW-weighted features per Wang &
@@ -216,7 +216,7 @@ pub struct ProfileParams {
     /// transfer (Z-RMSE 0.869 vs V_18's 0.455 at k=1; near-random at
     /// k=8). Reserved for research bakes that need full 372-input
     /// scoring through the standard runtime.
-    pub compute_iw_features: bool,
+    pub(crate) compute_iw_features: bool,
 
     /// When `true`, the final score is wrapped through a logistic
     /// soft-clamp `100 / (1 + exp(-(raw - 50) / 20))` instead of the
@@ -240,7 +240,7 @@ pub struct ProfileParams {
     ///
     /// Added 2026-05-16 (T3.2). See zensim/CLAUDE.md `V_20 input-shaping
     /// learnings > Soft-clamp the multi-bake output` for the design rationale.
-    pub soft_clamp_score: bool,
+    pub(crate) soft_clamp_score: bool,
 
     /// EXP-CROSS-CODEC-V10 (2026-05-20): when `true`, the final score
     /// is returned **without clamping or soft-clamping** — the
@@ -253,7 +253,7 @@ pub struct ProfileParams {
     /// When set, `soft_clamp_score` is ignored. Default `false`
     /// preserves legacy [0, 100] semantics for V9 and earlier
     /// profiles whose splines/anchors only span [0, 100].
-    pub extrapolate_score: bool,
+    pub(crate) extrapolate_score: bool,
 
     /// **Correct-by-construction bounded squash** for *linear*
     /// (`mlp_bytes == None`) profiles. When `true`, the final score is
@@ -278,7 +278,7 @@ pub struct ProfileParams {
     /// Ignored on MLP profiles (`mlp_bytes.is_some()`), whose
     /// correct-by-construction form requires a monotone architecture
     /// (the larger follow-on in §5 of that doc). Default `false`.
-    pub bounded_squash: bool,
+    pub(crate) bounded_squash: bool,
 
     /// **Ensemble routing classifier** — when `Some`, the runtime
     /// loads the classifier bake, forwards the feature vector through

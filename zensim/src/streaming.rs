@@ -765,8 +765,6 @@ impl ScaleAccumulators {
         let mut iw_art_4th = [0.0f64; 3];
         let mut iw_det_4th = [0.0f64; 3];
         let mut iw_mse = [0.0f64; 3];
-        #[allow(unused_mut)]
-        let mut iw_mean_w = [0.0f64; 3];
 
         let gain_form = crate::hf_gain_form::HfGainForm::at_revision(revision);
         // The pooled 4th/8th roots go through their ONE owner
@@ -880,7 +878,6 @@ impl ScaleAccumulators {
             iw_art_4th,
             iw_det_4th,
             iw_mse,
-            iw_mean_w,
         }
     }
 }
@@ -1199,7 +1196,7 @@ fn native_sdr_linear_row(
     }
     if source.color_primaries() != ColorPrimaries::Srgb {
         for pixel in out {
-            apply_gamut_matrix(pixel, source.color_primaries(), source.gamut_mapping());
+            apply_gamut_matrix(pixel, source.color_primaries());
         }
     }
 }
@@ -1359,9 +1356,7 @@ pub(crate) fn convert_source_to_xyb_into_slices_chunked(
     let pixel_format = source.pixel_format();
     let opaque = matches!(source.alpha_mode(), AlphaMode::Opaque);
     let primaries = source.color_primaries();
-    let gamut_mapping = source.gamut_mapping();
     let need_gamut = primaries != ColorPrimaries::Srgb;
-    let preserve_oog = need_gamut && matches!(gamut_mapping, crate::source::GamutMapping::Preserve);
 
     #[allow(clippy::type_complexity)]
     let process_chunk =
@@ -1372,39 +1367,23 @@ pub(crate) fn convert_source_to_xyb_into_slices_chunked(
 
             // Helper: apply gamut matrix to every pixel in a linear row buffer.
             #[inline]
-            fn gamut_convert_row(
-                row: &mut [[f32; 3]],
-                primaries: ColorPrimaries,
-                mapping: crate::source::GamutMapping,
-            ) {
+            fn gamut_convert_row(row: &mut [[f32; 3]], primaries: ColorPrimaries) {
                 for px in row.iter_mut() {
-                    apply_gamut_matrix(px, primaries, mapping);
+                    apply_gamut_matrix(px, primaries);
                 }
             }
 
-            // Linear-row → XYB converter for the gamut path (issue #17):
-            // under `GamutMapping::Preserve` the gamut-converted rows may
-            // carry out-of-[0,1] components, which the SIMD kernels'
-            // input clamp would re-clip — route those rows through the
-            // unclamped scalar sibling instead. `preserve_oog` is false
-            // whenever no gamut conversion runs, so every existing path
-            // stays on the SIMD kernel bit-identically.
+            // Linear-row → XYB converter for the gamut path. The gamut matrix
+            // clamps to [0, 1], so the SIMD kernel's own input clamp is a no-op.
             #[inline]
             fn xyb_row_convert(
-                preserve_oog: bool,
                 pixels: &[[f32; 3]],
                 x_out: &mut [f32],
                 y_out: &mut [f32],
                 b_out: &mut [f32],
                 revision: crate::feature_defs::FormulaRevision,
             ) {
-                if preserve_oog {
-                    crate::color::linear_to_positive_xyb_planar_into_unclamped(
-                        pixels, x_out, y_out, b_out, revision,
-                    );
-                } else {
-                    linear_to_positive_xyb_planar_into(pixels, x_out, y_out, b_out, revision);
-                }
+                linear_to_positive_xyb_planar_into(pixels, x_out, y_out, b_out, revision);
             }
 
             match pixel_format {
@@ -1424,10 +1403,9 @@ pub(crate) fn convert_source_to_xyb_into_slices_chunked(
                                     crate::color::srgb_u8_to_linear(b),
                                 ];
                             }
-                            gamut_convert_row(&mut linear_row[..width], primaries, gamut_mapping);
+                            gamut_convert_row(&mut linear_row[..width], primaries);
                             let row_offset = (y - row_start) * width;
                             xyb_row_convert(
-                                preserve_oog,
                                 &linear_row[..width],
                                 &mut c0[row_offset..row_offset + width],
                                 &mut c1[row_offset..row_offset + width],
@@ -1498,15 +1476,10 @@ pub(crate) fn convert_source_to_xyb_into_slices_chunked(
                                 );
                             }
                             if need_gamut {
-                                gamut_convert_row(
-                                    &mut linear_row[..width],
-                                    primaries,
-                                    gamut_mapping,
-                                );
+                                gamut_convert_row(&mut linear_row[..width], primaries);
                             }
                             let row_offset = (y - row_start) * width;
                             xyb_row_convert(
-                                preserve_oog,
                                 &linear_row[..width],
                                 &mut c0[row_offset..row_offset + width],
                                 &mut c1[row_offset..row_offset + width],
@@ -1559,15 +1532,10 @@ pub(crate) fn convert_source_to_xyb_into_slices_chunked(
                                 );
                             }
                             if need_gamut {
-                                gamut_convert_row(
-                                    &mut linear_row[..width],
-                                    primaries,
-                                    gamut_mapping,
-                                );
+                                gamut_convert_row(&mut linear_row[..width], primaries);
                             }
                             let row_offset = (y - row_start) * width;
                             xyb_row_convert(
-                                preserve_oog,
                                 &linear_row[..width],
                                 &mut c0[row_offset..row_offset + width],
                                 &mut c1[row_offset..row_offset + width],
@@ -1583,8 +1551,7 @@ pub(crate) fn convert_source_to_xyb_into_slices_chunked(
                         native_sdr_linear_row(source, y, abs_row_offset + y, &mut linear_row);
                         let row_offset = (y - row_start) * width;
                         xyb_row_convert(
-                            preserve_oog,
-                            &linear_row,
+                                &linear_row,
                             &mut c0[row_offset..row_offset + width],
                             &mut c1[row_offset..row_offset + width],
                             &mut c2[row_offset..row_offset + width],
@@ -1606,8 +1573,7 @@ pub(crate) fn convert_source_to_xyb_into_slices_chunked(
                             }
                         }
                         xyb_row_convert(
-                            preserve_oog,
-                            &rgb_buf,
+                                &rgb_buf,
                             &mut c0[..raw_elems],
                             &mut c1[..raw_elems],
                             &mut c2[..raw_elems],
@@ -1619,7 +1585,6 @@ pub(crate) fn convert_source_to_xyb_into_slices_chunked(
                             native_sdr_linear_row(source, y, abs_row_offset + y, &mut linear_row);
                             let row_offset = (y - row_start) * width;
                             xyb_row_convert(
-                                preserve_oog,
                                 &linear_row,
                                 &mut c0[row_offset..row_offset + width],
                                 &mut c1[row_offset..row_offset + width],
@@ -3315,19 +3280,6 @@ impl PrecomputedReference {
 
 }
 
-/// Zero-copy view of a Y-row range of a [`PrecomputedReference`].
-///
-/// Holds borrowed slices into the parent reference's plane Vecs. Built
-/// via [`PrecomputedReference::slice_rows_view`]; never directly
-/// constructed by callers.
-///
-/// The strip-aggregator hot path uses this to avoid 12 fresh `Vec<f32>`
-/// allocations + memcpy per strip per pair (see optimization notes).
-pub(crate) struct PrecomputedReferenceView<'a> {
-    /// Per scale: `(planes, padded_width, height)`.
-    pub(crate) scales: Vec<([&'a [f32]; 3], usize, usize)>,
-}
-
 /// Trait the strip kernel uses to access an arbitrary multi-scale
 /// reference pyramid — either an owned [`PrecomputedReference`] or a
 /// borrowed [`PrecomputedReferenceView`].
@@ -3350,18 +3302,6 @@ impl MultiScaleRef for PrecomputedReference {
     fn scale(&self, idx: usize) -> ([&[f32]; 3], usize, usize) {
         let (planes, w, h) = &self.scales[idx];
         ([&planes[0], &planes[1], &planes[2]], *w, *h)
-    }
-}
-
-impl<'a> MultiScaleRef for PrecomputedReferenceView<'a> {
-    #[inline]
-    fn num_scales(&self) -> usize {
-        self.scales.len()
-    }
-    #[inline]
-    fn scale(&self, idx: usize) -> ([&[f32]; 3], usize, usize) {
-        let (planes, w, h) = &self.scales[idx];
-        (*planes, *w, *h)
     }
 }
 

@@ -7859,12 +7859,6 @@ pub(crate) fn box_spread_sum_preserving(
     plane.copy_from_slice(&out);
 }
 
-/// Row band height for the parallel phases of [`box_spread_merge_f32`]:
-/// coarse enough that a rayon job is tens of microseconds (per-row jobs
-/// drown in fork-join overhead), fine enough to load-balance.
-#[cfg(feature = "threads")]
-const SPREAD_ROW_BAND: usize = 64;
-
 /// Call-site policy cutoff for [`box_spread_merge_f32`]'s `parallel`
 /// switch: engage rayon only at/above this element count. Measured
 /// crossover 2026-08-01 (28-core WSL2 host, `spread_microbench`, against

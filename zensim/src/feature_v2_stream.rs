@@ -40,7 +40,7 @@
 
 #[cfg(test)]
 use crate::feature_v2::gather_strip_halo;
-use crate::feature_v2::{HALO_P, HdrEncoding, STRIP_ROWS, reflect_101};
+use crate::feature_v2::{HALO_P, STRIP_ROWS, reflect_101};
 use crate::source::{ImageSource, PixelFormat, SubsetView};
 
 /// Research toggle (`ZENSIM_PYRAMID=linear`): scales 1–3 from 2×2 averages of
@@ -116,11 +116,6 @@ pub(crate) enum FrontEnd {
     /// The SDR path: `convert_source_to_xyb_into_slices` (sRGB → linear →
     /// opsin → cube-root XYB) — byte-identical to the pre-HDR producer.
     Sdr,
-    /// The HDR path (HDR_PLAN chunk 2): pixel values → absolute cd/m² per
-    /// the declared [`HdrEncoding`] → the UPIQ-validated PU-XYB front-end
-    /// (`color::linear_to_pu_xyb_planar_into`: opsin mix → PU21
-    /// banding_glare per channel ÷ PU21(100) → opponent axes, X×4).
-    Hdr(HdrEncoding),
 }
 
 /// Rows appended to scale 0 per production step. A multiple of
@@ -869,7 +864,6 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
             front_end,
             hdr_row: match front_end {
                 FrontEnd::Sdr => Vec::new(),
-                FrontEnd::Hdr(_) => vec![[0.0f32; 3]; w0],
             },
             max_held_rows: vec![0; crate::NUM_SCALES],
             ref_planes,
@@ -1117,36 +1111,6 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
                             );
                         }
                     },
-                    FrontEnd::Hdr(encoding) => {
-                        for k in 0..n_new {
-                            let y = hi0 + k;
-                            let row_off = k * width;
-                            if si == 0 {
-                                hdr_source_row_to_nits(
-                                    self.source,
-                                    y,
-                                    encoding,
-                                    &mut self.hdr_row,
-                                    self.revision,
-                                );
-                            } else {
-                                hdr_source_row_to_nits(
-                                    self.distorted,
-                                    y,
-                                    encoding,
-                                    &mut self.hdr_row,
-                                    self.revision,
-                                );
-                            }
-                            crate::color::linear_to_pu_xyb_planar_into_at_revision(
-                                &self.hdr_row[..width],
-                                &mut p0[row_off..row_off + width],
-                                &mut p1[row_off..row_off + width],
-                                &mut p2[row_off..row_off + width],
-                                self.revision,
-                            );
-                        }
-                    }
                 }
             }
         }
@@ -1432,113 +1396,6 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
                 }
             }
         }
-    }
-}
-
-/// Read one source row as absolute-linear cd/m² RGB triples per the
-/// declared [`HdrEncoding`]. Accepted pixel formats (validated at the HDR
-/// entry): `LinearF32Rgba` (f32 values used directly — cd/m² for
-/// `Linear`, code values for `Pq`/`Hlg`; alpha ignored, Opaque required)
-/// and `Srgb16Rgba` (u16 code values normalized by 65535 — `Pq`/`Hlg`
-/// code-value containers like cICP-spliced 16-bit PNG).
-///
-/// Every reachable caller (`streaming::PrecomputedReference::for_candidate_inner`,
-/// `attribution::Fused944Session::planned_features`) sits behind
-/// `custom-profiles` in addition to this module's own `feature-regime-v2`
-/// gate; `allow` rather than `cfg` because `planned_features` itself is
-/// gated on `feature-regime-v2` alone and still calls this unconditionally,
-/// so cfg-stripping the function under `feature-regime-v2`-only would break
-/// that compile rather than just leave it unreached.
-#[allow(dead_code)]
-pub(crate) fn hdr_source_to_xyb(
-    source: &impl ImageSource,
-    encoding: HdrEncoding,
-    out: &mut [Vec<f32>; 3],
-    revision: crate::feature_defs::FormulaRevision,
-) {
-    let width = source.width();
-    let mut row = vec![[0.0; 3]; width];
-    let [x, y, b] = out;
-    for r in 0..source.height() {
-        hdr_source_row_to_nits(source, r, encoding, &mut row, revision);
-        let range = r * width..(r + 1) * width;
-        crate::color::linear_to_pu_xyb_planar_into_at_revision(
-            &row,
-            &mut x[range.clone()],
-            &mut y[range.clone()],
-            &mut b[range],
-            revision,
-        );
-    }
-}
-
-fn hdr_source_row_to_nits(
-    src: &impl ImageSource,
-    y: usize,
-    encoding: HdrEncoding,
-    out: &mut [[f32; 3]],
-    revision: crate::feature_defs::FormulaRevision,
-) {
-    let width = src.width();
-    let row_bytes = &src.row_bytes(y)[..width * src.pixel_format().bytes_per_pixel()];
-    let mut already_nits = false;
-    match src.pixel_format() {
-        PixelFormat::LinearF32Rgba => {
-            let px = crate::source::packed_row::<[f32; 4]>(row_bytes, width);
-            for (o, p) in out[..width].iter_mut().zip(&px[..width]) {
-                *o = [p[0], p[1], p[2]];
-            }
-        }
-        PixelFormat::Srgb16Rgba => {
-            if let HdrEncoding::Pq { peak_nits } = encoding {
-                crate::transfer::decode_pq_u16_rgba_row_at_revision(
-                    row_bytes,
-                    &mut out[..width],
-                    peak_nits,
-                    revision,
-                );
-                already_nits = true;
-            } else {
-                const INV: f32 = 1.0 / 65535.0;
-                for (x, o) in out[..width].iter_mut().enumerate() {
-                    let off = x * 8;
-                    let r = u16::from_ne_bytes([row_bytes[off], row_bytes[off + 1]]);
-                    let g = u16::from_ne_bytes([row_bytes[off + 2], row_bytes[off + 3]]);
-                    let b = u16::from_ne_bytes([row_bytes[off + 4], row_bytes[off + 5]]);
-                    *o = [r as f32 * INV, g as f32 * INV, b as f32 * INV];
-                }
-            }
-        }
-        other => unreachable!(
-            "HDR route accepts LinearF32Rgba/Srgb16Rgba only (validated at the entry); got {other:?}"
-        ),
-    }
-    if !already_nits {
-        match encoding {
-            HdrEncoding::Linear => {}
-            HdrEncoding::Pq { peak_nits } => {
-                crate::transfer::decode_pq_row_at_revision(&mut out[..width], peak_nits, revision)
-            }
-            HdrEncoding::Hlg {
-                peak_nits,
-                ambient_lux,
-            } => crate::transfer::decode_hlg_row_in_primaries_at_revision(
-                &mut out[..width],
-                peak_nits,
-                ambient_lux,
-                src.color_primaries(),
-                revision,
-            ),
-        }
-    }
-    // Absolute light must remain absolute: never apply the SDR [0, 1]
-    // display clamp here. The opsin matrix is defined in linear sRGB.
-    for pixel in &mut out[..width] {
-        crate::color::apply_gamut_matrix(
-            pixel,
-            src.color_primaries(),
-            crate::source::GamutMapping::Preserve,
-        );
     }
 }
 

@@ -55,34 +55,6 @@ use crate::feature_v2::V2Scratch;
 use crate::metric::{ZensimConfig, ZensimResult};
 use crate::source::ImageSource;
 
-/// Which walk [`crate::Zensim`]'s scoring entries run.
-///
-/// `#[doc(hidden)]`: this is an internal engine selector for the parity gates
-/// and the perf comparison, not a product knob. [`ScoringEngine::Buffered`]
-/// is the default for every profile except [`crate::profile::ZensimProfile::D`]
-/// (`Zensim::new` opts `D` into `Fold` itself, since speed is its whole reason
-/// to exist — `benchmarks/profile_d_notax_2026-09-01.md`). `feature-regime-v2`
-/// is default-on as of 2026-09-01, so a plain `cargo add zensim` build CAN
-/// name this type (it stays `#[doc(hidden)]`, not surfaced in rendered docs);
-/// `--no-default-features` removes it and the module entirely, and every
-/// profile including `D` then runs `Buffered` unconditionally — correctly,
-/// just without the fold's speed.
-///
-/// It is `pub` rather than `pub(crate)` for the same reason
-/// `V2NewFeatureToggles::v1_only` is: the parity gate lives in
-/// `tests/fold_engine_parity.rs`, which is a separate crate and cannot reach
-/// `pub(crate)`.
-#[doc(hidden)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ScoringEngine {
-    /// The buffered walk — today's shipped path.
-    #[default]
-    Buffered,
-    /// The streaming fold, where it can serve the request (see
-    /// [`is_fold_backable`]); buffered otherwise.
-    Fold,
-}
-
 /// **THE single owner of "can the fold serve this scoring request?"**
 ///
 /// Returns `false` for every case §"What the engine does NOT cover" lists.
@@ -301,26 +273,6 @@ pub(crate) fn compute_fold_backed_with_ref_stoppable_plan(
 // ============================================================================
 // Per-profile weight-skipping: computing only the v1 pool families a bake reads
 // ============================================================================
-
-/// Which of v1's three pool families (`f156..228` peaks, `f228..300` masked,
-/// `f300..372` IW) a bake's layer 0 **structurally** reads — the compute-side
-/// complement of `zensim-validate`'s `bake_block_profile`.
-///
-/// "Structurally" means the L∞ norm over that caller line's layer-0 output
-/// weights is exactly zero, which is the same test the tooling uses and the
-/// only one that is safe here: a zero weight makes the slot's value
-/// unreachable by the forward pass for EVERY input, so leaving the slot at
-/// 0.0 cannot move the score by a single ULP. A merely *small* weight is not
-/// skippable and is never treated as one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct V1PoolNeed {
-    pub(crate) peaks: bool,
-    pub(crate) masked: bool,
-    pub(crate) iw: bool,
-}
-
-impl V1PoolNeed {
-}
 
 /// The layer-0 column range each CALLER line occupies, in caller order —
 /// `caller_col_spans()[k] = (start, end)` with `end == start` for a line the

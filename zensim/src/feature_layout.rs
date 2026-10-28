@@ -318,6 +318,20 @@ fn dense_slots_of(id: &FeatureSetId) -> Option<SlotSet> {
     (dense.hash8() == id.slots_hash() && !is_identity_range).then_some(dense)
 }
 
+/// The feature ids a bake declares, in ascending order, or `None` when it
+/// declares the identity layout.
+pub(crate) fn declared_feature_ids(model: &crate::mlp::Model) -> Option<Vec<u16>> {
+    let layout = declared_layout(model);
+    if layout.is_identity() {
+        return None;
+    }
+    Some(
+        (0..layout.width())
+            .map(|pos| layout.slot_at(pos).unwrap_or(u16::MAX))
+            .collect(),
+    )
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -424,18 +438,4 @@ pub(crate) mod tests {
         zenpredict_bake::bake_from_json_str(&json).expect("synthetic bake must build")
     }
 
-}
-
-/// The feature ids a bake declares, in ascending order, or `None` when it
-/// declares the identity layout.
-pub(crate) fn declared_feature_ids(model: &crate::mlp::Model) -> Option<Vec<u16>> {
-    let layout = declared_layout(model);
-    if layout.is_identity() {
-        return None;
-    }
-    Some(
-        (0..layout.width())
-            .map(|pos| layout.slot_at(pos).unwrap_or(u16::MAX))
-            .collect(),
-    )
 }
