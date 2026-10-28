@@ -39,63 +39,7 @@
 //! (interior strips — the fast path the C2 walk reads in place).
 
 use crate::feature_v2::{HALO_P, STRIP_ROWS, reflect_101};
-use crate::source::{ImageSource, PixelFormat, SubsetView};
-
-/// Scales 1–3 always come from 2×2 averages of XYB (the linear-light pyramid is research only).
-pub(crate) fn linear_pyramid() -> bool {
-    false
-}
-
-/// Rows `y0 .. y0 + n` of an sRGB8 source as planar linear RGB (`out`: three
-/// planes of `n · width`), through the sRGB8 table the conversion uses.
-pub(crate) fn srgb8_rows_to_linear(
-    src: &impl ImageSource,
-    y0: usize,
-    n: usize,
-    width: usize,
-    out: [&mut [f32]; 3],
-) {
-    assert!(
-        src.pixel_format() == PixelFormat::Srgb8Rgb
-            && src.color_primaries() == crate::source::ColorPrimaries::Srgb,
-        "ZENSIM_PYRAMID=linear takes sRGB8 RGB sources"
-    );
-    let [r, g, b] = out;
-    for k in 0..n {
-        let row: &[[u8; 3]] = bytemuck::cast_slice(&src.row_bytes(y0 + k)[..width * 3]);
-        for (x, p) in row.iter().enumerate() {
-            let o = k * width + x;
-            r[o] = crate::color::srgb_u8_to_linear(p[0]);
-            g[o] = crate::color::srgb_u8_to_linear(p[1]);
-            b[o] = crate::color::srgb_u8_to_linear(p[2]);
-        }
-    }
-}
-
-/// Positive XYB of `n` planar linear RGB rows (`lin`) into three XYB slices.
-pub(crate) fn linear_rows_to_xyb(
-    lin: [&[f32]; 3],
-    n: usize,
-    width: usize,
-    out: [&mut [f32]; 3],
-    revision: crate::feature_defs::FormulaRevision,
-    buf: &mut Vec<[f32; 3]>,
-) {
-    let [r, g, b] = lin;
-    let [x, y, bb] = out;
-    for k in 0..n {
-        let row = k * width..(k + 1) * width;
-        buf.clear();
-        buf.extend(row.clone().map(|i| [r[i], g[i], b[i]]));
-        crate::color::linear_to_positive_xyb_planar_into(
-            buf,
-            &mut x[row.clone()],
-            &mut y[row.clone()],
-            &mut bb[row],
-            revision,
-        );
-    }
-}
+use crate::source::{ImageSource, SubsetView};
 
 /// Which front-end fills the scale-0 rolling planes.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -387,10 +331,6 @@ pub(crate) struct StripPlaneProducer<'a, S: ImageSource, D: ImageSource> {
     /// The walk's formula revision — what the scale-0 opsin conversion runs
     /// (canonical at Rev4, featcanon D1).
     revision: crate::feature_defs::FormulaRevision,
-    /// [`linear_pyramid`]: `[side][R, G, B][scale]` linear rolling planes,
-    /// the parents of every coarse level, and a row of interleaved pixels.
-    lin: Option<Box<[[Vec<RollingPlane>; 3]; 2]>>,
-    lin_buf: Vec<[f32; 3]>,
 }
 
 /// Convert `n_new` scale-0 rows of one side into that side's three rolling
@@ -672,14 +612,8 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
         revision: crate::feature_defs::FormulaRevision,
         omit_scale0_xb: bool,
     ) -> Self {
-        let linear = linear_pyramid();
-        assert!(
-            !linear || (matches!(front_end, FrontEnd::Sdr) && ref_planes.is_none()),
-            "ZENSIM_PYRAMID=linear supports the SDR walk without a cached reference"
-        );
         // The linear pyramid converts every level itself: scale-0 chroma is kept.
         let omit_scale0_xb = omit_scale0_xb
-            && !linear
             && revision >= crate::feature_defs::FormulaRevision::Rev5
             && matches!(front_end, FrontEnd::Sdr);
         let (w0, h0) = (source.width(), source.height());
@@ -725,24 +659,6 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
             })
         });
 
-        let lin = linear.then(|| {
-            Box::new(std::array::from_fn(|_| {
-                std::array::from_fn(|_| {
-                    scales
-                        .iter()
-                        .enumerate()
-                        .map(|(s, st)| {
-                            RollingPlane::from_pooled(
-                                pool.pop().unwrap_or_default(),
-                                st.plane_w,
-                                scale_capacity_rows(s, st.plane_h, advance_rows),
-                            )
-                        })
-                        .collect::<Vec<_>>()
-                })
-            }))
-        });
-
         Self {
             source,
             distorted,
@@ -756,8 +672,6 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
             ref_planes,
             advance_rows,
             revision,
-            lin,
-            lin_buf: Vec::new(),
         }
     }
 
@@ -1000,22 +914,6 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
 
         // `ZENSIM_PYRAMID=linear`: the same rows in linear RGB, the parents of
         // every coarse level.
-        if let Some(lin) = self.lin.as_deref_mut() {
-            let width = self.scales[0].plane_w;
-            for (si, side) in lin.iter_mut().enumerate() {
-                let [r, g, b] = side;
-                let out = [
-                    r[0].append_rows(n_new),
-                    g[0].append_rows(n_new),
-                    b[0].append_rows(n_new),
-                ];
-                if si == 0 {
-                    srgb8_rows_to_linear(self.source, hi0, n_new, width, out);
-                } else {
-                    srgb8_rows_to_linear(self.distorted, hi0, n_new, width, out);
-                }
-            }
-        }
 
         // --- Cascade downscales: fill each deeper scale from complete
         //     even row pairs of its parent. ---
@@ -1027,52 +925,6 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
         // consumes rows scale `s-1` produced in this same call. So the fan-out
         // is 6-way per scale, which is a pure schedule change: no value is
         // summed across the boundary, no byte moves.
-        if let Some(lin) = self.lin.as_deref_mut() {
-            // Each coarse level: 2×2 averages of the parent's linear rows (the
-            // XYB cascade's `downscale_2x_into` and row targets), then positive
-            // XYB of the new rows.
-            for scale in 1..crate::NUM_SCALES {
-                let (plane_w, plane_h) = (self.scales[scale].plane_w, self.scales[scale].plane_h);
-                let parent_w = self.scales[scale - 1].plane_w;
-                for (side, planes) in lin.iter_mut().zip(self.planes.iter_mut()) {
-                    let child_hi = side[0][scale].hi;
-                    let target = (side[0][scale - 1].hi / 2).min(plane_h);
-                    if target <= child_hi {
-                        continue;
-                    }
-                    let n_out = target - child_hi;
-                    for ch in side.iter_mut() {
-                        let (head, tail) = ch.split_at_mut(scale);
-                        let src_rows = head[scale - 1].rows(child_hi * 2, target * 2);
-                        let dst = tail[0].append_rows(n_out);
-                        crate::blur::downscale_2x_into(src_rows, parent_w, dst, plane_w, n_out);
-                    }
-                    let [r, g, b] = &*side;
-                    let [x, y, bb] = planes;
-                    linear_rows_to_xyb(
-                        [
-                            r[scale].rows(child_hi, target),
-                            g[scale].rows(child_hi, target),
-                            b[scale].rows(child_hi, target),
-                        ],
-                        n_out,
-                        plane_w,
-                        [
-                            x[scale].append_rows(n_out),
-                            y[scale].append_rows(n_out),
-                            bb[scale].append_rows(n_out),
-                        ],
-                        self.revision,
-                        &mut self.lin_buf,
-                    );
-                }
-            }
-            for (scale, held) in self.max_held_rows.iter_mut().enumerate() {
-                let p = &self.planes[0][0][scale];
-                *held = (*held).max(p.hi - p.lo);
-            }
-            return true;
-        }
         let ref_planes = self.ref_planes;
         #[cfg(feature = "threads")]
         let cascade_parallel = self.parallel;
@@ -1172,23 +1024,6 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
             }
             // Linear rows are read only by the next level's downscale; the
             // last level's are converted as they are made.
-            if let Some(lin) = self.lin.as_deref_mut() {
-                for side in lin.iter_mut() {
-                    let floor = if scale + 1 < crate::NUM_SCALES {
-                        let child_hi = side[0][scale + 1].hi;
-                        if child_hi >= self.scales[scale + 1].plane_h {
-                            st.plane_h
-                        } else {
-                            child_hi * 2
-                        }
-                    } else {
-                        side[0][scale].hi
-                    };
-                    for ch in side.iter_mut() {
-                        ch[scale].retire_below(floor);
-                    }
-                }
-            }
         }
     }
 
@@ -1256,11 +1091,6 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
 
     /// Return every rolling-plane buffer to `pool` for the next pair.
     pub(crate) fn recycle(self, pool: &mut Vec<Vec<f32>>) {
-        for side in self.lin.into_iter().flat_map(|lin| *lin) {
-            for ch in side {
-                pool.extend(ch.into_iter().map(|plane| plane.buf));
-            }
-        }
         for side in self.planes.into_iter().rev() {
             for ch in side.into_iter().rev() {
                 for plane in ch.into_iter().rev() {

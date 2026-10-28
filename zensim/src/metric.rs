@@ -2912,18 +2912,11 @@ fn finish_network_output(
     } else {
         y_pre
     };
-    let y_after_spline = if let Some(spline) = output_spline {
+    Ok(if let Some(spline) = output_spline {
         apply_output_calibration_spline(y_after_pin, spline)
     } else {
         y_after_pin
-    };
-    // EXP-CROSS-CODEC-V11-E: per-codec post-spline affine. When
-    // the metadata is present AND the caller supplied a known
-    // codec hint, pull the per-codec output toward consensus.
-    // Otherwise pass through unchanged. The affine is monotone
-    // (beta > 0 by parse) so within-codec rank ordering is
-    // preserved bit-exact.
-    Ok({ y_after_spline })
+    })
 }
 
 /// Append `(log2(pixels), log2(min_dim), log2(max_dim), signed

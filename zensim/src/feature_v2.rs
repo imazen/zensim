@@ -4019,7 +4019,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
     // windows (`rev5_block_walk`); the streaming producer above is unused.
     #[cfg(feature = "threads")]
     let block_walk = {
-        let omit_xb = !compute.full_res_xb && !crate::feature_v2_stream::linear_pyramid();
+        let omit_xb = !compute.full_res_xb;
         batch_limit > 0
             && ref_planes.is_none()
             && matches!(front_end, crate::feature_v2_stream::FrontEnd::Sdr)
@@ -4043,7 +4043,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
             toggles,
             fold_v1,
             batch_limit,
-            !compute.full_res_xb && !crate::feature_v2_stream::linear_pyramid(),
+            !compute.full_res_xb,
             rev5_jobs,
             block_pool,
             &mut accums,
