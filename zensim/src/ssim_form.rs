@@ -73,7 +73,6 @@ use magetypes::simd::generic::{f32x8 as GenericF32x8, f32x16};
 /// forms the dissimilarity from it). This kernel is the exactness REFERENCE the
 /// bounded-error tests measure against — see
 /// `benchmarks/stable_ssim_kernel_2026-09-08.md`.
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Default)]
 pub(crate) struct StableSsimScratch {
     rows: Vec<[f64; 4]>,
@@ -85,7 +84,6 @@ pub(crate) struct StableSsimScratch {
 /// All moments use f64, including source products and sliding-window updates;
 /// outputs round once to f32. No covariance subtraction enters the numerator.
 /// The spatial kernel is one reflect-101 box with the specified radius.
-#[cfg_attr(not(test), allow(dead_code))]
 #[allow(clippy::too_many_arguments)]
 #[autoversion]
 pub(crate) fn stable_ssim_plane(
@@ -553,7 +551,6 @@ pub(crate) struct TiledSsimScratch {
 /// sliding kernel's time. Kept because it is the only construction that makes
 /// locality precision-independent, and because that is what an f32 variant
 /// would need. See `benchmarks/stable_ssim_kernel_2026-09-08.md`.
-#[cfg_attr(not(test), allow(dead_code))]
 #[allow(clippy::too_many_arguments)]
 #[autoversion]
 pub(crate) fn stable_ssim_plane_tiled(
@@ -1307,7 +1304,6 @@ impl<T: F32x16Backend + Copy> SsimSplats16<T> {
     /// `var1 + var2 - 2*cov`. Same algebra as the f64 reference `finalize`,
     /// in f32 with the crate's `mul_add` spellings. Bounded error, registered
     /// in `benchmarks/stable_ssim_kernel_2026-09-08.md`.
-    #[cfg_attr(not(feature = "avx512"), allow(dead_code))] // 16-lane: only the v4x arcane bodies reach it
     #[inline(always)]
     pub(crate) fn direct(
         &self,
@@ -1509,7 +1505,6 @@ pub(crate) fn ssim_direct_raw_scalar(
 }
 
 /// 16-lane direct-error form; see [`SsimSplats16::direct`].
-#[cfg_attr(not(feature = "avx512"), allow(dead_code))] // only the v4x arcane bodies call this; they are not emitted without `avx512`
 #[inline(always)]
 pub(crate) fn ssim_direct16<T: F32x16Backend + Copy>(
     token: T,

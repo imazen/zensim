@@ -98,7 +98,6 @@ pub(crate) struct ExtPoolsWork {
 // `dead_code` allow for the same reason as the sibling 16-lane helpers: a
 // build without the `avx512` feature never dispatches the tiers that call it.
 #[cfg(target_arch = "x86_64")]
-#[allow(dead_code)]
 #[inline(always)]
 fn ext_accumulate16<T: F32x16Backend + Copy>(
     token: T,
@@ -298,7 +297,6 @@ fn raw_moments_finish8<T: F32x8Backend + Copy>(
 // reports the 16-lane helpers as dead even though `_v4`/`_v4x` still
 // compile and call them. Annotated rather than `cfg`-gated: gating
 // them off breaks those bodies (measured — `cannot find function`).
-#[allow(dead_code)]
 #[inline(always)]
 fn raw_moments_accumulate16<T: F32x16Backend + Copy>(
     fm_s: &mut f32x16<T>,
@@ -339,7 +337,6 @@ fn raw_moments_accumulate16<T: F32x16Backend + Copy>(
 // reports the 16-lane helpers as dead even though `_v4`/`_v4x` still
 // compile and call them. Annotated rather than `cfg`-gated: gating
 // them off breaks those bodies (measured — `cannot find function`).
-#[allow(dead_code)]
 #[inline(always)]
 fn raw_moments_finish16<T: F32x16Backend + Copy>(
     acc: &mut StripChannelAccum,
@@ -560,7 +557,6 @@ fn lum_bins_finish8<T: F32x8Backend + Copy>(
 // reports the 16-lane helpers as dead even though `_v4`/`_v4x` still
 // compile and call them. Annotated rather than `cfg`-gated: gating
 // them off breaks those bodies (measured — `cannot find function`).
-#[allow(dead_code)]
 #[inline(always)]
 fn bounded_err_accumulate16<T: F32x16Backend + Copy>(
     token: T,
@@ -580,7 +576,6 @@ fn bounded_err_accumulate16<T: F32x16Backend + Copy>(
 // reports the 16-lane helpers as dead even though `_v4`/`_v4x` still
 // compile and call them. Annotated rather than `cfg`-gated: gating
 // them off breaks those bodies (measured — `cannot find function`).
-#[allow(dead_code)]
 #[inline(always)]
 #[allow(clippy::too_many_arguments)]
 fn lum_bins_accumulate16<T: F32x16Backend + Copy>(
@@ -610,7 +605,6 @@ fn lum_bins_accumulate16<T: F32x16Backend + Copy>(
 // reports the 16-lane helpers as dead even though `_v4`/`_v4x` still
 // compile and call them. Annotated rather than `cfg`-gated: gating
 // them off breaks those bodies (measured — `cannot find function`).
-#[allow(dead_code)]
 #[inline(always)]
 fn bounded_err_finish16<T: F32x16Backend + Copy>(acc: &mut StripChannelAccum, be_m: f32x16<T>) {
     acc.sum_msat += be_m.reduce_add() as f64;
@@ -623,7 +617,6 @@ fn bounded_err_finish16<T: F32x16Backend + Copy>(acc: &mut StripChannelAccum, be
 // reports the 16-lane helpers as dead even though `_v4`/`_v4x` still
 // compile and call them. Annotated rather than `cfg`-gated: gating
 // them off breaks those bodies (measured — `cannot find function`).
-#[allow(dead_code)]
 #[inline(always)]
 fn lum_bins_finish16<T: F32x16Backend + Copy>(
     acc: &mut StripChannelAccum,
@@ -4895,7 +4888,6 @@ impl VWin {
     /// The `F64` variant's five per-column f64 window states — `None` on the
     /// other variants. The canon64 vector bodies are entered only under
     /// `BlurMode::Rec64` (the caller's axis gate), which constructs `F64`.
-    #[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))] // only the x86_64 lane-parallel canon bodies call it
     #[inline(always)]
     fn f64_states(&self) -> Option<[&[f64]; 5]> {
         match self {
@@ -6343,7 +6335,7 @@ fn fused_vblur_ssim_canon64_vec_scalar<P: crate::featcanon::Pool64>(
 }
 
 /// Wasm128 sibling of [`fused_vblur_ssim_canon64_vec_scalar`].
-#[allow(clippy::too_many_arguments, dead_code)]
+#[allow(clippy::too_many_arguments)]
 fn fused_vblur_ssim_canon64_vec_wasm128<P: crate::featcanon::Pool64>(
     _token: archmage::Wasm128Token,
     h_mu1: &[f32],
@@ -6429,7 +6421,7 @@ fn fused_vblur_ssim_canon64_vec_wasm128<P: crate::featcanon::Pool64>(
 
 /// NEON runs the scalar canonical body (2026-10-03): NEON vector `max`/`min` propagate NaN where the canon's `f32::max`/
 /// `f64::max` drop it (the REV4VEC CI aarch64 failure), so only the x86_64 fused tiers run a lane-parallel body.
-#[allow(clippy::too_many_arguments, dead_code)]
+#[allow(clippy::too_many_arguments)]
 fn fused_vblur_ssim_canon64_vec_neon<P: crate::featcanon::Pool64>(
     _token: archmage::NeonToken,
     h_mu1: &[f32],
@@ -6842,7 +6834,7 @@ fn fused_vblur_edge_canon64_vec_scalar(
 }
 
 /// Wasm128 sibling of [`fused_vblur_edge_canon64_vec_scalar`].
-#[allow(clippy::too_many_arguments, dead_code)]
+#[allow(clippy::too_many_arguments)]
 fn fused_vblur_edge_canon64_vec_wasm128(
     _token: archmage::Wasm128Token,
     h_mu1: &[f32],
@@ -6878,7 +6870,7 @@ fn fused_vblur_edge_canon64_vec_wasm128(
 
 /// NEON runs the scalar canonical body (2026-10-03): NEON vector `max`/`min` propagate NaN where the canon's `f32::max`/
 /// `f64::max` drop it (the REV4VEC CI aarch64 failure), so only the x86_64 fused tiers run a lane-parallel body.
-#[allow(clippy::too_many_arguments, dead_code)]
+#[allow(clippy::too_many_arguments)]
 fn fused_vblur_edge_canon64_vec_neon(
     _token: archmage::NeonToken,
     h_mu1: &[f32],

@@ -19,7 +19,6 @@
 //! Foundation-ahead-of-consumer: the scoring path that uses these does not
 //! land until the PU front-end chunk, so the items are `allow(dead_code)` for
 //! now. They are fully exercised by the reference-parity tests below.
-#![allow(dead_code)]
 
 use archmage::incant;
 use archmage::magetypes;
@@ -77,17 +76,6 @@ fn pq_eotf_canon(v: f32) -> f32 {
     L_MAX * pow_midp_f32(num / den, 1.0 / M1)
 }
 
-/// [`pq_eotf`] at an explicit formula revision: the libm body through
-/// Rev3, the canonical midp body at Rev4 (featcanon D1).
-#[inline]
-pub(crate) fn pq_eotf_at_revision(v: f32, revision: crate::feature_defs::FormulaRevision) -> f32 {
-    if crate::featcanon::mode(revision).active() {
-        pq_eotf_canon(v)
-    } else {
-        pq_eotf(v)
-    }
-}
-
 /// ITU-R BT.2100 HLG inverse-OETF: HLG-encoded `v ∈ [0, 1]` → scene-relative
 /// linear `[0, 12]` **per channel**.
 ///
@@ -105,19 +93,6 @@ pub(crate) fn hlg_inverse_oetf(v: f32) -> f32 {
     } else {
         (((v - C) / A).exp() + B) / 12.0
     }
-}
-
-/// [`hlg_inverse_oetf`] at an explicit formula revision: libm `exp` through
-/// Rev3, the canonical midp `exp` at Rev4.
-#[inline]
-pub(crate) fn hlg_inverse_oetf_at_revision(
-    v: f32,
-    revision: crate::feature_defs::FormulaRevision,
-) -> f32 {
-    if !crate::featcanon::mode(revision).active() {
-        return hlg_inverse_oetf(v);
-    }
-    hlg_inverse_oetf_canon(v)
 }
 
 /// The Rev4 canonical HLG inverse-OETF — [`hlg_inverse_oetf_at_revision`]'s
@@ -149,26 +124,6 @@ pub(crate) fn hlg_system_gamma(y_peak: f32, e_ambient_lux: f32) -> f32 {
         };
         1.2 + 0.42 * (y_peak / 1000.0).log10() - 0.076_23 * (amb / 5.0).log10()
     }
-}
-
-/// [`hlg_system_gamma`] at an explicit formula revision: libm `log10`
-/// through Rev3, the canonical midp `log10` at Rev4.
-#[inline]
-pub(crate) fn hlg_system_gamma_at_revision(
-    y_peak: f32,
-    e_ambient_lux: f32,
-    revision: crate::feature_defs::FormulaRevision,
-) -> f32 {
-    if !crate::featcanon::mode(revision).active() || y_peak <= 1000.0 {
-        return hlg_system_gamma(y_peak, e_ambient_lux);
-    }
-    let amb = if e_ambient_lux > 0.0 {
-        e_ambient_lux
-    } else {
-        5.0
-    };
-    1.2 + 0.42 * crate::det_math::log10_midp_f32(y_peak / 1000.0)
-        - 0.076_23 * crate::det_math::log10_midp_f32(amb / 5.0)
 }
 
 /// The physical display the metric assumes the image is shown on: peak and
@@ -222,17 +177,6 @@ impl DisplayModel {
         self.pq_nits_to_display(pq_eotf(v))
     }
 
-    /// [`pq_to_luminance`](Self::pq_to_luminance) at an explicit formula
-    /// revision — [`pq_eotf_at_revision`] underneath.
-    #[inline]
-    pub(crate) fn pq_to_luminance_at_revision(
-        &self,
-        v: f32,
-        revision: crate::feature_defs::FormulaRevision,
-    ) -> f32 {
-        self.pq_nits_to_display(pq_eotf_at_revision(v, revision))
-    }
-
     #[inline]
     fn pq_nits_to_display(&self, nits: f32) -> f32 {
         nits.min(self.y_peak) + self.y_black + self.y_refl
@@ -262,35 +206,6 @@ pub(crate) fn decode_pq_row(row: &mut [[f32; 3]], peak_nits: f32) {
         px[1] = dm.pq_to_luminance(px[1]);
         px[2] = dm.pq_to_luminance(px[2]);
     }
-}
-
-/// [`decode_pq_row`] at an explicit formula revision — the same display
-/// model over [`pq_eotf_at_revision`]. REV4VEC: at Rev4 the per-channel
-/// canonical body (`pq_eotf_canon` + the display clamp/lift) runs
-/// lane-parallel over flat channel chunks on the fused-FMA tiers; the
-/// scalar canonical body covers the remainder and the non-fused tiers.
-pub(crate) fn decode_pq_row_at_revision(
-    row: &mut [[f32; 3]],
-    peak_nits: f32,
-    revision: crate::feature_defs::FormulaRevision,
-) {
-    if !crate::featcanon::mode(revision).active() {
-        decode_pq_row(row, peak_nits);
-        return;
-    }
-    let dm = DisplayModel {
-        y_peak: peak_nits,
-        y_black: DisplayModel::STANDARD_HDR_PQ_1000.y_black,
-        y_refl: DisplayModel::STANDARD_HDR_PQ_1000.y_refl,
-    };
-    // The EOTF + display map is elementwise — the channel-major layout of
-    // `[[f32; 3]]` needs no transpose, the flat channel sequence is the
-    // chunk sequence.
-    let flat: &mut [f32] = bytemuck::cast_slice_mut(row);
-    incant!(
-        decode_pq_row_canon_vec(flat, dm),
-        [v4x, v4, v3, neon, wasm128, scalar]
-    );
 }
 
 /// The per-element scalar canonical PQ decode body — what the fused
@@ -399,39 +314,6 @@ pub(crate) fn decode_pq_u16_rgba_row(row: &[u8], out: &mut [[f32; 3]], peak_nits
     }
 }
 
-/// [`decode_pq_u16_rgba_row`] at an explicit formula revision. The Rev4
-/// table is a second cache: the canonical EOTF differs in bits from the
-/// libm one, and a Rev4 consumer must not read production-table values
-/// (nor poison the shared production table).
-pub(crate) fn decode_pq_u16_rgba_row_at_revision(
-    row: &[u8],
-    out: &mut [[f32; 3]],
-    peak_nits: f32,
-    revision: crate::feature_defs::FormulaRevision,
-) {
-    if !crate::featcanon::mode(revision).active() {
-        decode_pq_u16_rgba_row(row, out, peak_nits);
-        return;
-    }
-    static LUT_CANON: std::sync::OnceLock<Box<[f32]>> = std::sync::OnceLock::new();
-    let lut = LUT_CANON.get_or_init(|| {
-        (0..=u16::MAX)
-            .map(|code| pq_eotf_canon(f32::from(code) * (1.0 / 65535.0)))
-            .collect::<Vec<_>>()
-            .into_boxed_slice()
-    });
-    let dm = DisplayModel {
-        y_peak: peak_nits,
-        ..DisplayModel::STANDARD_HDR_PQ_1000
-    };
-    for (px, source) in out.iter_mut().zip(row.as_chunks::<8>().0) {
-        for c in 0..3 {
-            let code = u16::from_ne_bytes([source[c * 2], source[c * 2 + 1]]);
-            px[c] = dm.pq_nits_to_display(lut[usize::from(code)]);
-        }
-    }
-}
-
 /// Decode one row of HLG signal-value RGB triples (`[0, 1]`) IN PLACE to
 /// absolute display-light cd/m² per BT.2100's reference OOTF:
 /// per-channel scene light `E_s = OETF⁻¹(E')`, scene luminance
@@ -476,37 +358,6 @@ pub(crate) fn decode_hlg_row_in_primaries(
         px[1] = scale * gs + lift;
         px[2] = scale * bs + lift;
     }
-}
-
-/// [`decode_hlg_row_in_primaries`] at an explicit formula revision — the
-/// canonical midp transcendentals at Rev4, the libm bodies below it.
-/// REV4VEC: at Rev4 the per-pixel canonical body runs lane-parallel over
-/// 16-pixel chunks on the fused-FMA tiers; the scalar canonical body
-/// covers the remainder and the non-fused tiers.
-pub(crate) fn decode_hlg_row_in_primaries_at_revision(
-    row: &mut [[f32; 3]],
-    peak_nits: f32,
-    ambient_lux: f32,
-    primaries: crate::source::ColorPrimaries,
-    revision: crate::feature_defs::FormulaRevision,
-) {
-    if !crate::featcanon::mode(revision).active() {
-        decode_hlg_row_in_primaries(row, peak_nits, ambient_lux, primaries);
-        return;
-    }
-    use crate::source::ColorPrimaries;
-    let luma = match primaries {
-        ColorPrimaries::Srgb => [0.212_639, 0.715_168_7, 0.072_192_32],
-        ColorPrimaries::DisplayP3 => [0.228_974_57, 0.691_738_55, 0.079_286_91],
-        ColorPrimaries::Bt2020 => BT2100_LUMA,
-    };
-    let gamma = hlg_system_gamma_at_revision(peak_nits, ambient_lux, revision);
-    let lift =
-        DisplayModel::STANDARD_HDR_PQ_1000.y_black + DisplayModel::STANDARD_HDR_PQ_1000.y_refl;
-    incant!(
-        decode_hlg_row_canon_vec(row, luma, gamma, peak_nits, lift),
-        [v4x, v4, v3, neon, wasm128, scalar]
-    );
 }
 
 /// `f32::clamp(v, 0.0, 1.0)` lane-parallel — `if v < 0 {0} else if v > 1

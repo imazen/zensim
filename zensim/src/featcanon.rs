@@ -61,7 +61,6 @@ impl Mode {
 
     /// Product-build sibling of the oracle `exact()`: never true, so
     /// `if mode.exact()` folds away wherever it is written unconditionally.
-    #[allow(dead_code)]
     #[inline(always)]
     pub(crate) const fn exact(self) -> bool {
         false
@@ -137,13 +136,6 @@ pub(crate) enum BlurMode {
     /// w = s8 + s2[8] + x[10]` — with [`tap_mirror`] padding. No recurrence,
     /// so rounding cannot travel along a row or strip.
     Local,
-}
-
-/// Non-oracle sibling: the blur axis does not exist, only `Rec` ships.
-#[inline(always)]
-#[allow(dead_code)]
-pub(crate) const fn blur_axis() -> BlurMode {
-    BlurMode::Rec
 }
 
 /// Non-oracle sibling: the only canon mode a product build can select is
@@ -224,7 +216,6 @@ pub(crate) const CANON_LANES: usize = 8;
 pub(crate) struct LanesF64(pub [f64; CANON_LANES]);
 
 /// dead_code until chunked-pool kernels land; see LanesF32::add_chunk.
-#[allow(dead_code)]
 impl LanesF64 {
     #[inline(always)]
     pub(crate) fn zero() -> Self {
@@ -237,26 +228,8 @@ impl LanesF64 {
         }
     }
     #[inline(always)]
-    pub(crate) fn add_chunk_f64(&mut self, c: &[f64; 8]) {
-        for (l, &v) in self.0.iter_mut().zip(c.iter()) {
-            *l += v;
-        }
-    }
-    #[inline(always)]
     pub(crate) fn add_lane(&mut self, i: usize, v: f64) {
         self.0[i & (CANON_LANES - 1)] += v;
-    }
-    #[inline(always)]
-    pub(crate) fn add_tail(&mut self, t: &[f32]) {
-        for (l, &v) in self.0.iter_mut().zip(t.iter()) {
-            *l += v as f64;
-        }
-    }
-    #[inline(always)]
-    pub(crate) fn add_tail_f64(&mut self, t: &[f64]) {
-        for (l, &v) in self.0.iter_mut().zip(t.iter()) {
-            *l += v;
-        }
     }
     /// The same adjacent-pairwise tree as `era2_reduce8`, in f64.
     #[inline(always)]

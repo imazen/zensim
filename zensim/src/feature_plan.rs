@@ -675,11 +675,6 @@ impl Plan {
         }
     }
 
-    /// The formula revision this plan computes.
-    pub(crate) fn formula_revision(&self) -> crate::feature_defs::FormulaRevision {
-        self.compute.formula_revision
-    }
-
     /// Do two plans compute the SAME arithmetic era?
     ///
     /// One walk computes one revision, so a profile whose bakes disagree

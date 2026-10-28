@@ -171,36 +171,6 @@ pub(crate) fn srgb_to_positive_xyb_planar_into_at_revision(
     srgb_to_positive_xyb_planar_into(pixels, x_out, y_out, b_out);
 }
 
-/// Convert interleaved sRGB u8 to planar XYB (without positive shift).
-#[allow(dead_code)]
-pub fn srgb_to_xyb_planar(pixels: &[[u8; 3]]) -> [Vec<f32>; 3] {
-    let n = pixels.len();
-    let mut x_plane = vec![0.0f32; n];
-    let mut y_plane = vec![0.0f32; n];
-    let mut b_plane = vec![0.0f32; n];
-
-    incant!(
-        srgb_to_xyb_planar_inner(pixels, &mut x_plane, &mut y_plane, &mut b_plane),
-        [v3, neon, wasm128, scalar]
-    );
-
-    [x_plane, y_plane, b_plane]
-}
-
-/// Convert interleaved sRGB u8 to planar XYB, writing into pre-allocated buffers.
-#[allow(dead_code)]
-pub fn srgb_to_xyb_planar_into(
-    pixels: &[[u8; 3]],
-    x_plane: &mut [f32],
-    y_plane: &mut [f32],
-    b_plane: &mut [f32],
-) {
-    incant!(
-        srgb_to_xyb_planar_inner(pixels, x_plane, y_plane, b_plane),
-        [v3, neon, wasm128, scalar]
-    );
-}
-
 // Note: the standalone `make_positive_xyb` post-process function was
 // removed in 0.3.0. The streaming pipeline now fuses the conversion +
 // positive shift in `srgb_to_positive_xyb_planar_into` and
@@ -394,7 +364,6 @@ fn linear_xyb_canon_body<const CLAMP: bool>(
 /// definition every fused tier runs — on v3 and NEON `f32x16` decomposes
 /// into two/four fused-FMA ops per lane, which is per-lane identical to one
 /// fused `mul_add` each. Only x86_64 builds one: i686, wasm32 and aarch64 NEON run the scalar canonical body.
-#[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))]
 struct CanonChunk<T: F32x16Convert> {
     token: T,
     /// Revision 7's cube root ([`crate::det_math::cbrt_newton_x16`]).
@@ -411,7 +380,6 @@ struct CanonChunk<T: F32x16Convert> {
     b_bias: GenericF32x16<T>,
 }
 
-#[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))]
 impl<T: F32x16Convert> CanonChunk<T> {
     /// `cbrt7` selects revision 7's cube root in [`Self::opsin_positive`].
     #[inline(always)]

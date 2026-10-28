@@ -124,22 +124,6 @@ pub(crate) enum Statistic {
 }
 
 impl Statistic {
-    /// Stable lower-case token, for provenance output.
-    pub(crate) const fn as_str(self) -> &'static str {
-        match self {
-            Statistic::Mean => "mean",
-            Statistic::L2 => "l2",
-            Statistic::L4 => "l4",
-            Statistic::L8 => "l8",
-            Statistic::BlockL4 => "block_l4",
-            Statistic::BlockL8 => "block_l8",
-            Statistic::Max => "max",
-            Statistic::WeightedMean => "weighted_mean",
-            Statistic::Ratio => "ratio",
-            Statistic::Bin => "bin",
-            Statistic::Global => "global",
-        }
-    }
 }
 
 /// What a slot costs when its OWNING BLOCK runs.
@@ -159,14 +143,6 @@ pub(crate) enum CostClass {
 }
 
 impl CostClass {
-    /// Stable lower-case token, for provenance output.
-    pub(crate) const fn as_str(self) -> &'static str {
-        match self {
-            CostClass::Free => "free",
-            CostClass::Cheap => "cheap",
-            CostClass::Expensive => "expensive",
-        }
-    }
 }
 
 /// Whether a slot can be harvested by a v1-only walk that never runs the
@@ -192,14 +168,6 @@ pub(crate) enum Tranche {
 }
 
 impl Tranche {
-    /// Stable lower-case token, for provenance output.
-    pub(crate) const fn as_str(self) -> &'static str {
-        match self {
-            Tranche::None => "none",
-            Tranche::RawMoments => "raw_moments",
-            Tranche::ClassC => "class_c",
-        }
-    }
 }
 
 /// Which (scale, channel) placements of a signal its [`Tranche`] can serve.
@@ -253,15 +221,6 @@ pub(crate) enum Form {
 }
 
 impl Form {
-    /// Stable lower-case token, for provenance output.
-    pub(crate) const fn as_str(self) -> &'static str {
-        match self {
-            Form::Difference => "difference",
-            Form::Similarity => "similarity",
-            Form::ReferenceOnly => "reference_only",
-            Form::Undeclared => "undeclared",
-        }
-    }
 }
 
 /// The monotone expectation a dial gate may rely on.
@@ -278,20 +237,10 @@ pub(crate) enum Direction {
     /// Reserved for the Phase-2 research engine's provenance output
     /// (`docs/PLAN_FEATURE_SYSTEM_2026-09-05.md`); no signal in the committed
     /// registry currently declares it, so nothing constructs it yet.
-    #[allow(dead_code)]
     Undeclared,
 }
 
 impl Direction {
-    /// Stable lower-case token, for provenance output.
-    pub(crate) const fn as_str(self) -> &'static str {
-        match self {
-            Direction::HigherIsWorse => "higher_is_worse",
-            Direction::HigherIsBetter => "higher_is_better",
-            Direction::Unsigned => "unsigned",
-            Direction::Undeclared => "undeclared",
-        }
-    }
 }
 
 /// The kernel that owns a signal's accumulation — the "who computes this"
@@ -332,25 +281,6 @@ pub(crate) enum KernelId {
 }
 
 impl KernelId {
-    /// Stable lower-case token, for provenance output.
-    pub(crate) const fn as_str(self) -> &'static str {
-        match self {
-            KernelId::V1Fused => "v1_fused",
-            KernelId::V1Peaks => "v1_peaks",
-            KernelId::V1MaskIw => "v1_mask_iw",
-            KernelId::V2Dense => "v2_dense",
-            KernelId::V2Gradient => "v2_gradient",
-            KernelId::Append => "append",
-            KernelId::Append2 => "append2",
-            KernelId::Csfw => "csfw",
-            KernelId::FreeRawMoments => "free_raw_moments",
-            KernelId::FreeBoundedErr => "free_bounded_err",
-            KernelId::Gridblk => "gridblk",
-            KernelId::RestoreMaps => "restore_maps",
-            KernelId::Palette => "palette",
-            KernelId::GlobAff => "globaff",
-        }
-    }
 }
 
 /// Whether a [`Revision`] has LANDED (the values moved) or is PROPOSED (the
@@ -369,13 +299,6 @@ pub(crate) enum RevisionStatus {
 }
 
 impl RevisionStatus {
-    /// Stable lower-case token, for provenance output.
-    pub(crate) const fn as_str(self) -> &'static str {
-        match self {
-            RevisionStatus::Landed => "landed",
-            RevisionStatus::Proposed => "proposed",
-        }
-    }
 }
 
 /// A known defect in a signal's current definition.
@@ -778,7 +701,6 @@ pub(crate) struct SignalDef {
     // anywhere — they are Phase 1a's declarative data, awaiting the Phase-2
     // research engine's provenance consumer
     // (`docs/PLAN_FEATURE_SYSTEM_2026-09-05.md`). Not dead: reserved.
-    #[allow(dead_code)]
     pub statistic: Statistic,
     /// Cost when the signal's OWNING BLOCK runs. See [`cost_of`] for the
     /// per-slot answer, which also accounts for [`SignalDef::tranche`].
@@ -787,14 +709,10 @@ pub(crate) struct SignalDef {
     pub tranche: Tranche,
     /// Which placements the tranche can serve.
     pub placement: Placement,
-    #[allow(dead_code)]
     pub form: Form,
-    #[allow(dead_code)]
     pub direction: Direction,
-    #[allow(dead_code)]
     pub kernel: KernelId,
     /// Retired: the slot keeps its id and its structural zero forever.
-    #[allow(dead_code)]
     pub deprecated: bool,
     /// A live defect in the current definition, from the defect audit.
     pub defect: Option<Defect>,
@@ -809,7 +727,6 @@ pub(crate) struct FeatureDef {
     /// Constructed by every layout expansion but not yet read back anywhere
     /// — reserved for the Phase-2 provenance consumer
     /// (`docs/PLAN_FEATURE_SYSTEM_2026-09-05.md`).
-    #[allow(dead_code)]
     pub id: u16,
     pub signal: &'static SignalDef,
     pub scale: u8,
@@ -3209,30 +3126,6 @@ pub(crate) fn block_base(
     None
 }
 
-/// Every emitted-vector width a registered PRODUCER set has ever used —
-/// the candidate clip widths [`crate::feature_layout::slots_of`] searches when
-/// an id does not carry a legacy `@w<N>` component.
-///
-/// **This bounds a search; it is not an identity.** A feature-set id's identity
-/// is its `slots_hash8`, so a width on this list can only ever CONFIRM a
-/// reconstruction, never change which set an id names. An id whose sparse clip
-/// width is not here is reported unreproducible by this build, which is the
-/// same answer it would give for an unknown compute token — and the honest one,
-/// because guessing would name a different set.
-///
-/// Sourced from `benchmarks/feature_sets_registry.json`'s `sets[].layout`
-/// (append-only; 2026-09-19: 372, 720, 924, 944, 956, 986; 2026-09-23: the
-/// Rev4 feature bank's full width 1322) plus C8's width 1502, the by-construction research widths 1891 (globaff),
-/// 2055 (the luminance-gated globaff research set), 2301 (the gated globaff research set) and 2337 (the byc_orient
-/// research set) and the restored-cut families' widths 1562 (mapdev),
-/// `zensim-validate`'s
-/// `every_registered_layout_width_is_a_candidate` holds the two in sync, so
-/// registering a set at a new width fails the build rather than silently
-/// becoming unreproducible.
-pub(crate) const REGISTERED_LAYOUT_WIDTHS: &[usize] = &[
-    372, 720, 924, 944, 956, 986, 1322, 1502, 1562, 1790, 1820, 1825, 1867, 1891, 2055, 2301, 2337,
-];
-
 /// Total layout width at `n_scales` with every registered block present.
 pub(crate) fn full_width(n_scales: usize) -> usize {
     BLOCKS
@@ -3449,7 +3342,6 @@ pub(crate) fn cost_of(id: usize, n_scales: usize) -> Option<CostClass> {
 /// Not yet called (reserved for the Phase-2 research engine's iteration over
 /// the registry, `docs/PLAN_FEATURE_SYSTEM_2026-09-05.md`); kept because it is
 /// the documented entry point for that consumer, not because it runs today.
-#[allow(dead_code)]
 pub(crate) fn signals() -> impl Iterator<Item = &'static SignalDef> {
     BLOCKS.iter().flat_map(|b| b.signals.iter())
 }

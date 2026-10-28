@@ -29,7 +29,6 @@
 // the `oracle`-feature harnesses. Building the lib with `oracle` on but without
 // `cfg(test)` therefore leaves most of it unreferenced, which is correct rather
 // than a smell.
-#[allow(dead_code)]
 pub(crate) mod oracle {
     use super::*;
 
@@ -400,7 +399,6 @@ pub(crate) mod oracle {
 // lane pins its parity stages). Until then they are exercised only by the
 // era-2 structural gates, so a non-test build sees them as unused. The
 // allow comes off with the kernel.
-#[allow(dead_code)]
 pub(crate) const ERA2_BAND_ROWS: usize = 32;
 
 /// The era-2 horizontal reduction — defined in [`crate::featcanon`], whose
@@ -411,9 +409,7 @@ pub(crate) use crate::featcanon::era2_reduce8;
 
 /// One era-2 accumulator: 8 f32 virtual lanes.
 #[derive(Clone, Copy)]
-#[allow(dead_code)]
 pub(crate) struct Lanes8(pub [f32; 8]);
-#[allow(dead_code)]
 impl Lanes8 {
     #[inline(always)]
     fn zero() -> Self {
@@ -498,7 +494,7 @@ fn dense_block_kernel_era2(
 // than 22. The split is not a 16-register concession — it is the right
 // structure on every tier.
 #[magetypes(+v4x, -v4, -v3, -neon, -wasm128, -scalar)]
-#[allow(clippy::too_many_arguments, dead_code)]
+#[allow(clippy::too_many_arguments)]
 fn dense_block_kernel_era2_entry(
     token: Token,
     src: &[f32],
@@ -530,7 +526,7 @@ fn dense_block_kernel_era2_entry(
 }
 
 #[magetypes(v4, v3, neon, wasm128, scalar)]
-#[allow(clippy::too_many_arguments, dead_code)]
+#[allow(clippy::too_many_arguments)]
 fn dense_block_kernel_era2_entry(
     token: Token,
     src: &[f32],
@@ -570,7 +566,6 @@ fn dense_block_kernel_era2_entry(
 /// `iw_w = IW_WEIGHT_FLOOR`) to the weight denominators. Those are not
 /// accumulator-neutral, so the tail is masked rather than padded.
 #[inline(always)]
-#[allow(dead_code)]
 fn v8_add_first<T: F32x8Backend + Copy>(token: T, acc: V8<T>, t: &[f32; 8], n: usize) -> V8<T> {
     let mut a = acc.to_array();
     for k in 0..n {
@@ -594,7 +589,7 @@ fn v8_add_first<T: F32x8Backend + Copy>(token: T, acc: V8<T>, t: &[f32; 8], n: u
 /// Term evaluation moves to the `_v` helpers, i.e. **the same functions era-1's
 /// SIMD path uses**, so the per-pixel math is era-1's exactly.
 #[inline(always)]
-#[allow(clippy::too_many_arguments, dead_code)]
+#[allow(clippy::too_many_arguments)]
 fn dense_block_kernel_era2_generic<T: F32x8Backend + Copy, const FUSED: bool>(
     token: T,
     src: &[f32],
@@ -1228,7 +1223,6 @@ fn dense_block_kernel_canon<P: crate::featcanon::Pool>(
 /// scalar mirror was written to era-2's `terms!`/`pools!`; this calls the
 /// same `*_v` helpers). All plain unfused ops — no `mul_add` anywhere —
 /// so every lane IS one scalar element's rounding.
-#[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))] // only the x86_64 lane-parallel canon bodies call it
 #[inline(always)]
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn dense_terms32_v<V: Vf32>(
@@ -2028,7 +2022,7 @@ fn dense_block_kernel_canon64_vec_scalar<P: crate::featcanon::Pool64, const R7: 
 }
 
 /// Wasm128 sibling of [`dense_block_kernel_canon64_vec_scalar`].
-#[allow(clippy::too_many_arguments, dead_code)]
+#[allow(clippy::too_many_arguments)]
 fn dense_block_kernel_canon64_vec_wasm128<P: crate::featcanon::Pool64, const R7: bool>(
     _token: archmage::Wasm128Token,
     src: &[f32],
@@ -2062,7 +2056,7 @@ fn dense_block_kernel_canon64_vec_wasm128<P: crate::featcanon::Pool64, const R7:
 
 /// NEON runs the scalar canonical body (2026-10-03): NEON vector `max`/`min` propagate NaN where the canon's `f32::max`/
 /// `f64::max` drop it (the REV4VEC CI aarch64 failure), so only the x86_64 fused tiers run a lane-parallel body.
-#[allow(clippy::too_many_arguments, dead_code)]
+#[allow(clippy::too_many_arguments)]
 fn dense_block_kernel_canon64_vec_neon<P: crate::featcanon::Pool64, const R7: bool>(
     _token: archmage::NeonToken,
     src: &[f32],

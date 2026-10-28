@@ -194,14 +194,12 @@ pub struct ZensimConfig {
     ///
     /// Overrides `blur_passes` when set. The `blur_radius` field still controls
     /// the kernel width. Currently only the `Box` variant is implemented.
-    #[allow(dead_code)] // planned: not yet wired into blur dispatch
     pub blur_kernel: BlurKernel,
 
     /// Downscale filter for pyramid construction (default: `DownscaleFilter::Box2x2`).
     ///
     /// Controls how each pyramid level is produced. `Box2x2` is currently
     /// the only variant.
-    #[allow(dead_code)] // planned: not yet wired into pyramid construction
     pub downscale_filter: DownscaleFilter,
 
     /// Compute all 156 features even when their weights are zero (default: false).
@@ -385,7 +383,6 @@ fn distance_to_score_mapped(raw_distance: f64, a: f64, b: f64) -> f64 {
 /// Returns `(score, raw_distance)` on success, or
 /// [`ZensimError::FeatureWeightsLengthMismatch`] if the slices have
 /// different lengths.
-#[cfg_attr(not(feature = "training"), allow(dead_code))]
 pub fn try_score_from_features(
     features: &[f64],
     weights: &[f64],
@@ -425,7 +422,6 @@ pub fn try_score_from_features(
 ///
 /// Panics if the slices have different lengths; [`try_score_from_features`]
 /// returns an error instead.
-#[cfg_attr(not(feature = "training"), allow(dead_code))]
 pub fn score_from_features(features: &[f64], weights: &[f64]) -> (f64, f64) {
     try_score_from_features(features, weights).expect("features and weights must have same length")
 }
@@ -443,7 +439,6 @@ pub fn score_from_features(features: &[f64], weights: &[f64]) -> (f64, f64) {
 /// zensim-validate feature-extraction binaries; not part of the
 /// 0-100 score surface.
 #[doc(hidden)]
-#[cfg_attr(not(feature = "training"), allow(dead_code))]
 pub fn precompute_reference_with_scales(
     source: &[[u8; 3]],
     width: usize,
@@ -556,7 +551,6 @@ pub(crate) struct ScaleStats {
     pub(crate) hf_energy_loss: [f64; 3],
     /// Raw destination HF sum for the exact active gain-form derivative.
     /// Read only by the `custom-profiles` attribution path.
-    #[allow(dead_code)]
     pub(crate) hf_sq_dst_sum: [f64; 3],
     /// High-frequency magnitude loss (L1): max(0, 1 - Σ|dst-mu_dst|/Σ|src-mu_src|) per channel.
     /// Like hf_energy_loss but with L1 norm — more robust to outliers.
@@ -3767,7 +3761,6 @@ pub fn compute_zensim_with_config(
 ///
 /// Weights are trained against synthetic quality scores (see `weights/` directory).
 /// Features per scale for the default scoring profile (3 channels × 13 features = 39).
-#[cfg_attr(not(feature = "training"), allow(dead_code))]
 pub const FEATURES_PER_SCALE: usize = FEATURES_PER_CHANNEL_WITH_PEAKS * 3;
 
 /// Default scoring weights — references the latest profile weights.

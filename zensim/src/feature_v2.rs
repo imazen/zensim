@@ -588,7 +588,6 @@ pub const APPEND2_PER_SCALE: usize = 5;
 /// Layout metadata, so it stays compiled in every configuration — but its
 /// only non-test reader is the `custom-profiles`-gated attribution-density
 /// cluster, hence the targeted dead-code allowance.
-#[allow(dead_code)]
 pub(crate) const APPEND2_CHANNEL: usize = 1;
 
 /// Named local offsets within one scale's append2 block (all Y-only).
@@ -683,10 +682,6 @@ pub mod idx_csfw {
 // local`), arttype is PerScale (`scale*ARTTYPE_PER_SCALE + local`).
 // ============================================================================
 
-/// Registered base of the rev4 candidate bank (`feature_defs::BLOCKS`
-/// derives the same number — asserted in `rev4_base_matches_registry`).
-#[cfg_attr(not(test), allow(dead_code))] // the registered rev4 base — read by the parity/layout gates
-pub(crate) const GMSBANK_PER_CELL: usize = 15;
 /// mapdev slots per (scale, channel) cell (`feature_defs::MAPDEV_SIGNALS`).
 pub(crate) const MAPDEV_PER_CELL: usize = 5;
 /// z1max slots per (scale, channel) cell: 13 basic + 6 peaks.
@@ -1132,7 +1127,6 @@ fn rev4_dense_pixel(
 /// unvectorizable, and `inline(never)` keeps the mangled shape from being
 /// re-created inside the caller. Bit-exact: the calls are identical.
 #[inline(never)]
-#[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))]
 fn rev4_dense_chunk8(
     r4: &mut Rev4Dense<'_>,
     d: &[f32; 8],
@@ -4627,7 +4621,6 @@ fn stream_windows_shared<'w, S: ImageSource, D: ImageSource>(
 /// `threads`-off build (e.g. the `feature-regime-v2`-alone CI permutation)
 /// has no caller for it; `cfg_attr` scopes the allow to exactly that case
 /// rather than silencing dead-code detection when `threads` IS on.
-#[cfg_attr(not(feature = "threads"), allow(dead_code))]
 fn stream_gather_windows<S: ImageSource, D: ImageSource>(
     producer: &crate::feature_v2_stream::StripPlaneProducer<'_, S, D>,
     info: &crate::feature_v2_stream::StripInfo,
@@ -7205,7 +7198,6 @@ thread_local! {
 /// type, and the walk's retention hooks write it), but its fields are only
 /// READ by the `custom-profiles`-gated attribution-density cluster — hence
 /// the targeted dead-code allowance.
-#[allow(dead_code)]
 #[derive(Default, Clone, Copy)]
 pub(crate) struct AttrCellSums {
     pub(crate) dense: DenseAccum,

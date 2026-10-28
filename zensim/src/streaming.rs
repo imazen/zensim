@@ -354,7 +354,6 @@ fn redistribute_pow2x_guided_add(
 /// plane (the E-JBU redistribution with the interpolation as guide), so footprint-aligned
 /// block sums are unchanged and only the shape inside each footprint differs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[allow(dead_code)] // selected only through the env knob
 pub(crate) enum CoarseKernel {
     Nearest,
     Bilinear,
@@ -376,7 +375,6 @@ impl CoarseUpsample {
     };
 
     /// `nearest`, `bilinear`, `catmull-rom`, `bspline` or `lanczos3`, optionally with `-mass`.
-    #[allow(dead_code)]
     pub(crate) fn parse(s: &str) -> Option<Self> {
         let (k, mass) = match s.strip_suffix("-mass") {
             Some(k) => (k, true),
@@ -2527,7 +2525,6 @@ pub(crate) struct AttrScaleRetention {
 impl AttrScaleRetention {
     /// Planes sized for the scale-0 (largest) resolution; coarser scales
     /// use the leading `w × h` prefix of each plane.
-    #[allow(dead_code)] // attribution-only constructor
     pub fn new(n: usize) -> Self {
         Self {
             sd: core::array::from_fn(|_| vec![0.0; n]),
@@ -3011,7 +3008,6 @@ pub(crate) type XybPyramidLevel = ([Vec<f32>; 3], usize, usize);
 pub struct PrecomputedReference {
     pub(crate) formula_revision: crate::feature_defs::FormulaRevision,
     pub(crate) sampling: Option<crate::sampling::Sampling>,
-    #[allow(dead_code)]
     pub(crate) sampling_geometry: Option<crate::sampling::Geometry>,
     pub(crate) scales: Vec<([Vec<f32>; 3], usize, usize)>,
     // INVARIANT: scales[i].0[0..3].len() == scales[i].1 * scales[i].2
@@ -3876,7 +3872,6 @@ fn compute_diffmap_from_xyb(
 /// `on_scale(scale, stats, src_planes, dst_planes, retention, w, h)` runs
 /// once per processed scale, BEFORE the dst pyramid is downscaled for the
 /// next scale.
-#[allow(dead_code)] // attribution-only walker
 pub(crate) fn compute_zensim_streaming_with_ref_and_attr_planes(
     precomputed: &PrecomputedReference,
     distorted: &impl ImageSource,
@@ -4078,115 +4073,6 @@ pub(crate) fn compute_zensim_streaming_with_ref_and_attr_planes_input(
         );
         let scale_stat = accum.finalize(config.iw_strength as f64, config.formula_revision);
         on_scale(scale, &scale_stat, src_planes, dst_view, &retention, w, h);
-        stats.push(scale_stat);
-
-        if scale < num_scales - 1 {
-            let (nw, nh) = downscale_3_planes(&mut dst_planes, w, h, parallel);
-            w = nw;
-            h = nh;
-        }
-    }
-
-    #[cfg(feature = "threads")]
-    dealloc_planes(dst_planes, None);
-    #[cfg(not(feature = "threads"))]
-    drop(dst_planes);
-
-    combine_scores(&stats, weights, config, mean_offset)
-}
-
-/// task #70 stale-scalar single-pass: the fold twin of
-/// [`compute_zensim_streaming_with_ref_and_attr_planes`]. Instead of
-/// retaining planes for a post-scale combine, each scale's attribution
-/// combine runs IN-STRIP with the caller-supplied per-scale coefficient
-/// packs (derived from a PREVIOUS compare's pooled scalars — the stale
-/// semantics), accumulating into the caller's scale-0-sized `id`/`win`
-/// planes (zeroed here per scale). `on_scale` receives the finalized
-/// stats plus this scale's accumulated id/win prefixes for the
-/// spread/merge/upsample tail and next-coefficient derivation. The score
-/// path (stats, finalize, combine_scores) is IDENTICAL to the other
-/// walks.
-#[allow(dead_code)] // attribution-only walker
-pub(crate) fn compute_zensim_streaming_with_ref_and_attr_fold(
-    precomputed: &PrecomputedReference,
-    distorted: &impl ImageSource,
-    config: &ZensimConfig,
-    weights: &[f64],
-    coeffs_per_scale: &[[[f32; 12]; 3]],
-    id_plane: &mut [f32],
-    win_plane: &mut [f32],
-    mut on_scale: impl FnMut(usize, &ScaleStats, &mut [f32], &mut [f32], usize, usize),
-) -> crate::metric::ZensimResult {
-    let width = distorted.width();
-    let height = distorted.height();
-    let padded_width = pyramid_plane_stride(width);
-    let mut dst_planes = convert_source_to_xyb(
-        distorted,
-        padded_width,
-        config.allow_multithreading,
-        config.revision(),
-    );
-
-    let num_scales = config.num_scales.min(precomputed.scales.len());
-    let parallel = config.allow_multithreading;
-
-    let (src_planes_s0, _, _) = precomputed.scale(0);
-    let dst_view_s0: [&[f32]; 3] = [&dst_planes[0], &dst_planes[1], &dst_planes[2]];
-    let mean_offset =
-        compute_xyb_mean_offset(src_planes_s0, dst_view_s0, width, height, padded_width);
-
-    let mut stats = Vec::with_capacity(num_scales);
-    let mut w = padded_width;
-    let mut h = height;
-
-    for scale in 0..num_scales {
-        if w < 8 || h < 8 {
-            break;
-        }
-        let (src_planes, src_w, src_h) = precomputed.scale(scale);
-        assert_eq!(
-            w, src_w,
-            "internal invariant violated: width mismatch at scale {scale}"
-        );
-        assert_eq!(
-            h, src_h,
-            "internal invariant violated: height mismatch at scale {scale}"
-        );
-        let n = w * h;
-        id_plane[..n].fill(0.0);
-        win_plane[..n].fill(0.0);
-        // Same-dims sessions always carry one pack per visited scale; the
-        // zero default (no map contribution) is unreachable there.
-        debug_assert!(scale < coeffs_per_scale.len());
-        let co = coeffs_per_scale
-            .get(scale)
-            .copied()
-            .unwrap_or([[0.0; 12]; 3]);
-        let dst_view: [&[f32]; 3] = [&dst_planes[0], &dst_planes[1], &dst_planes[2]];
-        let (accum, _) = process_scale_bands_into_accum(
-            src_planes,
-            dst_view,
-            w,
-            h,
-            config,
-            scale,
-            weights,
-            None,
-            None,
-            None,
-            None,
-            Some((&co, &mut id_plane[..n], &mut win_plane[..n])),
-            None,
-        );
-        let scale_stat = accum.finalize(config.iw_strength as f64, config.formula_revision);
-        on_scale(
-            scale,
-            &scale_stat,
-            &mut id_plane[..n],
-            &mut win_plane[..n],
-            w,
-            h,
-        );
         stats.push(scale_stat);
 
         if scale < num_scales - 1 {

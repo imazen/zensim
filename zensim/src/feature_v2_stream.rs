@@ -632,7 +632,6 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
     /// [`Self::recycle`] refills it — steady-state batch extraction
     /// performs zero producer allocation (measured ~1.7k page
     /// faults/pair from fresh per-pair Vecs before this).
-    #[cfg_attr(not(test), allow(dead_code))] // research/test constructor
     pub(crate) fn new(
         source: &'a S,
         distorted: &'a D,

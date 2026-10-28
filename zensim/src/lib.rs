@@ -214,10 +214,8 @@ pub(crate) mod det_math;
 mod diffmap;
 mod error;
 pub(crate) mod featcanon;
-#[allow(dead_code)]
 pub(crate) mod feature_defs;
 pub(crate) mod feature_layout;
-#[allow(dead_code)]
 pub(crate) mod feature_plan;
 pub(crate) mod feature_set_id;
 pub(crate) mod feature_v2;

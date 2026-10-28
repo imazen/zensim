@@ -130,7 +130,6 @@ impl core::fmt::Display for ZensimProfile {
 ///
 /// Each parameter's effect on computation path and performance is documented
 /// on the corresponding field of `ZensimConfig` in `metric.rs`.
-#[cfg_attr(not(feature = "training"), allow(dead_code))]
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct ProfileParams {

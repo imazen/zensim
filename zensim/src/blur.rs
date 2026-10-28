@@ -979,7 +979,6 @@ fn box_blur_h_inner_v4x(
 }
 
 #[cfg(target_arch = "x86_64")]
-#[cfg_attr(not(feature = "avx512"), allow(dead_code))] // only the v4x arcane bodies call this; they are not emitted without `avx512`
 #[inline(always)]
 fn box_blur_h_v4x_body(
     token: archmage::X64V4xToken,
@@ -1033,7 +1032,6 @@ fn box_blur_h_v4x_body(
 
 // Physical row pitch changes storage only; preserve the original recurrence.
 #[cfg(target_arch = "x86_64")]
-#[cfg_attr(not(feature = "avx512"), allow(dead_code))] // only the v4x arcane bodies call this; they are not emitted without `avx512`
 #[inline(always)]
 fn box_blur_h_v4x_strided(
     token: archmage::X64V4xToken,
@@ -5124,7 +5122,6 @@ fn rec64_emit8_256(out: &mut [&mut [f32]; 8], x: usize, v: Rec64D8) {
 
 /// `plane`'s `G` consecutive 8-row groups as `G × 8` mutable row slices.
 #[inline(always)]
-#[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))]
 fn rec64_rows8g_mut<const G: usize>(plane: &mut [f32], width: usize) -> [[&mut [f32]; 8]; G] {
     let mut it = plane.chunks_exact_mut(width);
     std::array::from_fn(|_| std::array::from_fn(|_| it.next().unwrap()))
@@ -6078,7 +6075,7 @@ fn fused_blur_h_ssim_rec64_rows_scalar(
 }
 
 /// Wasm128 sibling of [`fused_blur_h_ssim_rec64_rows_scalar`].
-#[allow(clippy::too_many_arguments, dead_code)]
+#[allow(clippy::too_many_arguments)]
 fn fused_blur_h_ssim_rec64_rows_wasm128(
     _token: archmage::Wasm128Token,
     src: &[f32],
@@ -6114,7 +6111,7 @@ fn fused_blur_h_ssim_rec64_rows_wasm128(
 
 /// NEON runs the scalar canonical body (2026-10-03): NEON vector `max`/`min` propagate NaN where the canon's `f32::max`/
 /// `f64::max` drop it (the REV4VEC CI aarch64 failure), so only the x86_64 fused tiers run a lane-parallel body.
-#[allow(clippy::too_many_arguments, dead_code)]
+#[allow(clippy::too_many_arguments)]
 fn fused_blur_h_ssim_rec64_rows_neon(
     _token: archmage::NeonToken,
     src: &[f32],
@@ -7792,7 +7789,6 @@ pub(crate) fn checked_padded_plane_len(
 /// exact arithmetic. O(N) via prefix sums per row + a sliding row-window for
 /// the vertical pass. `tmp` must be `width` long; `plane` is modified in
 /// place.
-#[cfg_attr(not(test), allow(dead_code))] // f64 attribution-density pass B (needs BOTH features since the cluster
 // was custom-profiles-gated, matching af4417f8) + tests
 pub(crate) fn box_spread_sum_preserving(
     plane: &mut [f64],
@@ -7858,20 +7854,6 @@ pub(crate) fn box_spread_sum_preserving(
     }
     plane.copy_from_slice(&out);
 }
-
-/// Call-site policy cutoff for [`box_spread_merge_f32`]'s `parallel`
-/// switch: engage rayon only at/above this element count. Measured
-/// crossover 2026-08-01 (28-core WSL2 host, `spread_microbench`, against
-/// the fused serial V+merge pass): 0.18x @341k, 0.45x @1.35M, 0.95x
-/// @5.3M, **1.36x @16.8M** — the fork-join barriers cost ~0.5-1 ms
-/// against low-ms serial work, and the serial path got faster than the
-/// banded one below ~8M elements. Every 576²/1152² compare therefore
-/// takes the serial path; 4K-class compares' scale 0 engages rayon.
-// Its only users — the fused attribution paths and their bitwise gate test —
-// are BOTH behind `custom-profiles`, so a plain `--tests` build without that
-// feature still sees it unused (the old `test` disjunct did not cover that).
-#[allow(dead_code)] // attribution parallel-spread crossover + its bitwise gate test
-pub(crate) const SPREAD_PARALLEL_MIN_N: usize = 8_388_608;
 
 #[cfg(test)]
 mod tests {

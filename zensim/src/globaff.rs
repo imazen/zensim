@@ -37,11 +37,9 @@ pub(crate) const GLOBAFF_PER_CELL: usize = 2;
 
 /// The family's first feature id; its slots follow in
 /// `2·(3·scale + channel) + {share, explained}` order.
-#[allow(dead_code)]
 pub(crate) const FIRST_ID: usize = 1867;
 
 /// The family's slot count over the four scales.
-#[allow(dead_code)]
 pub(crate) const SLOTS: usize = crate::NUM_SCALES * 3 * GLOBAFF_PER_CELL;
 
 /// The five running sums of one (scale, channel) cell: `s`, `e = s − d`,

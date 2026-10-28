@@ -44,7 +44,6 @@ use crate::det_math::DetRoots;
 // `IwWeightConfig` by offline/training experiments (see
 // `benchmarks/iw_pyramid_spike_methodology_2026-05-15.md`); they are kept in
 // every feature set so the config surface stays feature-stable.
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum IwWeightKind {
     /// Local variance in a square window (kernel size set by config).
@@ -406,14 +405,12 @@ fn compute_gradient(
 /// policy: same formula, different computational strategy, tested
 /// equivalent). `l2`/`l4` remain unused by v2 (kept for parity / future
 /// use, individually `#[allow(dead_code)]` below).
-#[allow(dead_code)] // only caller is the gated-mirror equivalence test in feature_v2.rs
 pub(crate) struct WeightedPool;
 
 impl WeightedPool {
     /// Weighted mean: `(Σ w_i v_i) / Σ w_i`. Returns 0 if weight sum
     /// is below 1e-12. Canonical reference form — see the struct doc for
     /// why the v2 hot path calls `feature_v2::WeightedSum` instead.
-    #[allow(dead_code)] // only caller is the gated-mirror equivalence test in feature_v2.rs
     pub(crate) fn mean(values: &[f32], weights: &[f32]) -> f64 {
         assert_eq!(values.len(), weights.len());
         let mut num = 0.0f64;
@@ -428,7 +425,6 @@ impl WeightedPool {
     /// Weighted L2 norm: `√((Σ w_i v_i²) / Σ w_i)`. Square-root taken
     /// after weighted mean of squares so units match the underlying
     /// signal.
-    #[allow(dead_code)] // not used by v2 iteration 1 (bounded-basic block doesn't need weighted L2 pooling yet); kept for parity/future use
     pub(crate) fn l2(values: &[f32], weights: &[f32]) -> f64 {
         assert_eq!(values.len(), weights.len());
         let mut num = 0.0f64;
@@ -443,7 +439,6 @@ impl WeightedPool {
     /// Weighted L4 norm: `((Σ w_i v_i⁴) / Σ w_i)^(1/4)`. Matches the
     /// basic feature block's L4 ("`ssim_4th`") which emphasises peak
     /// errors.
-    #[allow(dead_code)] // not used by v2 iteration 1 (bounded-basic block doesn't need weighted L4 pooling yet); kept for parity/future use
     pub(crate) fn l4(values: &[f32], weights: &[f32]) -> f64 {
         assert_eq!(values.len(), weights.len());
         let mut num = 0.0f64;
@@ -473,7 +468,6 @@ impl WeightedPool {
 /// type is kept for the offline-experiment entry point
 /// [`Self::pool_from_maps`] and the iw_pool unit tests.
 #[derive(Debug, Clone, Copy)]
-#[allow(dead_code)] // type is built only by the crate-internal pool_from_maps; tests construct it via that path
 pub(crate) struct IwSsimFeatures {
     /// Weighted mean of per-pixel SSIM(src, dst) at this scale & channel.
     pub iw_ssim_mean: f64,
@@ -489,22 +483,7 @@ pub(crate) struct IwSsimFeatures {
     pub iw_mse: f64,
 }
 
-#[allow(dead_code)] // tests-only reference implementation; hot path is fused into streaming
 impl IwSsimFeatures {
-    /// Number of features per call — matches `FEATURES_PER_CHANNEL_*_MASKED` in `metric.rs`.
-    pub(crate) const FEATURES_PER_CALL: usize = 6;
-
-    /// Flatten into the wire-order indices used by the trainer.
-    pub(crate) fn as_array(&self) -> [f64; 6] {
-        [
-            self.iw_ssim_mean,
-            self.iw_ssim_2nd,
-            self.iw_ssim_4th,
-            self.iw_art_4th,
-            self.iw_det_4th,
-            self.iw_mse,
-        ]
-    }
 
     /// Pool the supplied per-pixel maps with IW weights computed from
     /// the reference plane. All inputs must be the same length =

@@ -514,12 +514,6 @@ impl<'a, S: ImageSource + ?Sized> SubsetView<'a, S> {
         }
     }
 
-    /// Y offset within the parent.
-    #[inline]
-    #[allow(dead_code)] // accessor for tooling / debugging — not currently called by streaming
-    pub(crate) fn y_start(&self) -> usize {
-        self.y_start
-    }
 }
 
 impl<S: ImageSource + ?Sized> ImageSource for SubsetView<'_, S> {

@@ -1,6 +1,5 @@
 //! Model-bound experimental XYB sampling. Kernels belong to zenresize;
 //! extraction and attribution remain in their existing owners.
-#![allow(dead_code)]
 
 use crate::streaming::XybPyramidLevel;
 use crate::{ImageSource, ZensimError};
@@ -232,33 +231,6 @@ impl Sampling {
         levels
     }
 
-    pub(crate) fn reference(
-        self,
-        source: &impl ImageSource,
-        parallel: bool,
-        revision: crate::feature_defs::FormulaRevision,
-    ) -> crate::PrecomputedReference {
-        crate::PrecomputedReference {
-            formula_revision: revision,
-            scales: self.pyramid(source, parallel, revision),
-            ref_width: source.width(),
-            ref_height: source.height(),
-            sampling: Some(self),
-            sampling_geometry: Some(Geometry {
-                width: source.width(),
-                height: source.height(),
-                axes: (0..4)
-                    .map(|level| {
-                        [
-                            self.axis(source.width(), level),
-                            self.axis(source.height(), level),
-                        ]
-                    })
-                    .collect(),
-            }),
-        }
-    }
-
     /// Compose nonnegative, normalized squared-tap ownership back to original
     /// coordinates. This is a removal-mass model, not the resizer's derivative.
     fn axis(self, logical: usize, level: usize) -> Vec<Vec<(usize, f64)>> {
@@ -308,9 +280,6 @@ pub(crate) struct Geometry {
     axes: Vec<[Axis; 2]>,
 }
 impl Geometry {
-    pub(crate) fn logical_dimensions(&self) -> (usize, usize) {
-        (self.width, self.height)
-    }
     pub(crate) fn footprints(&self, axis: usize, level: usize) -> Vec<(usize, usize)> {
         self.axes[level][axis]
             .iter()

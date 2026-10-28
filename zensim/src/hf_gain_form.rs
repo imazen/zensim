@@ -240,7 +240,6 @@ impl HfGainForm {
     ///
     /// Read by [`tests::order_preservation_matches_the_declared_flag`], which
     /// holds the flag equal to the arm's actual behaviour.
-    #[allow(dead_code)]
     pub(crate) const fn preserves_order(self) -> bool {
         !matches!(self, Self::CappedExcess)
     }
@@ -262,7 +261,6 @@ impl HfGainForm {
     /// Mirrored by `scripts/r6b_arm_delta.py`'s `ARM_RATIO_ONLY`, and pinned
     /// against the arithmetic by
     /// [`tests::only_bounded_excess_depends_on_the_magnitude`].
-    #[allow(dead_code)]
     pub(crate) const fn depends_only_on_ratio(self) -> bool {
         !matches!(self, Self::BoundedExcess)
     }
@@ -397,7 +395,6 @@ pub(crate) fn hf_mag_loss(mad_src: f64, mad_dst: f64) -> f64 {
 // Used by `attribution`'s density integrand, which is `custom-profiles`-gated;
 // on a build without that feature it is reachable only from this module's
 // finite-difference tests.
-#[allow(dead_code)]
 #[inline]
 pub(crate) fn hf_energy_gain_d_var_dst(form: HfGainForm, var_src: f64, var_dst: f64) -> f64 {
     // Same NaN-preserving negation as `hf_energy_gain`; see its comment.
@@ -438,7 +435,6 @@ pub(crate) fn hf_energy_gain_d_var_dst(form: HfGainForm, var_src: f64, var_dst: 
 // Used by `attribution`'s density integrand, which is `custom-profiles`-gated;
 // on a build without that feature it is reachable only from this module's
 // finite-difference tests.
-#[allow(dead_code)]
 #[inline]
 pub(crate) fn hf_energy_gain_d_sum_dst_sq(
     form: HfGainForm,

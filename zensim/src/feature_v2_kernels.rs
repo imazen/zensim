@@ -320,7 +320,6 @@ fn pjnd_transducer_v<V: Vf32>(
 /// proof that the phase-4 reformulation is numerically equivalent, not
 /// just "removed and hoped for the best".
 #[derive(Default, Clone, Copy)]
-#[cfg_attr(not(test), allow(dead_code))] // test-referenced reference impl (raw_moment_reformulation_matches_terriberry)
 pub(crate) struct OnlineMoments {
     n: f64,
     mean: f64,
@@ -329,7 +328,6 @@ pub(crate) struct OnlineMoments {
     m4: f64,
 }
 
-#[cfg_attr(not(test), allow(dead_code))] // see struct note: exercised by the Terriberry parity test
 impl OnlineMoments {
     /// Two-pass moments within a small block; no subtraction of raw powers.
     #[inline(never)]
@@ -2532,7 +2530,7 @@ fn dense_block_kernel_entry_pools_scalar(
 
 /// Forced-scalar-pool sibling of [`dense_block_kernel`] (see
 /// [`dense_block_kernel_entry_pools_scalar`]).
-#[allow(clippy::too_many_arguments, dead_code)]
+#[allow(clippy::too_many_arguments)]
 fn dense_block_kernel_pools_scalar(
     src: &[f32],
     dst: &[f32],
@@ -4162,7 +4160,6 @@ fn gradient_block_kernel_canon<
 /// The BANK / REV4 side effects are NOT in here — they stay scalarized
 /// per element in the caller (histogram scatters and Welford pushes
 /// cannot vectorize).
-#[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))] // only the x86_64 lane-parallel canon bodies call it
 #[inline(always)]
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn gradient_terms32_v<
@@ -4889,7 +4886,7 @@ fn gradient_block_kernel_canon64_vec_scalar<
 }
 
 /// Wasm128 sibling of [`gradient_block_kernel_canon64_vec_scalar`].
-#[allow(clippy::too_many_arguments, dead_code)]
+#[allow(clippy::too_many_arguments)]
 fn gradient_block_kernel_canon64_vec_wasm128<
     P: crate::featcanon::Pool64,
     const BANDVIS: bool,
@@ -4919,7 +4916,7 @@ fn gradient_block_kernel_canon64_vec_wasm128<
 
 /// NEON runs the scalar canonical body (2026-10-03): NEON vector `max`/`min` propagate NaN where the canon's `f32::max`/
 /// `f64::max` drop it (the REV4VEC CI aarch64 failure), so only the x86_64 fused tiers run a lane-parallel body.
-#[allow(clippy::too_many_arguments, dead_code)]
+#[allow(clippy::too_many_arguments)]
 fn gradient_block_kernel_canon64_vec_neon<
     P: crate::featcanon::Pool64,
     const BANDVIS: bool,

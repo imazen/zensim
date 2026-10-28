@@ -474,7 +474,7 @@ fn restore_cuts_row_work_scalar(
 }
 
 /// Wasm128 sibling of [`restore_cuts_row_work_scalar`].
-#[allow(clippy::too_many_arguments, dead_code)]
+#[allow(clippy::too_many_arguments)]
 fn restore_cuts_row_work_wasm128(
     _token: archmage::Wasm128Token,
     sp_row: &[f32],
@@ -494,7 +494,7 @@ fn restore_cuts_row_work_wasm128(
 
 /// NEON runs the scalar canonical body (2026-10-03): NEON vector `max`/`min` propagate NaN where the canon's `f32::max`/
 /// `f64::max` drop it (the REV4VEC CI aarch64 failure), so only the x86_64 fused tiers run a lane-parallel body.
-#[allow(clippy::too_many_arguments, dead_code)]
+#[allow(clippy::too_many_arguments)]
 fn restore_cuts_row_work_neon(
     _token: archmage::NeonToken,
     sp_row: &[f32],
