@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare frozen path_audit executables with interleaved fresh-process runs.
+"""Compare frozen path_audit executables with interleaved fresh-process runs on Linux.
 
 Run under the machine's resource wrapper, exclusive heavy-work lock, and an enforced
 uniform CPU cpuset. Timing is inside zenbench, never subprocess elapsed time. Keep the
@@ -27,6 +27,20 @@ MODES = {
     "planar_serial": ("planar", 1, "auto"),
     "planar_parallel": ("planar", 8, "auto"),
 }
+
+
+# The example emits one JSON record after zenbench's human-readable output.
+# External zenbench pair extracts that record's sole benchmark median.
+METRIC_PATTERN = r'(?m)^\{"fingerprint":[^\n]*?"benchmarks":\[\{[^\n]*?"summary":\{[^\n]*?"median":([0-9.eE+-]+)'
+
+
+def benchmark_median(result, label):
+    timing = result["timing"]
+    if timing["incomplete"] or timing["unreliable"]:
+        raise RuntimeError(f"invalid timing packet: {label}")
+    if timing["cpu_placement"]["status"] != "enforced_uniform":
+        raise RuntimeError(f"unverified CPU placement: {label}")
+    return timing["comparisons"][0]["benchmarks"][0]["summary"]["median"]
 
 
 def packet(text):
@@ -71,22 +85,35 @@ def main():
     ap.add_argument("--profiles", default="E,ECodec,A,PreviewV0_1,PreviewV0_2")
     ap.add_argument("--sizes", default="64x64,257x193,1024x768,2048x1536")
     ap.add_argument("--modes", default=",".join(MODES))
+    ap.add_argument("--cells", help="comma-separated PROFILE-WIDTHxHEIGHT-MODE cells for follow-up")
     ap.add_argument("--rounds", type=int, default=12)
     ap.add_argument("--inner-rounds", type=int, default=12)
     ap.add_argument("--memory-rounds", type=int, default=3)
     ap.add_argument("--serial-cpu", default="2")
     ap.add_argument("--parallel-cpus", default="0-7")
     ap.add_argument("--max-slowdown", type=float, default=0.02,
-                    help="one-sided equivalence bound; report inconclusive cells, never hide them")
+                    help="one-sided non-regression margin; report inconclusive cells, never hide them")
     args = ap.parse_args()
+    if args.rounds < 0 or args.memory_rounds < 0 or args.rounds + args.memory_rounds == 0:
+        ap.error("request at least one timing or memory round; counts must be nonnegative")
+    if args.inner_rounds <= 0 or args.max_slowdown < 0:
+        ap.error("inner rounds must be positive and the margin nonnegative")
     arms = dict(x.split("=", 1) for x in args.arm)
-    assert len(arms) == len(args.arm) and len(arms) >= 2
-    assert not args.output.exists(), "use a fresh output directory; old evidence is protected"
+    if len(arms) != len(args.arm) or len(arms) < 2:
+        ap.error("provide at least two uniquely named arms")
+    if args.output.exists():
+        ap.error("use a fresh output directory; old evidence is protected")
     args.output.mkdir(parents=True)
     metadata = {"argv": vars(args) | {"output": str(args.output)}, "pid": os.getpid(),
-                "started": time.time(), "binaries": {n: {"path": p, "sha256": hashlib.sha256(Path(p).read_bytes()).hexdigest()} for n,p in arms.items()}}
+                "started": time.time(), "driver_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(), "binaries": {n: {"path": p, "sha256": hashlib.sha256(Path(p).read_bytes()).hexdigest()} for n,p in arms.items()}}
     (args.output / "manifest.json").write_text(json.dumps(metadata, indent=2) + "\n")
     cells = [(p, size, mode) for p in args.profiles.split(',') for size in args.sizes.split(',') for mode in args.modes.split(',')]
+    if args.cells:
+        selected = set(args.cells.split(','))
+        available = {f"{p}-{size}-{mode}" for p, size, mode in cells}
+        if not selected <= available:
+            ap.error(f"unknown cells: {selected - available}")
+        cells = [(p, size, mode) for p, size, mode in cells if f"{p}-{size}-{mode}" in selected]
     rows = []
     fingerprints = {}
     completed = 0
@@ -126,11 +153,7 @@ def main():
                     row = {"cell": cell, "arm": name, "round": round_no, "action": action,
                            "fingerprint": result["fingerprint"]}
                     if action == "bench":
-                        timing = result["timing"]
-                        assert not timing["incomplete"] and not timing["unreliable"], stem
-                        assert timing["cpu_placement"]["status"] == "enforced_uniform", stem
-                        comp = timing["comparisons"][0]
-                        row["median_ns"] = comp["benchmarks"][0]["summary"]["median"]
+                        row["median_ns"] = benchmark_median(result, stem)
                     else:
                         rss = rss_path.read_text()
                         row["max_rss_kib"] = int(next(l.split(':')[-1] for l in rss.splitlines() if "Maximum resident set size" in l))
