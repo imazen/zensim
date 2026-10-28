@@ -1440,20 +1440,9 @@ fn process_strip_channel(
     bufs: &mut ScaleBuffers,
     accum: &mut ScaleAccumulators,
     mut diffmap: Option<(&mut [f32], PixelFeatureWeights)>,
-    attr_ret: Option<(&mut [f32], &mut [f32], &mut [f32])>,
-    attr_fold: Option<([f32; 12], &mut [f32], &mut [f32])>,
 ) {
     // MSE-only path: no blur needed
     if !need_ssim && !need_edge {
-        debug_assert!(
-            attr_fold.is_none(),
-            "attr_fold requires an all-features profile (every channel SSIM)"
-        );
-        if let Some((sd_out, mu1_out, mu2_out)) = attr_ret {
-            sd_out.fill(0.0);
-            mu1_out.fill(0.0);
-            mu2_out.fill(0.0);
-        }
         let inner_off = inner_start * width;
         let inner_n = inner_h * width;
         let inner_src = &src_c[inner_off..inner_off + inner_n];
@@ -1481,8 +1470,6 @@ fn process_strip_channel(
         let dm_needs_edge = diffmap.as_ref().is_some_and(|(_, pw)| pw.needs_edge_mse());
         let dm_needs_hf = diffmap.as_ref().is_some_and(|(_, pw)| pw.needs_hf());
         let store_sd = (diffmap.is_some()
-            || attr_ret.is_some()
-            || attr_fold.is_some()
             || (stable && (config.extended_features || config.compute_iw_features)))
             && need_ssim;
         // Force mu1/mu2 storage when diffmap needs edge/MSE or HF features
@@ -1494,9 +1481,7 @@ fn process_strip_channel(
         // readers that ask for them.
         let store_mu = (!fused_ext && (config.extended_features || config.compute_iw_features))
             || dm_needs_edge
-            || dm_needs_hf
-            || attr_ret.is_some()
-            || attr_fold.is_some();
+            || dm_needs_hf;
         if need_ssim {
             let strip_n = strip_h * width;
             // Fused H-blur: src,dst → 4 H-blurred planes in one pass
@@ -1669,29 +1654,9 @@ fn process_strip_channel(
                 config.blur_radius,
                 &mut bufs.mask,
                 &mut bufs.mul_buf,
-                config.extended_features || config.compute_iw_features || attr_ret.is_some(),
+                config.extended_features || config.compute_iw_features,
                 config.revision(),
             );
-        }
-
-        if let Some((sd_out, mu1_out, mu2_out)) = attr_ret {
-            let inner_off = inner_start * width;
-            let inner_n = inner_h * width;
-            if need_ssim {
-                sd_out.copy_from_slice(&bufs.temp_blur[inner_off..inner_off + inner_n]);
-            } else {
-                sd_out.fill(0.0);
-            }
-            mu1_out.copy_from_slice(&bufs.mask[inner_off..inner_off + inner_n]);
-            mu2_out.copy_from_slice(&bufs.mul_buf[inner_off..inner_off + inner_n]);
-        }
-
-        if let Some((co, id_out, win_out)) = attr_fold {
-            debug_assert!(
-                need_ssim,
-                "attr_fold requires an all-features profile (every channel SSIM)"
-            );
-            let _ = (co, id_out, win_out);
         }
 
         // Swap: mu1/mu2 now hold V-blurred values, mask/mul_buf hold H-blurred garbage
@@ -2215,8 +2180,6 @@ fn process_scale_bands(
         diffmap_weights,
         None,
         None,
-        None,
-        None,
         stop,
     );
     (
@@ -2224,42 +2187,6 @@ fn process_scale_bands(
         diffmap,
     )
 }
-
-/// Per-scale retained planes for the fused score+attribution path (task
-/// #67 C3a): per channel, the per-pixel SSIM-error plane and the V-blurred
-/// `mu1`/`mu2` at scale resolution (accumulated rows, band-concatenated in
-/// row order — the same assembly the per-scale diffmap uses). Consumed by
-/// `crate::attribution`'s fused entry to derive the basic attribution
-/// density from the SAME pipeline pass that produced the scalar's stats.
-pub(crate) struct AttrScaleRetention {
-    pub sd: [Vec<f32>; 3],
-    pub mu1: [Vec<f32>; 3],
-    pub mu2: [Vec<f32>; 3],
-}
-
-impl AttrScaleRetention {}
-
-struct AttrBandSlices<'a> {
-    sd: [&'a mut [f32]; 3],
-    mu1: [&'a mut [f32]; 3],
-    mu2: [&'a mut [f32]; 3],
-}
-
-/// One band's in-strip fused-combine spec (task #70 stale-scalar
-/// single-pass): the per-channel coefficient packs (copied per band —
-/// 144 bytes) and the band's row-range-disjoint id/win output slices,
-/// pre-split from the caller's scale-sized planes exactly like
-/// [`AttrBandSlices`].
-struct AttrFoldBand<'a> {
-    co: [[f32; 12]; 3],
-    id: &'a mut [f32],
-    win: &'a mut [f32],
-}
-
-/// One scale's in-strip fold spec (task #70): per-channel coefficient packs
-/// plus the scale-sized id/win accumulation planes (`width * height`
-/// prefixes, caller-zeroed).
-type AttrFoldOut<'a> = (&'a [[f32; 12]; 3], &'a mut [f32], &'a mut [f32]);
 
 /// Variant of [`process_scale_bands`] that returns the **raw**
 /// [`ScaleAccumulators`] instead of the finalized [`ScaleStats`].
@@ -2299,8 +2226,6 @@ fn process_scale_bands_into_accum(
     diffmap_weights: Option<[PixelFeatureWeights; 3]>,
     inner_y_filter: Option<(usize, usize)>,
     outer_layout: Option<(usize, usize)>,
-    attr_ret_out: Option<&mut AttrScaleRetention>,
-    attr_fold_out: Option<AttrFoldOut<'_>>,
     // Cooperative cancellation (issue #48): checked once per band. A
     // fired token makes remaining bands return empty accumulators
     // immediately (in both the rayon and serial paths); the public entry
@@ -2361,10 +2286,7 @@ fn process_scale_bands_into_accum(
     let strip_outer_y0 = plane_offset;
     let strip_outer_y1 = plane_offset + height;
 
-    let process_band = |bufs: &mut ScaleBuffers,
-                        band_idx: usize,
-                        mut band_ret: Option<AttrBandSlices<'_>>,
-                        mut band_fold: Option<AttrFoldBand<'_>>| {
+    let process_band = |bufs: &mut ScaleBuffers, band_idx: usize| {
         // Cooperative cancellation: once the token fires, every remaining
         // band degenerates to an empty accumulator. The result is
         // discarded by the entry point's post-walk `check_stop`.
@@ -2477,20 +2399,6 @@ fn process_scale_bands_into_accum(
                     }
                     _ => None,
                 };
-                let ret_info = band_ret.as_mut().map(|r| {
-                    (
-                        &mut r.sd[c][dm_start..dm_start + dm_n],
-                        &mut r.mu1[c][dm_start..dm_start + dm_n],
-                        &mut r.mu2[c][dm_start..dm_start + dm_n],
-                    )
-                });
-                let fold_info = band_fold.as_mut().map(|f| {
-                    (
-                        f.co[c],
-                        &mut f.id[dm_start..dm_start + dm_n],
-                        &mut f.win[dm_start..dm_start + dm_n],
-                    )
-                });
                 process_strip_channel(
                     &src_planes[c][strip_top * width..strip_bot * width],
                     &dst_planes[c][strip_top * width..strip_bot * width],
@@ -2505,8 +2413,6 @@ fn process_scale_bands_into_accum(
                     bufs,
                     &mut accum,
                     dm_info,
-                    ret_info,
-                    fold_info,
                 );
             }
 
@@ -2515,66 +2421,6 @@ fn process_scale_bands_into_accum(
 
         (accum, band_dm)
     };
-
-    let band_chunk_rows = STRIP_INNER * strips_per_band;
-    let band_rets: Vec<Option<AttrBandSlices<'_>>> = match attr_ret_out {
-        Some(ret) => {
-            let n_used = width * height;
-            fn split3(
-                planes: &mut [Vec<f32>; 3],
-                n_used: usize,
-                chunk: usize,
-            ) -> [Vec<&mut [f32]>; 3] {
-                let [a, b, c] = planes;
-                [
-                    a[..n_used].chunks_mut(chunk).collect(),
-                    b[..n_used].chunks_mut(chunk).collect(),
-                    c[..n_used].chunks_mut(chunk).collect(),
-                ]
-            }
-            let chunk = band_chunk_rows * width;
-            let [sd0, sd1, sd2] = split3(&mut ret.sd, n_used, chunk);
-            let [m10, m11, m12] = split3(&mut ret.mu1, n_used, chunk);
-            let [m20, m21, m22] = split3(&mut ret.mu2, n_used, chunk);
-            let mut bands = Vec::with_capacity(num_bands);
-            let z = sd0
-                .into_iter()
-                .zip(sd1)
-                .zip(sd2)
-                .zip(m10)
-                .zip(m11)
-                .zip(m12)
-                .zip(m20)
-                .zip(m21)
-                .zip(m22);
-            for ((((((((a, b), c), d), e), f), g), h), i) in z {
-                bands.push(Some(AttrBandSlices {
-                    sd: [a, b, c],
-                    mu1: [d, e, f],
-                    mu2: [g, h, i],
-                }));
-            }
-            bands
-        }
-        None => (0..num_bands).map(|_| None).collect(),
-    };
-    debug_assert_eq!(band_rets.len(), num_bands);
-
-    let band_folds: Vec<Option<AttrFoldBand<'_>>> = match attr_fold_out {
-        Some((co, id_plane, win_plane)) => {
-            let n_used = width * height;
-            let chunk = band_chunk_rows * width;
-            id_plane[..n_used]
-                .chunks_mut(chunk)
-                .zip(win_plane[..n_used].chunks_mut(chunk))
-                .map(|(id, win)| Some(AttrFoldBand { co: *co, id, win }))
-                .collect()
-        }
-        None => (0..num_bands).map(|_| None).collect(),
-    };
-    debug_assert_eq!(band_folds.len(), num_bands);
-    let band_aux: Vec<(Option<AttrBandSlices<'_>>, Option<AttrFoldBand<'_>>)> =
-        band_rets.into_iter().zip(band_folds).collect();
 
     let band_results: Vec<_> = {
         // Per-rayon-worker scratch — first band on each worker grows
@@ -2587,29 +2433,18 @@ fn process_scale_bands_into_accum(
         #[cfg(feature = "threads")]
         if run_parallel {
             use rayon::prelude::*;
-            band_aux
+            (0..num_bands)
                 .into_par_iter()
-                .enumerate()
-                .map_init(init_bufs, |bufs, (i, (ret, fold))| {
-                    process_band(bufs, i, ret, fold)
-                })
+                .map_init(init_bufs, |bufs, i| process_band(bufs, i))
                 .collect()
         } else {
             let mut bufs = init_bufs();
-            band_aux
-                .into_iter()
-                .enumerate()
-                .map(|(i, (ret, fold))| process_band(&mut bufs, i, ret, fold))
-                .collect()
+            (0..num_bands).map(|i| process_band(&mut bufs, i)).collect()
         }
         #[cfg(not(feature = "threads"))]
         {
             let mut bufs = init_bufs();
-            band_aux
-                .into_iter()
-                .enumerate()
-                .map(|(i, (ret, fold))| process_band(&mut bufs, i, ret, fold))
-                .collect()
+            (0..num_bands).map(|i| process_band(&mut bufs, i)).collect()
         }
     };
 
@@ -3269,8 +3104,6 @@ pub(crate) fn compute_multiscale_accums_streaming_with_ref_borrowed<R: MultiScal
             None,
             scale_filter,
             scale_outer,
-            None,
-            None,
             stop,
         );
         accums.push(accum);
