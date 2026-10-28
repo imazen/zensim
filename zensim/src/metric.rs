@@ -390,12 +390,8 @@ pub fn score_from_features(features: &[f64], weights: &[f64]) -> (f64, f64) {
 /// `num_scales`. The precomputed data must have at least as many scales as the config
 /// requests.
 ///
-/// **Research / feature-extraction API; not stable.** The
-/// `ZensimConfig` knobs that this entry exposes (blur kernel, scale
-/// count, masking) change metric internals whose outputs are
-/// incomparable with the default trained weights. Used by the
-/// zensim-validate feature-extraction binaries; not part of the
-/// 0-100 score surface.
+/// Feature-extraction API for custom scale counts. Changing the pyramid
+/// changes the features; default trained weights need their original layout.
 #[doc(hidden)]
 pub fn precompute_reference_with_scales(
     source: &[[u8; 3]],
@@ -430,8 +426,7 @@ pub fn precompute_reference_with_scales(
 /// `ZensimConfig` knobs that this entry exposes change metric
 /// internals whose outputs are incomparable with the default trained
 /// weights. The `config.num_scales` must not exceed the number of
-/// scales in `precomputed`. Used by the zensim-validate
-/// feature-extraction binaries.
+/// scales in `precomputed`.
 #[doc(hidden)]
 #[cfg(feature = "training")]
 pub fn compute_zensim_with_ref_and_config(
@@ -3129,12 +3124,8 @@ impl<'a> FeatureView<'a> {
 
 /// Compute zensim with custom configuration (training API).
 ///
-/// Uses the v0.2 weights (latest general-purpose profile).
-///
-/// **Research / feature-extraction API; not stable.** Used by the
-/// zensim-validate feature-extraction binaries and inline tests; the
-/// `ZensimConfig` knobs change metric internals whose outputs are
-/// incomparable with the default trained weights.
+/// Uses the legacy v0.2 linear weights. Custom configuration changes metric
+/// internals, so its scores are not comparable with default-profile scores.
 #[doc(hidden)]
 #[cfg(any(feature = "training", test))]
 pub fn compute_zensim_with_config(

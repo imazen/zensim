@@ -450,9 +450,7 @@ impl ZensimV2Result {
 /// [`V2NewFeatureToggles::formula_revision`] is nameable by the callers that
 /// set it.
 ///
-/// `#[doc(hidden)]`: the revision axis is research/extraction machinery, not
-/// product surface. A default build's `Zensim::compute` resolves it per bake
-/// and never asks a caller.
+/// Internal extraction revision; `Zensim::compute` resolves it from the bake.
 #[doc(hidden)]
 pub use crate::feature_defs::FormulaRevision;
 /// Runtime toggles for the phase-2 new-feature GROUPS (A.10 candidates),

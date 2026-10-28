@@ -98,19 +98,7 @@ pub(crate) struct Defect {
     pub note: &'static str,
 }
 
-/// WHICH registered revision's semantics a computation uses.
-///
-/// The [`Revision`] entries above record, per signal, which eras MOVED it.
-/// This is the knob that SELECTS one — phase 3 of
-/// `docs/PLAN_FEATURE_SYSTEM_2026-09-05.md`, executed by
-/// `docs/PLAN_FEATURE_REV2_2026-09-05.md`.
-///
-/// It is deliberately a small closed enum rather than a set of era tokens:
-/// eras in this crate have only ever moved forward together, and a research
-/// extraction needs to reproduce "the semantics of era X", not an arbitrary
-/// per-slot mixture. [`Self::era_tokens`] is the bridge back to the registry,
-/// so "which slots does this revision move?" stays a lookup over the signal
-/// table rather than a second list that can drift.
+/// Arithmetic revision used by a feature computation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash, PartialOrd, Ord)]
 #[non_exhaustive]
 pub enum FormulaRevision {

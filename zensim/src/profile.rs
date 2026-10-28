@@ -180,12 +180,6 @@ pub struct ProfileParams {
     /// (300 → 372 features — adds 72 IW-weighted features per Wang &
     /// Li 2011). Implies `extended_features = true` for the standard
     /// IW layout. Default `false`.
-    ///
-    /// **Note**: setting this for a shipping profile is currently
-    /// discouraged — V_20a IW bakes catastrophically failed CID22
-    /// transfer (Z-RMSE 0.869 vs V_18's 0.455 at k=1; near-random at
-    /// k=8). Reserved for research bakes that need full 372-input
-    /// scoring through the standard runtime.
     pub(crate) compute_iw_features: bool,
 
     /// EXP-CROSS-CODEC-V10 (2026-05-20): when `true`, the final score
@@ -205,9 +199,7 @@ pub struct ProfileParams {
 impl ProfileParams {
     /// Create custom params for weight training/exploration.
     ///
-    /// MLP scoring is disabled (`mlp_bytes = None`) for custom params;
-    /// research-side MLP exploration goes through `zensim-validate`'s
-    /// `--algorithm mlp` arm instead.
+    /// Custom parameters use linear scoring (`mlp_bytes = None`).
     pub fn custom(
         weights: &'static [f64],
         blur_radius: usize,
@@ -340,13 +332,8 @@ static PROFILE_A: ProfileParams = ProfileParams {
     extrapolate_score: true,
 };
 
-/// `ZensimProfile::LegacyLinearV0_2` params — the plain 228-weight linear
-/// V0_2 scoring path (no MLP head), matching [`ProfileParams::builder`]'s
-/// defaults byte-for-byte (which in turn reconstruct the removed
-/// `PreviewV0_2` built-in profile; see commit `493c91cd`). Backs the
-/// doc-hidden `compute_zensim_with_config` /
-/// `compute_zensim_with_ref_and_config` research entry points in
-/// `metric.rs` — nothing else constructs a `Zensim` with this profile.
+/// Legacy linear weights and score mapping used by the custom-configuration
+/// training entry points in `metric.rs`.
 #[cfg(any(feature = "training", test))]
 static PROFILE_LEGACY_LINEAR_V0_2: ProfileParams = ProfileParams {
     weights: &WEIGHTS_PREVIEW_V0_2,

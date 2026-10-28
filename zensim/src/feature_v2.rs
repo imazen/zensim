@@ -3094,7 +3094,7 @@ impl MeanOffsetRows {
 pub(crate) struct FoldWalkExtras<'a> {
     // A cancelled partial walk is discarded by the named scorer's post-check.
     pub(crate) stop: Option<&'a dyn enough::Stop>,
-    /// Resolved model/research plan; raw public extraction keeps all channels.
+    /// Resolved extraction plan; raw public extraction keeps all channels.
     pub(crate) compute: Option<ComputeSet>,
     /// Per-scale-0-row `Σ_x (src − dst)` sums, for the fold-backed engine's
     /// bit-exact `mean_offset` (see [`MeanOffsetRows`]).

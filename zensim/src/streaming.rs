@@ -257,9 +257,8 @@ pub(crate) fn upsample_row_powx_add(
     }
 }
 
-/// Guided mass-conserving redistribution upsample (E-JBU, research; used only
-/// when `DiffmapOptions::guided_coarse_redistribution` is set — default path is
-/// [`upsample_pow2x_add`], byte-identical to prior behavior).
+/// Guided mass-conserving redistribution of a coarse plane.
+/// The unguided path uses [`upsample_pow2x_add`].
 ///
 /// For each coarse-scale cell, deposits the cell's exact NN mass
 /// (`src[cell] · weight · footprint_count`) within its aligned
@@ -3321,7 +3320,7 @@ fn compute_diffmap_from_xyb(
     let full_h = height;
     let mut fused = vec![0.0f32; full_w * full_h];
 
-    // E-JBU guide (research, opt-in): |scale-0 contribution plane| + ε. The
+    // Guided redistribution: |scale-0 contribution plane| + ε. The
     // scale-0 plane is the fold's own full-res localization signal; |·| makes
     // it sign-robust under the signed ModelSensitivity weighting, and the
     // per-cell normalization `g / Σ_cell g` cancels any global scaling (so the

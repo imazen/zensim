@@ -30,7 +30,8 @@ pub(crate) fn mode(revision: FormulaRevision) -> Mode {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BlurMode {
-    Rec64,
+    /// Canonical recurrence with an f64 running sum.
+    F64Recurrence,
     /// THE REV5 CANON's blur axis (`localwin`): each output's 11-tap window
     /// is summed independently in f32 over the spec's fixed pair tree —
     /// `s2 = x[i]+x[i+1]; s4 = s2[i]+s2[i+2]; s8 = s4[i]+s4[i+4];
@@ -39,11 +40,10 @@ pub(crate) enum BlurMode {
     Local,
 }
 
-/// Non-oracle sibling: the only canon mode a product build can select is
-/// `Canon64`, whose blur is the f64 recurrence — a constant here.
+/// Default canonical blur axis when no explicit revision is supplied.
 #[inline(always)]
 pub(crate) const fn canon_blur_axis(_mode: Mode) -> BlurMode {
-    BlurMode::Rec64
+    BlurMode::F64Recurrence
 }
 
 #[inline(always)]
@@ -54,7 +54,7 @@ pub(crate) fn canon_blur_axis_for(
     if revision >= crate::feature_defs::FormulaRevision::Rev5 {
         BlurMode::Local
     } else {
-        BlurMode::Rec64
+        BlurMode::F64Recurrence
     }
 }
 

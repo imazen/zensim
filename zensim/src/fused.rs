@@ -438,7 +438,7 @@ pub(crate) fn fused_vblur_features_edge(
         crate::featcanon::Mode::Canon64 => {
             if matches!(
                 crate::featcanon::canon_blur_axis(mode),
-                crate::featcanon::BlurMode::Rec64
+                crate::featcanon::BlurMode::F64Recurrence
             ) {
                 return incant!(
                     fused_vblur_edge_canon64_vec(
@@ -3489,7 +3489,7 @@ impl VWin {
             }
         };
         match blur {
-            crate::featcanon::BlurMode::Rec64 => {
+            crate::featcanon::BlurMode::F64Recurrence => {
                 let seed64 = |plane: &[f32], out: &mut Vec<f64>| {
                     if plane.is_empty() {
                         return;
@@ -4215,7 +4215,7 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
     };
     debug_assert!(
         local || matches!(win, VWin::F64 { .. }),
-        "canon64 vector body is entered only under the Rec64 axis"
+        "canon64 vector body is entered only under the F64Recurrence axis"
     );
     let inv_v = f64x8::splat_t(token, planes.inv64());
     let splats = crate::ssim_form::SsimSplats8::new(token, form);
@@ -5248,7 +5248,7 @@ fn fused_vblur_edge_canon64_vec(
     let mut win = VWin::new(crate::featcanon::canon_blur_axis(mode), &planes);
     debug_assert!(
         matches!(win, VWin::F64 { .. }),
-        "canon64 vector body is entered only under the Rec64 axis"
+        "canon64 vector body is entered only under the F64Recurrence axis"
     );
     let inv_v = f64x8::splat_t(token, planes.inv64());
     let one = f32x8::splat_t(token, 1.0);
@@ -5268,7 +5268,7 @@ fn fused_vblur_edge_canon64_vec(
         if y >= inner_start && y < inner_end {
             let base = y * width;
             let mut row = EdgeRowPools::<LanesF64>::zero();
-            let [wm1, wm2, _, _, _] = win.f64_states().expect("Rec64");
+            let [wm1, wm2, _, _, _] = win.f64_states().expect("F64Recurrence");
             let wm1 = &wm1[..full * 8];
             let wm2 = &wm2[..full * 8];
             let srow = &src[base..base + full * 8];

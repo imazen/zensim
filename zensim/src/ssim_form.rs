@@ -57,12 +57,7 @@ impl SsimLumaForm {
     }
 }
 
-/// **The revision this build ships.**
-///
-/// Changing this line is the era flip. Everything else — the registry entries,
-/// the gates, the recalculation — hangs off it, and
-/// `docs/PLAN_FEATURE_REV2_2026-09-05.md` R1 is the control that proves the
-/// machinery around it is inert while it still reads `Rev1`.
+/// Default arithmetic revision for computations without a declared revision.
 pub(crate) const SHIPPED_REVISION: FormulaRevision = FormulaRevision::Rev1;
 
 /// The default for computations without a declared revision.
@@ -70,8 +65,7 @@ pub(crate) const fn active_revision() -> FormulaRevision {
     SHIPPED_REVISION
 }
 
-/// Explicit research cross-revision replay keeps using the process kernels.
-/// Normal model-bound requests never consult mutable thread/global overrides.
+/// Preserve the revision explicitly selected by the caller.
 pub(crate) fn effective_revision(revision: FormulaRevision) -> FormulaRevision {
     revision
 }
