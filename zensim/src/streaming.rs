@@ -341,18 +341,6 @@ fn redistribute_pow2x_guided_add(
     }
 }
 
-/// Research (`custom-profiles`): interpolation kernel for the coarse-scale (s1–s3) diffmap
-/// upsample, chosen per call by `ZENSIM_DIFFMAP_UPSAMPLE`. Unset or `nearest` keeps the
-/// default [`upsample_pow2x_add`] path byte-identical.
-///
-/// Interpolating kernels sample the coarse plane at every full-res pixel centre,
-/// `u = (x + 0.5) / f − 0.5` in coarse samples (a coarse cell's centre is the middle of its
-/// aligned `f × f` footprint), with replicated borders and taps normalized to sum to 1, so a
-/// constant plane stays constant. Coverage matches nearest-neighbour: pixels beyond
-/// `src_w·f` / `src_h·f` receive nothing. A `-mass` variant then deposits each coarse cell's
-/// exact nearest-neighbour mass inside its own footprint in proportion to the interpolated
-/// plane (the E-JBU redistribution with the interpolation as guide), so footprint-aligned
-/// block sums are unchanged and only the shape inside each footprint differs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CoarseKernel {
     Nearest,
@@ -697,10 +685,6 @@ impl ScaleAccumulators {
         let mut iw_mse = [0.0f64; 3];
 
         let gain_form = crate::hf_gain_form::HfGainForm::at_revision(revision);
-        // The pooled 4th/8th roots go through their ONE owner
-        // (`crate::det_math`) — F18, the libc-dependent `powf`. Hoisted out
-        // of the channel loop for the same reason `gain_form` is: it reads a
-        // `OnceLock`.
         let root_form = crate::det_math::RootForm::at_revision(revision);
 
         for c in 0..3 {
@@ -726,11 +710,6 @@ impl ScaleAccumulators {
             edge_2nd[c * 2 + 1] = (self.edge_det2[c] * one_over_n).max(0.0).sqrt();
             mse[c] = self.mse[c] * one_over_n;
 
-            // The HF ratio family goes through its ONE owner
-            // (`crate::hf_gain_form`) — the `gain` member is F17 and carries a
-            // runtime-selected arm; the two `loss` members are bounded by
-            // construction and have none. `gain_form` is hoisted out of the
-            // channel loop: it reads a `OnceLock`.
             let var_src = self.hf_sq_src[c] * one_over_n;
             let var_dst = self.hf_sq_dst[c] * one_over_n;
             hf_energy_loss[c] = crate::hf_gain_form::hf_energy_loss(var_src, var_dst);
@@ -845,11 +824,6 @@ fn active_channels(
     //     0-2: ssim_max, art_max, det_max
     //     3-5: ssim_p95, art_p95, det_p95
     let basic_total = n_scales * basic_fpc * 3;
-    // REV4SERVE: at Rev4 every active channel takes the fused SSIM route —
-    // the edge-only `blur::fused_blur_h_mu` chain and the MSE-only
-    // `sq_diff_sum` leaf are tier-dispatched and have no canonical body, so
-    // the canonical definition IS the SSIM route's pools (which is also what
-    // `research::extract` computes for every channel).
     let canon =
         crate::featcanon::mode(crate::ssim_form::effective_revision(config.revision())).active();
     let mut active: ScaleActive = [None; 3];
@@ -1130,12 +1104,6 @@ fn native_sdr_linear_row(
     }
 }
 
-/// Convert an ImageSource to planar XYB at padded width, parallelized over row chunks.
-///
-/// Handles both RGB and RGBA sources row-by-row. RGBA is composited over a noise background.
-///
-/// `revision` is the computation's formula revision; it selects the canonical
-/// opsin body at Rev4 (featcanon D1) and nothing else.
 pub(crate) fn convert_source_to_xyb(
     source: &impl ImageSource,
     padded_width: usize,
@@ -1603,21 +1571,7 @@ fn process_strip_channel(
     bufs: &mut ScaleBuffers,
     accum: &mut ScaleAccumulators,
     mut diffmap: Option<(&mut [f32], PixelFeatureWeights)>,
-    // task #67 C3a: when `Some((sd, mu1, mu2))`, copy this channel's
-    // accumulated-row SSIM-error plane and V-blur means into the given
-    // band-local slices (each `inner_h * width`) — the fused
-    // score+attribution path's plane retention. `None` (every pre-existing
-    // caller) is byte-identical to the previous behavior.
     attr_ret: Option<(&mut [f32], &mut [f32], &mut [f32])>,
-    // task #70 stale-scalar single-pass: when `Some((coeffs, id, win))`,
-    // run the fused attribution combine for this channel IN-STRIP (on the
-    // cache-hot sd/mu planes, accumulated rows only) with the caller's
-    // per-channel coefficient pack — no plane retention, no post-scale
-    // combine sweep. The kernel is per-pixel elementwise `+=`, so the
-    // result is bitwise-identical to the retained-plane combine given the
-    // same coefficients. Requires `need_ssim` (the stale entry validates
-    // an all-features profile, under which every channel computes SSIM).
-    // `None` (every pre-existing caller) is byte-identical.
     attr_fold: Option<([f32; 12], &mut [f32], &mut [f32])>,
 ) {
     // MSE-only path: no blur needed
@@ -1639,27 +1593,11 @@ fn process_strip_channel(
         return;
     }
 
-    // Rev3 is FUSED into the one-pass route: `fused_blur_h_ssim` accumulates
-    // the direct error moment in place of `Σab` and `fused_vblur_features_ssim`
-    // forms the dissimilarity from it. The separate blur+reduce fallback below
-    // (`blur_passes != 1`, which no shipped profile selects) still builds its
-    // fourth plane with `mul_into` — i.e. `Σab` — and pools with the legacy
-    // covariance reducers, so Rev3 does not serve it. The refusal is an
-    // explicit `ZensimError` raised at the fallible entry points
-    // (`crate::ssim_form::check_route`), NOT a panic here and NOT a silent
-    // fall-through to the legacy arithmetic; this assertion only documents
-    // that the gate ran.
     let stable = crate::ssim_form::effective_revision(
         config
             .formula_revision
             .unwrap_or_else(crate::ssim_form::active_revision),
     ) >= crate::feature_defs::FormulaRevision::Rev5;
-    // Revision 3 fuses the masked/IW extension into the SSIM V sweep
-    // (`fused::ExtPoolsWork`): the activity is H-blurred from the H-only
-    // `mu1` plane the H pass already wrote, V-blurred inside the same sweep
-    // that forms the SSIM signal, and every masked/IW pool is accumulated
-    // there. The separate activity chain, the two V-blurred mu planes it
-    // needed, the retention copy and the swap below are all skipped.
     let fused_ext = stable && need_ssim && (config.extended_features || config.compute_iw_features);
     debug_assert!(
         !stable || config.blur_passes == 1,
@@ -1764,8 +1702,6 @@ fn process_strip_channel(
                 &mut [],
                 &mut [],
                 false,
-                // v1's 372 layout has no append/append2 block, so the free
-                // raw moments have nowhere to land on this path.
                 crate::fused::FreeExtrasWork {
                     revision: config.formula_revision,
                     local_only: config.local_only,
@@ -1794,13 +1730,6 @@ fn process_strip_channel(
                 accum.iw_mse[c] += strip_acc.iw_mse;
             }
 
-            // Retain the inner-band signal BEFORE the activity work below
-            // reuses `temp_blur` as blur scratch. `store_sd` was forced on for
-            // exactly this reason, so the masked/IW pools read the same
-            // per-pixel values the basic/peak pools already consumed rather
-            // than re-deriving a second, differently-rounded signal. (Under
-            // the fused Rev3 the sigma V-blurs the legacy pools needed are
-            // also skipped: their fourth plane now holds the error moment.)
             if stable && !fused_ext && (config.extended_features || config.compute_iw_features) {
                 let inner = inner_start * width..(inner_start + inner_h) * width;
                 bufs.stable_sd.clear();
@@ -1876,10 +1805,6 @@ fn process_strip_channel(
             );
         }
 
-        // task #67 C3a: retention copy — the accumulated rows' SSIM-error
-        // plane (temp_blur) and V-blurred mu1/mu2 (in mask/mul_buf at this
-        // point, BEFORE the swap below) into the caller's band-local
-        // slices. `sd` is zero-filled for a channel that computes no SSIM.
         if let Some((sd_out, mu1_out, mu2_out)) = attr_ret {
             let inner_off = inner_start * width;
             let inner_n = inner_h * width;
@@ -1892,12 +1817,6 @@ fn process_strip_channel(
             mu2_out.copy_from_slice(&bufs.mul_buf[inner_off..inner_off + inner_n]);
         }
 
-        // task #70 stale-scalar single-pass: run the fused combine for this
-        // channel right here, while sd (temp_blur) and the V-blurred
-        // mu1/mu2 (mask/mul_buf, pre-swap) are cache-hot — the same values
-        // the retention path would copy out. Accumulated rows only; the
-        // caller's id/win slices are band-local at the same offsets as the
-        // retention slices.
         if let Some((co, id_out, win_out)) = attr_fold {
             debug_assert!(
                 need_ssim,
@@ -2037,11 +1956,6 @@ fn process_strip_channel(
             // for s12) with 2 SIMD passes (1D V-blur each), saving
             // ~30% of the masked-block setup cost.
             if need_ssim && stable {
-                // Rev3: the canonical signal is already retained, so the two
-                // sigma V-blurs and the covariance re-derivation below are not
-                // just redundant — running them would give the weighted pools
-                // a DIFFERENT `d_raw` than the basic/peak pools. Same weights,
-                // same tiers, same accumulation order as the legacy arms.
                 debug_assert_eq!(bufs.stable_sd.len(), inner_n);
                 if do_ext && do_iw {
                     let ((sd_m, sd4_m, sd2_m), (sd_i, sd4_i, sd2_i)) =
@@ -2456,8 +2370,6 @@ pub(crate) struct AttrScaleRetention {
 
 impl AttrScaleRetention {}
 
-/// One band's in-place retention output slices (pre-split from the
-/// caller's [`AttrScaleRetention`] planes; row-range-disjoint per band).
 struct AttrBandSlices<'a> {
     sd: [&'a mut [f32]; 3],
     mu1: [&'a mut [f32]; 3],
@@ -2519,10 +2431,6 @@ fn process_scale_bands_into_accum(
     inner_y_filter: Option<(usize, usize)>,
     outer_layout: Option<(usize, usize)>,
     attr_ret_out: Option<&mut AttrScaleRetention>,
-    // task #70 stale-scalar single-pass: per-channel fused-combine
-    // coefficient packs + the scale-sized id/win accumulation planes
-    // (`width * height` prefixes, caller-zeroed). The combine runs
-    // in-strip per (sub-strip, channel) — no retention, no second sweep.
     attr_fold_out: Option<AttrFoldOut<'_>>,
     // Cooperative cancellation (issue #48): checked once per band. A
     // fired token makes remaining bands return empty accumulators
@@ -2739,11 +2647,6 @@ fn process_scale_bands_into_accum(
         (accum, band_dm)
     };
 
-    // Pre-split the caller's retention planes into band-aligned mutable
-    // chunks (bands tile the plane in `STRIP_INNER`-row order, matching
-    // `chunks_mut(STRIP_INNER * strips_per_band * width)` exactly), so the
-    // parallel bands write in place — no per-band allocation, no
-    // concatenation copies (the C3a retention-churn lever).
     let band_chunk_rows = STRIP_INNER * strips_per_band;
     let band_rets: Vec<Option<AttrBandSlices<'_>>> = match attr_ret_out {
         Some(ret) => {
@@ -2788,8 +2691,6 @@ fn process_scale_bands_into_accum(
     };
     debug_assert_eq!(band_rets.len(), num_bands);
 
-    // Pre-split the fold's id/win planes into the SAME band tiling as the
-    // retention planes (row-range-disjoint chunks in band order).
     let band_folds: Vec<Option<AttrFoldBand<'_>>> = match attr_fold_out {
         Some((co, id_plane, win_plane)) => {
             let n_used = width * height;
@@ -2843,8 +2744,6 @@ fn process_scale_bands_into_accum(
         }
     };
 
-    // Merge band accumulators and concatenate diffmaps (retention was
-    // written in place through the pre-split band slices).
     let mut accum = ScaleAccumulators::new();
     let mut diffmap = if diffmap_weights.is_some() {
         Some(Vec::with_capacity(width * height))
@@ -2959,13 +2858,6 @@ impl PrecomputedReference {
         self.ref_height
     }
 
-    /// Build a precomputed reference from an ImageSource.
-    ///
-    /// Converts to XYB and builds the downscale pyramid, storing planes at each level.
-    ///
-    /// `revision` is the formula revision of the computations that will read
-    /// this cache: the opsin conversion is canonical at Rev4 (featcanon D1),
-    /// so a cache must be built at the revision its consumers run.
     pub(crate) fn new(
         source: &impl ImageSource,
         num_scales: usize,
@@ -5176,6 +5068,4 @@ mod tests {
             assert_eq!(a, b);
         }
     }
-
-    // ── Research coarse-upsample kernels (`ZENSIM_DIFFMAP_UPSAMPLE`) ─────────
 }

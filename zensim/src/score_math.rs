@@ -1,74 +1,7 @@
-// Copyright (c) Imazen LLC.
-// Licensed under AGPL-3.0-or-later OR the Imazen commercial license.
-
-//! **THE one owner of the SCORE path's arithmetic.**
+//! Shared score mapping and neural-output arithmetic.
 //!
-//! Five pieces of float math turn a bake's forward-pass output into a shipped
-//! zensim score: the two mixing heads (per-sample-α and hybrid), the tanh
-//! output pin, the PCHIP output-calibration spline, and the distance→score
-//! mapping. Every one of them was implemented TWICE — once here (reached
-//! through [`crate::metric`], the product runtime) and once in
-//! `zensim-validate`, whose bake-evaluation tooling scores runtime-loaded bake
-//! bytes over stored parquet rows and therefore cannot call the product
-//! entry points, which consume a compile-time `ZensimProfile` and a
-//! `ZensimResult`.
-//!
-//! # The defect this module exists for
-//!
-//! The duplication was documented as bit-exact **in prose, with no test
-//! binding the two**, and F19 turned that prose into a live wrong-number bug:
-//! [`crate::det_math::PowForm`] routes every transcendental on this path
-//! through one selectable form so a score stops being a function of which
-//! libm the binary linked against, and `metric.rs` follows it while the
-//! mirror did not. Both defaults are [`PowForm::LibmPowf`] today, so the two
-//! agree; the day [`crate::ssim_form::SHIPPED_REVISION`] flips they would
-//! silently disagree, and every published verdict would describe arithmetic
-//! the product does not run. `det_math`'s own exposure table named that fork
-//! *"a BLOCKER on flipping `SHIPPED_REVISION`"*.
-//!
-//! MEASURED before the fix (2026-09-06, six shipped/board bakes ×
-//! `cid22,kadid,tid,konjnd,aic3`): `bake_verdict --full-json` was
-//! **byte-identical under `ZENSIM_POW_FORM=libm` and `=pure` on all six** —
-//! i.e. the evaluation tooling was completely insensitive to the form the
-//! product runtime obeys. That is the fork, observed rather than argued.
-//!
-//! A second divergence fell out of the same consolidation, REAL in code and
-//! LATENT in practice: the validate-side PCHIP evaluator capped its upper
-//! *extrapolation* at 100 (the 2026-07-04 fix) but left the *interior*
-//! segment uncapped, while [`pchip_eval_capped`] — the product's — caps both.
-//! The reachable trigger is **a knot whose `y` exceeds 100**, which the wire
-//! format permits (`parse_payload` bounds `x` strictly increasing and both
-//! finite, and bounds `y` not at all). It is NOT Hermite overshoot: the
-//! Fritsch-Carlson derivative rule keeps the interpolant inside its
-//! bracketing knots by construction, and a first draft of
-//! `the_pchip_interior_is_capped_at_one_hundred` that tried to build an
-//! overshoot fixture failed its own vacuity guard proving it.
-//!
-//! MEASURED over all 49 bakes on disk (`zensim/weights`, its `archive/`, and
-//! `zensim-experimental/weights`): **0 declare a knot above 100**, so no
-//! published verdict moved. The divergence was a loaded gun, not a fired one.
-//! Unifying removes it by construction.
-//!
-//! # Shape
-//!
-//! The head parameters arrive in two different owned layouts — `metric.rs`
-//! parses them into private structs, `zensim-validate` into public tuples —
-//! so the entry points here take **borrowed** parameter views
-//! ([`PerSampleAlphaParams`]). Both callers build one
-//! for free; neither allocates, and neither has to adopt the other's storage.
-//!
-//! The [`PowForm`] is an explicit argument rather than a
-//! [`crate::det_math::active_pow_form`] read inside, for two reasons: it is
-//! the discipline `det_math` already documents (read the `OnceLock` ONCE,
-//! above any loop — LLVM will not hoist it for you), and it is what lets a
-//! test exercise BOTH arms in one process, which a process-wide `OnceLock`
-//! forbids.
-//!
-//! # `#[doc(hidden)]`
-//!
-//! Internal machinery, not product surface. The supported API
-//! (`docs/public-api/zensim.txt`) is unchanged; these items are registered in
-//! `docs/public-api/zensim.internal.txt`.
+//! Callers pass the power form explicitly; feature extraction and score mapping
+//! keep their arithmetic choices separate.
 
 use crate::det_math::{DetPow, PowForm};
 

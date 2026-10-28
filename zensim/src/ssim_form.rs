@@ -1,63 +1,7 @@
-//! THE per-pixel SSIM dissimilarity — one owner for a form that was
-//! hand-copied at 36 kernel sites.
+//! Scalar and SIMD forms of per-pixel SSIM dissimilarity.
 //!
-//! # Why this module exists
-//!
-//! Every SSIM-derived slot in the crate (`basic`'s `ssim_*`, the `masked`
-//! block, the `IW` block — 3 signals x 2 blocks x 4 scales x 3 channels, plus
-//! the basic block's own) is built from ONE per-pixel expression:
-//!
-//! ```text
-//! num_m   = 1 - (mu1 - mu2)^2          // luminance
-//! num_s   = 2*cov + C2                 // structure numerator
-//! denom_s = var1 + var2 + C2           // structure denominator
-//! d_raw   = 1 - num_m * num_s / denom_s
-//! ```
-//!
-//! That expression was written out by hand **36 times** — 10 in
-//! [`crate::fused`] and 26 in [`crate::simd_ops`], across four SIMD tiers and
-//! their scalar tails, in vector and scalar spellings. `C2` itself had three
-//! separate declarations. A form with 36 owners cannot be revised, which is
-//! exactly the position the defect audit found the crate in: F4 (the one live
-//! arithmetic defect) is a property of this expression, and there was nowhere
-//! to fix it.
-//!
-//! Everything here is `#[inline(always)]` and generic over the backend trait,
-//! following [`crate::fused`]'s `raw_moments_accumulate*` precedent. `nm` over
-//! a release build shows zero `ssim_dissim_*` symbols surviving.
-//!
-//! # F4, and why the fix needs a form rather than a clamp
-//!
-//! `num_s/denom_s` is bounded in `[-1, 1]` by construction: `|2*cov| <= var1 +
-//! var2` (Cauchy-Schwarz), so the structure term cannot run away. `num_m` is
-//! `1 - D^2` for a mean difference `D`, which is **unbounded below**, so a
-//! large local mean difference makes `d_raw` a large positive number. MEASURED
-//! (`benchmarks/ssim_moment_explosion_2026-07-16.md`, 2,322,579 rows):
-//! `f313 = iw_ssim_4th s0 ch2` reaches **5,814,302** against a photographic
-//! p99.9 of **0.48**.
-//!
-//! The weights are NOT the amplifier, and the numbers on record prove it: the
-//! `masked` weight is `1/(1 + k*a)`, bounded in `(0, 1]`, while the `IW`
-//! weight is `1 + k*a` and unbounded — yet `f241` (masked, 5,797,029) and
-//! `f313` (IW, 5,814,302) agree to **0.3 %**. A bounded weight cannot produce
-//! 5.8e6 from a bounded `d_raw`, and an unbounded weight that mattered could
-//! not land within 0.3 % of a bounded one. Both are ~1 there because the
-//! pathology lives in flat regions where activity is ~0. The amplifier is
-//! `num_m`.
-//!
-//! # Provenance: this is ssimulacra2's form, faithfully inherited
-//!
-//! `zensim/src/lib.rs` describes the no-`C1` luminance term as "ssimulacra2's
-//! variant". VERIFIED against our own SSIMULACRA2 implementation rather than
-//! assumed: `fast-ssim2`'s `simd_ops.rs`, `lib.rs` and `strip.rs` all compute
-//! `num_m = mu_diff.mul_add(-mu_diff, 1.0)` with `C2 = 0.0009` and no `C1`.
-//! So F4 is **inherited from the algorithm**, not a zensim coding slip, and
-//! any bounded form here is a deliberate, measured DEVIATION from that
-//! lineage — taken for a learned metric that must feed monotone linear heads,
-//! and recorded as such.
-//!
-//! (`fast-ssim2` carries the same unbounded term. It is a different repo and
-//! is NOT touched from here; the observation is reported, not acted on.)
+//! Revision 1 retains the legacy luminance term. Canonical revisions use the
+//! clamped form, selected from the comparison's explicit revision.
 
 use crate::feature_defs::FormulaRevision;
 use magetypes::simd::backends::{F32x8Backend, F32x16Backend};
@@ -100,50 +44,6 @@ impl SsimLumaForm {
         }
     }
 
-    /// The bounded arm revision 2 ships — **`Clamp`, DECIDED BY MEASUREMENT**
-    /// (`benchmarks/f4_arm_decision_2026-09-05.md`, R6).
-    ///
-    /// Named once so the R6 probe and the kernels cannot disagree about which
-    /// arm "rev2" means.
-    ///
-    /// # Why `Clamp` and not [`Self::SsimLumaC1`]
-    ///
-    /// `docs/PLAN_FEATURE_REV2_2026-09-05.md` §1.4 registered a prior — *"if
-    /// the probe cannot separate them, arm A (`SsimLumaC1`) ships"* — because
-    /// it reuses `feature_v2`'s own `bounded_sim` owner and preserves severity
-    /// ORDER among pathological pixels. **The probe DID separate them**, so
-    /// the prior never fired. Four arms were extracted from ONE binary over
-    /// 217,756 rows (the seven human eval corpora + the full 196,086-row
-    /// safesyn training leg), fitted through the shipped Profile-D recipe at
-    /// three slices x two solvers, and graded on rank, dial and cell deltas:
-    ///
-    /// * **F4's pathology occurs on NONE of it.** `Clamp` — which differs from
-    ///   the shipped form only where `(mu1-mu2)^2 > 1` — moves **0 cells**, and
-    ///   no slot anywhere reaches `|f| > 2` against the 5,814,302 on record
-    ///   (which belongs to the bigcodec sweep, a population with no local
-    ///   pixels).
-    /// * **`Clamp` is therefore bit-identical to revision 1 on every row R6
-    ///   fits or scores** — features, Gram, solve, spline and ZNPR bytes, all
-    ///   six bakes sha-for-sha — so its rank delta is exactly 0 with a
-    ///   degenerate CI.
-    /// * `SsimLumaC1` moves **29.4 M** healthy cells (worst |delta| 0.771) and
-    ///   `Lorentz` **24.0 M** (worst 0.0901), against a pre-registered 1e-4
-    ///   bar, to buy at most `+0.0025` CID22 in one of six variants. Both fail
-    ///   the healthy-cell gate; neither wins a rank majority in more than one
-    ///   variant.
-    ///
-    /// So `Clamp` is the unique arm that is ONLY a fix: it changes the metric
-    /// exactly where the metric was unbounded and nowhere else, which is what
-    /// makes a rev2 flip cheap for every table whose content resembles those
-    /// corpora.
-    ///
-    /// **Its known cost, recorded rather than glossed:** above `D^2 = 1` every
-    /// pixel gets the same `num_m = 0`, so tail ORDER is flat there — the exact
-    /// property §1.4's prior was protecting. `d` stays bounded in `[0, 2]`
-    /// regardless. If a future population makes that order load-bearing,
-    /// [`Self::Lorentz`] is the registered successor (bounded, no Weber term,
-    /// monotone in `D^2`, and 4-6 orders of magnitude closer to revision 1 on
-    /// healthy content than `SsimLumaC1`) — not `SsimLumaC1`.
     pub(crate) const REV2_LUMA: Self = Self::Clamp;
 
     /// Whether `d_raw` is bounded below by 0 by construction, making the
@@ -176,30 +76,6 @@ pub(crate) fn effective_revision(revision: FormulaRevision) -> FormulaRevision {
     revision
 }
 
-/// Refuse, EXPLICITLY, any route the active revision does not serve.
-///
-/// [`FormulaRevision::Rev3`] replaces the v1 SSIM signal with
-/// [`stable_ssim_plane`], whose spatial support is exactly ONE reflect-101
-/// box of `blur_radius`. `blur_passes != 1` selects
-/// `streaming::process_strip_channel`'s separate blur+reduce fallback, which
-/// no shipped profile reaches and whose `passes * radius` halo does not
-/// describe a single box. Rev3 therefore does not serve it.
-///
-/// This is the ONLY correct third option. Serving it from the legacy moments
-/// would silently mix two arithmetic eras inside one feature vector, and
-/// panicking would put an abort on a public path; so every fallible entry
-/// that turns a profile into a [`crate::metric::ZensimConfig`] calls this and
-/// returns the error to the caller.
-///
-/// Callers that only inspect a config (pool-mode derivation, fold planning)
-/// do not call it: they run no pixel kernel, and the entry that eventually
-/// does has already refused.
-///
-/// REV4SERVE: Rev4 crossings are refused via [`refuse_rev4_mix`]: a
-/// request at one revision served from a process pinned to another would
-/// compute the request's label with the process's gates. A pure-Rev4
-/// process (`ZENSIM_FORMULA_REV=4`) serves Rev4 computations — every leaf
-/// on the served walk is canonical there.
 pub(crate) fn check_route(config: &crate::metric::ZensimConfig) -> Result<(), crate::ZensimError> {
     refuse_rev4_mix(config.revision())?;
     if config.revision() >= FormulaRevision::Rev5 && config.blur_passes != 1 {
@@ -214,18 +90,6 @@ pub(crate) fn check_route(config: &crate::metric::ZensimConfig) -> Result<(), cr
 // the v2 walk's guard
 pub(crate) const REV4_MIX: &str = "formula revisions 4 and 5 cannot be mixed with another revision in one process: other formula gates follow ZENSIM_FORMULA_REV, so the request and the process must carry the same revision when either is revision 4 or later";
 
-/// **Refuse a computation whose revision disagrees with the process revision
-/// when either one is Rev4** (featcanon D1).
-///
-/// Canonical arithmetic follows the computation's own revision (every
-/// canonical leaf derives it from the revision it receives), but other
-/// formula gates — the dense kernel's `direct` flag, `RootForm`, `PowForm`,
-/// `HfGainForm` — still read the process switch. So a Rev4 request in a Rev3
-/// process would compute Rev3 semantics, and a Rev3 request in a Rev4 process
-/// would mix Rev4 gates into it. Both are refused rather than labelled with a
-/// revision they did not compute. Mixing among Rev1–Rev3 is governed by the
-/// pre-existing per-route checks and is unchanged.
-// the v2 walk's guard
 pub(crate) fn refuse_rev4_mix(requested: FormulaRevision) -> Result<(), crate::ZensimError> {
     if requested >= FormulaRevision::Rev5 {
         return Err(crate::ZensimError::ModelLoadFailed { reason: REV4_MIX });
@@ -233,10 +97,6 @@ pub(crate) fn refuse_rev4_mix(requested: FormulaRevision) -> Result<(), crate::Z
     Ok(())
 }
 
-/// The luminance form the active revision selects.
-///
-/// Call this ONCE per kernel invocation, above the pixel loop — it reads a
-/// `OnceLock`, which LLVM cannot hoist out of a loop for you.
 #[inline]
 pub(crate) fn active_luma_form() -> SsimLumaForm {
     SsimLumaForm::Ssim2Legacy
@@ -302,12 +162,6 @@ impl<T: F32x16Backend + Copy> SsimSplats16<T> {
         self.one - (num_m * num_s) / (den_m * denom_s)
     }
 
-    /// The DIRECT-ERROR form, for revision 3: the fourth moment is
-    /// `Σ(a-b)²` (the H/V passes accumulate it in place of `Σab`), so the
-    /// error variance is formed directly instead of recovered as
-    /// `var1 + var2 - 2*cov`. Same algebra as the f64 reference `finalize`,
-    /// in f32 with the crate's `mul_add` spellings. Bounded error, registered
-    /// in `benchmarks/stable_ssim_kernel_2026-09-08.md`.
     #[inline(always)]
     pub(crate) fn direct(
         &self,

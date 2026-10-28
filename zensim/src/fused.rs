@@ -28,59 +28,6 @@ use magetypes::simd::generic::f32x8 as GenericF32x8;
 #[cfg(target_arch = "x86_64")]
 use magetypes::simd::generic::f32x16;
 
-// ============================================================
-// Free raw-moments accumulation — shared across every SIMD tier
-// (`benchmarks/free_features_2026-09-01.md`, `benchmarks/profile_d_notax_2026-09-01.md`)
-// ============================================================
-//
-// The four FREE raw moments (`Σs, Σd, Σs², Σd²` — `V1FreeExtras::RawMoments`,
-// `StripChannelAccum::sum_s` etc.) are the same two-line accumulate + one
-// conditional four-line finish at every call site, independent of lane
-// width or which concrete SIMD backend produced the row's `s`/`d` values.
-// Before this pair of helpers the sequence was hand-duplicated at 6 vector
-// sites (`_v4`'s and `_v4x`'s native f32x16 main loops, `_v4`'s and `_v4x`'s
-// f32x8 REMAINDER loops via `token.v3()`, `_v3`'s native f32x8 main loop,
-// and the `#[magetypes(neon, wasm128, scalar)]`-generated function's f32x8
-// main loop) plus 4 scalar-tail sites — the free-features doc's own count.
-// Consolidating the two WIDTHS into one generic definition each removes the
-// vector-site duplication (6 -> 2 source definitions, still 6 call sites)
-// and is also the "no waste, no effort duplication" extension point a
-// future `V1FreeExtras` variant (a "class C" slot — see the free-features
-// doc §4) can reuse without re-deriving or re-copying this arithmetic a
-// 7th/8th/9th time: add the new lane-accumulate step here once, call it
-// from wherever the new class needs it.
-//
-// `#[inline(always)]`, not `#[rite]`: both helpers are GENERIC over a
-// backend TRAIT (`T: F32x8Backend` / `T: F32x16Backend`), not a concrete
-// token, so there is no single `#[target_feature]` string to attach at the
-// definition site the way `#[rite]` needs for a concrete-token function —
-// each monomorphized instantiation inherits its caller's already-established
-// feature region purely through ordinary generic inlining, exactly like
-// every other `T: F32x8Backend`-generic kernel in this codebase
-// (`feature_v2.rs`'s `dense_block_kernel_generic`, `ssim_d_local_v`, etc.).
-// `dense_block_kernel_generic`'s own doc comment already carries the
-// MEASURED reason forcing the inline is mandatory here too: an un-inlined
-// generic SIMD helper compiles to a call into a `core::arch` shim OUTSIDE
-// the `#[target_feature]` region, measured as a 5.3x whole-extraction
-// regression on that kernel. Verified inlined away on this refactor: `nm -C`
-// on the compiled `ssim2_speed_bar` release binary shows the tier entry
-// points present (`zensim::fused::__arcane_fused_vblur_ssim_inner_{v3,v4,v4x}`)
-// and zero occurrences of `raw_moments_accumulate`/`raw_moments_finish`
-// anywhere in the binary — no un-inlined call site survives.
-
-/// Accumulate one row's contribution to the four free raw-moment lane sums.
-/// Bit-identical to the hand-inlined `fm_s = fm_s + s; …` sequence it
-/// replaces — same operations, same order, same intermediate rounding
-/// (`s * s` before adding, not any fused/reassociated form).
-/// Masked and IW pools of the v1 "372" extension, fused into the V sweep
-/// (revision 3 only). The separate passes — `simd_ops::ssim_signal_inline_both`,
-/// `edge_diff_channel_inline_both`, `build_inline_mse` — form exactly the same
-/// per-pixel values from the same inputs; what differs is the ORDER the f64
-/// chunk sums are added in (column-group-major here, row-major there), so the
-/// pooled slots move at the last f64 bits and the families are registered as
-/// a moved era. `act` is the V-blurred activity `blur(|src - H(src)|)`, from
-/// the `h_act` plane the caller H-blurred; its V recurrence is the same
-/// `sum + add - rem` the other four planes use.
 #[derive(Clone, Copy, Default, Debug)]
 pub(crate) struct ExtPoolsWork {
     /// Any of it at all. When false every `h_act` read is skipped.
@@ -233,56 +180,11 @@ fn ext_accumulate_scalar(
     }
 }
 
-// ============================================================
-// Free BOUNDED-ERROR accumulation (class C) — shared across every SIMD tier
-// (`benchmarks/free_features_classC_2026-09-04.md`)
-// ============================================================
-//
-// The SECOND free tranche this kernel can carry, and the extension point the
-// raw-moments note above was written for: `Σ mse_i` and the two luminance-
-// binned weighted sums of the same `mse_i`, where
-//
-//     mse_i = sat((s − d)², C_MSE)          [`feature_v2::C_MSE`]
-//     t     = sat(ref_Y,     C_LUM_T)       [`feature_v2::C_LUM_T`]
-//
-// are per-pixel functions of values ALREADY LIVE in this kernel's registers:
-// `pd = s − d` is computed one line above for `acc.mse`, and for the Y
-// channel the reference-luma plane IS this channel's `src` (the append
-// kernel keeps `ref_y` a separate argument only so the weight is explicitly
-// a function of the reference — `feature_v2::csfw_block_kernel_generic`'s
-// own note). So no new plane, no new load, no new pass — the class-C
-// definition.
-//
-// They finalize four families of 944 slots the v1-only walk otherwise leaves
-// at their structural zeros:
-//   * v2-348 `MSE`      (12 cells) — `clamp01(Σ mse_i / n)`
-//   * append `LUM_DARK_ERR` / `LUM_MID_ERR` / `LUM_BRIGHT_ERR` (Y, 4 scales
-//     = 12 slots) — the Bernstein-partition dark/bright weighted means, with
-//     mid DERIVED at finalize exactly as `finish_append` derives it.
-// No slot is renumbered and none is invented: these are existing 944-layout
-// positions, filled by a cheaper route (the append-only feature-numbering
-// discipline).
-//
-// Same `#[inline(always)]`-generic-over-a-backend-trait shape, and the same
-// MEASURED reason for it, as the raw-moments pair above — see that comment;
-// `#[rite]` cannot apply to a function generic over a backend TRAIT.
-
-/// `feature_v2::C_MSE` as `f32`. Duplicated (not imported) because
-/// `feature_v2` is behind the `feature-regime-v2` feature while this module
-/// is unconditional; `feature_v2::tests::class_c_kernel_constants_match`
-/// fails the build if the two ever disagree.
 pub(crate) const C_MSE_F32: f32 = 0.01;
 /// `feature_v2::C_LUM_T` as `f32`. Same duplication contract as
 /// [`C_MSE_F32`].
 pub(crate) const C_LUM_T_F32: f32 = 0.35;
 
-/// Which FREE extra accumulators the fused v1 kernel carries this call.
-///
-/// Replaces the previous bare boolean `raw_moments` parameter: the class-C
-/// tranche adds two more independently-requestable accumulator groups, and
-/// one `Copy` struct keeps every kernel signature at ONE free-extras
-/// parameter instead of three parallel bools. All-false is the pre-existing
-/// instruction sequence, unchanged.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct FreeExtrasWork {
     /// Explicit per-request SSIM arithmetic; None retains research defaults.
@@ -331,13 +233,6 @@ pub(crate) struct StripChannelAccum {
     pub ssim_max: f32,
     pub edge_art_max: f32,
     pub edge_det_max: f32,
-    // --- Free raw moments (`raw_moments`; zero and untouched otherwise) ---
-    // Σsrc, Σdst, Σsrc², Σdst² over the inner rows. Written ONLY when the
-    // caller asks; every existing field's value and accumulation order is
-    // unchanged whether it asks or not.
-    // --- Free bounded error (`FreeExtrasWork::bounded_err` / `lum_bins`;
-    //     zero and untouched otherwise) ---
-    // Fused v1-extension pools (`ExtPoolsWork`), revision 3 only.
     pub masked_ssim_d: f64,
     pub masked_ssim_d4: f64,
     pub masked_ssim_d2: f64,
@@ -442,21 +337,10 @@ pub(crate) fn fused_vblur_features_ssim(
     ssq_out: &mut [f32],
     s12_out: &mut [f32],
     store_sigma: bool,
-    // `free`: which FREE extra accumulators to carry alongside the existing
-    // sums — the four raw moments (Σs, Σd, Σs², Σd²) and/or the class-C
-    // bounded-error family. See [`FreeExtrasWork`] and
-    // `StripChannelAccum::sum_s` / `sum_msat`.
     free: FreeExtrasWork,
     ext: ExtPoolsWork,
     h_act: &[f32],
 ) -> StripChannelAccum {
-    // Revision 3 is FUSED: the H pass already carries `Σ(a-b)²` in the
-    // `h_sigma12` plane (see `blur::fused_blur_h_ssim`), so the V pass forms
-    // the direct-error dissimilarity from the same four V-blurred planes it
-    // always had — no second traversal. The exact f64 second-pass kernel this
-    // replaced measured at 22% of the whole walk (perf, fold944_full@2048^2)
-    // and is kept in `ssim_form` as the reference the bounded-error tests
-    // measure against.
     let direct = free.revision() >= crate::feature_defs::FormulaRevision::Rev5;
     // Canonical arithmetic follows THIS computation's revision (featcanon D1).
     let mode = crate::featcanon::mode(free.revision());
@@ -526,15 +410,6 @@ pub(crate) fn fused_vblur_features_ssim(
     )
 }
 
-/// Fused V-blur + feature extraction for edge-only channels (no SSIM).
-///
-/// Reads 4 inputs: 2 H-blurred planes (h_mu1, h_mu2) + raw src + dst.
-/// Maintains 2 V-blur running sums per column group.
-/// Computes edge, variance, texture, and MSE features inline.
-///
-/// `revision` is the computation's formula revision; it selects the canonical
-/// body at Rev4 (featcanon D1) and nothing else. Revision 7 changes the edge
-/// ratio's form, but no canonical revision takes this route.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn fused_vblur_features_edge(
     h_mu1: &[f32],
@@ -561,8 +436,6 @@ pub(crate) fn fused_vblur_features_edge(
     let mode = crate::featcanon::mode(crate::ssim_form::effective_revision(revision));
     match mode {
         crate::featcanon::Mode::Canon64 => {
-            // rev4vec2: Rec64 → the chunked f32x8/f64x8 body on the fused-FMA
-            // tiers; any other (oracle) axis keeps the scalar canonical body.
             if matches!(
                 crate::featcanon::canon_blur_axis(mode),
                 crate::featcanon::BlurMode::Rec64
@@ -687,13 +560,7 @@ fn fused_vblur_ssim_inner_v4(
     ssq_out: &mut [f32],
     s12_out: &mut [f32],
     store_sigma: bool,
-    // `free`: which FREE extra accumulators to carry alongside the existing
-    // sums — the four raw moments (Σs, Σd, Σs², Σd²) and/or the class-C
-    // bounded-error family. See [`FreeExtrasWork`] and
-    // `StripChannelAccum::sum_s` / `sum_msat`.
     free: FreeExtrasWork,
-    // Revision 3: form the dissimilarity with the direct-error moment that the
-    // H pass put in `h_sigma12` (see `blur::fused_blur_h_ssim`).
     direct: bool,
     ext: ExtPoolsWork,
     h_act: &[f32],
@@ -789,7 +656,6 @@ fn fused_vblur_ssim_inner_v4(
             f32x16::zero_t(token),
             f32x16::zero_t(token),
         );
-        // Revision 2\'s paired second moment (see `raw_moments_accumulate16`).
         let mut _fm_dd = f32x16::zero_t(token);
         let mut _fm_ds = f32x16::zero_t(token);
         // Free bounded-error lane accumulators (`false` /
@@ -909,32 +775,6 @@ fn fused_vblur_ssim_inner_v4(
                     let act = sum_act * inv_v;
                     ext_accumulate16(token, &mut acc, sd, ed, pd, act, ext);
                 }
-
-                // === Free raw moments (`raw_moments`) ===
-                // Plain sums of the raw pixels already in registers — no
-                // new plane, no new load, no new pass. They finalize the
-                // append block's GLOBAL_DMEAN / GLOBAL_CGAIN / GLOBAL_CLOSS
-                // and append2's LUMA_MEAN_REF, which are the only 944 slots
-                // whose value is a function of the RAW planes alone (see
-                // `benchmarks/free_features_2026-09-01.md`). UNLIKE every
-                // f64-reduce accumulator above it, this vector-adds across
-                // rows (`fm_*`) with no per-row reduce_add, then reduces
-                // ONCE at the band's last inner row — reduce_add is a
-                // horizontal SIMD op, so 4 of them every row (one per
-                // accumulator) is the shape this avoids; the doc above
-                // prices the result. The vector sum is bounded to
-                // `V1_BAND_ROWS` (32) rows of f32 before the f64 upgrade,
-                // so the reorder costs negligible precision: worst |Δ| vs
-                // the 944 append block is 5.35e-6 (was 4.62e-6 pre-batch),
-                // ~2 orders below the module's 5e-4 tolerance
-                // (`free_extras_match_the_944_append_block`).
-
-                // === Free BOUNDED ERROR (`false` / `lum_bins`) ===
-                // `pd` is the same register the `acc.mse` line above just
-                // used; `s` is this channel's source row, which for the Y
-                // channel IS the reference-luma plane the bins weight by.
-                // No new plane, no new load, no new pass (class C — see the
-                // helper block at the top of this module).
             }
 
             // Slide V-blur window
@@ -990,7 +830,6 @@ fn fused_vblur_ssim_inner_v4(
             f32x8::zero_t(v3),
             f32x8::zero_t(v3),
         );
-        // Revision 2\'s paired second moment (see `raw_moments_accumulate16`).
         let mut _fm_dd = f32x8::zero_t(v3);
         let mut _fm_ds = f32x8::zero_t(v3);
         // Free bounded-error lane accumulators (`false` /
@@ -1102,32 +941,6 @@ fn fused_vblur_ssim_inner_v4(
                     let act = sum_act * inv_v8;
                     ext_accumulate8(v3, &mut acc, sd, ed, pd, act, ext);
                 }
-
-                // === Free raw moments (`raw_moments`) ===
-                // Plain sums of the raw pixels already in registers — no
-                // new plane, no new load, no new pass. They finalize the
-                // append block's GLOBAL_DMEAN / GLOBAL_CGAIN / GLOBAL_CLOSS
-                // and append2's LUMA_MEAN_REF, which are the only 944 slots
-                // whose value is a function of the RAW planes alone (see
-                // `benchmarks/free_features_2026-09-01.md`). UNLIKE every
-                // f64-reduce accumulator above it, this vector-adds across
-                // rows (`fm_*`) with no per-row reduce_add, then reduces
-                // ONCE at the band's last inner row — reduce_add is a
-                // horizontal SIMD op, so 4 of them every row (one per
-                // accumulator) is the shape this avoids; the doc above
-                // prices the result. The vector sum is bounded to
-                // `V1_BAND_ROWS` (32) rows of f32 before the f64 upgrade,
-                // so the reorder costs negligible precision: worst |Δ| vs
-                // the 944 append block is 5.35e-6 (was 4.62e-6 pre-batch),
-                // ~2 orders below the module's 5e-4 tolerance
-                // (`free_extras_match_the_944_append_block`).
-
-                // === Free BOUNDED ERROR (`false` / `lum_bins`) ===
-                // `pd` is the same register the `acc.mse` line above just
-                // used; `s` is this channel's source row, which for the Y
-                // channel IS the reference-luma plane the bins weight by.
-                // No new plane, no new load, no new pass (class C — see the
-                // helper block at the top of this module).
             }
 
             let add_idx = vblur_add_idx(y, r, height);
@@ -1165,12 +978,6 @@ fn fused_vblur_ssim_inner_v4(
         // at the band's last inner row (see `raw_moments`). Dead code when
         // the caller did not ask.
         let (mut _fm_s, mut _fm_d, mut _fm_s2, mut _fm_d2) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
-        // Revision 2's paired second moment and first difference (see
-        // `raw_moments_accumulate16`).
-        // Free bounded-error lane accumulators (`false` /
-        // `false`) — same band-batched shape and rationale as
-        // `fm_*` above: vector-add every row, reduce ONCE at the band's
-        // last inner row.
         let (mut _be_m, mut _be_wdn, mut _be_wdd, mut _be_wbn, mut _be_wbd) =
             (0.0f32, 0.0f32, 0.0f32, 0.0f32, 0.0f32);
 
@@ -1269,13 +1076,6 @@ fn fused_vblur_ssim_inner_v4(
                 }
 
                 // === Free raw moments (`raw_moments`) — scalar tail ===
-
-                // === Free BOUNDED ERROR (`false` / `lum_bins`) ===
-                // `pd` is the same register the `acc.mse` line above just
-                // used; `s` is this channel's source row, which for the Y
-                // channel IS the reference-luma plane the bins weight by.
-                // No new plane, no new load, no new pass (class C — see the
-                // helper block at the top of this module).
             }
 
             let add_idx = vblur_add_idx(y, r, height);
@@ -1315,13 +1115,7 @@ fn fused_vblur_ssim_inner_v4x(
     ssq_out: &mut [f32],
     s12_out: &mut [f32],
     store_sigma: bool,
-    // `free`: which FREE extra accumulators to carry alongside the existing
-    // sums — the four raw moments (Σs, Σd, Σs², Σd²) and/or the class-C
-    // bounded-error family. See [`FreeExtrasWork`] and
-    // `StripChannelAccum::sum_s` / `sum_msat`.
     free: FreeExtrasWork,
-    // Revision 3: form the dissimilarity with the direct-error moment that the
-    // H pass put in `h_sigma12` (see `blur::fused_blur_h_ssim`).
     direct: bool,
     ext: ExtPoolsWork,
     h_act: &[f32],
@@ -1417,7 +1211,6 @@ fn fused_vblur_ssim_inner_v4x(
             f32x16::zero_t(token),
             f32x16::zero_t(token),
         );
-        // Revision 2\'s paired second moment (see `raw_moments_accumulate16`).
         let mut _fm_dd = f32x16::zero_t(token);
         let mut _fm_ds = f32x16::zero_t(token);
         // Free bounded-error lane accumulators (`false` /
@@ -1537,32 +1330,6 @@ fn fused_vblur_ssim_inner_v4x(
                     let act = sum_act * inv_v;
                     ext_accumulate16(token, &mut acc, sd, ed, pd, act, ext);
                 }
-
-                // === Free raw moments (`raw_moments`) ===
-                // Plain sums of the raw pixels already in registers — no
-                // new plane, no new load, no new pass. They finalize the
-                // append block's GLOBAL_DMEAN / GLOBAL_CGAIN / GLOBAL_CLOSS
-                // and append2's LUMA_MEAN_REF, which are the only 944 slots
-                // whose value is a function of the RAW planes alone (see
-                // `benchmarks/free_features_2026-09-01.md`). UNLIKE every
-                // f64-reduce accumulator above it, this vector-adds across
-                // rows (`fm_*`) with no per-row reduce_add, then reduces
-                // ONCE at the band's last inner row — reduce_add is a
-                // horizontal SIMD op, so 4 of them every row (one per
-                // accumulator) is the shape this avoids; the doc above
-                // prices the result. The vector sum is bounded to
-                // `V1_BAND_ROWS` (32) rows of f32 before the f64 upgrade,
-                // so the reorder costs negligible precision: worst |Δ| vs
-                // the 944 append block is 5.35e-6 (was 4.62e-6 pre-batch),
-                // ~2 orders below the module's 5e-4 tolerance
-                // (`free_extras_match_the_944_append_block`).
-
-                // === Free BOUNDED ERROR (`false` / `lum_bins`) ===
-                // `pd` is the same register the `acc.mse` line above just
-                // used; `s` is this channel's source row, which for the Y
-                // channel IS the reference-luma plane the bins weight by.
-                // No new plane, no new load, no new pass (class C — see the
-                // helper block at the top of this module).
             }
 
             // Slide V-blur window
@@ -1618,7 +1385,6 @@ fn fused_vblur_ssim_inner_v4x(
             f32x8::zero_t(v3),
             f32x8::zero_t(v3),
         );
-        // Revision 2\'s paired second moment (see `raw_moments_accumulate16`).
         let mut _fm_dd = f32x8::zero_t(v3);
         let mut _fm_ds = f32x8::zero_t(v3);
         // Free bounded-error lane accumulators (`false` /
@@ -1730,32 +1496,6 @@ fn fused_vblur_ssim_inner_v4x(
                     let act = sum_act * inv_v8;
                     ext_accumulate8(v3, &mut acc, sd, ed, pd, act, ext);
                 }
-
-                // === Free raw moments (`raw_moments`) ===
-                // Plain sums of the raw pixels already in registers — no
-                // new plane, no new load, no new pass. They finalize the
-                // append block's GLOBAL_DMEAN / GLOBAL_CGAIN / GLOBAL_CLOSS
-                // and append2's LUMA_MEAN_REF, which are the only 944 slots
-                // whose value is a function of the RAW planes alone (see
-                // `benchmarks/free_features_2026-09-01.md`). UNLIKE every
-                // f64-reduce accumulator above it, this vector-adds across
-                // rows (`fm_*`) with no per-row reduce_add, then reduces
-                // ONCE at the band's last inner row — reduce_add is a
-                // horizontal SIMD op, so 4 of them every row (one per
-                // accumulator) is the shape this avoids; the doc above
-                // prices the result. The vector sum is bounded to
-                // `V1_BAND_ROWS` (32) rows of f32 before the f64 upgrade,
-                // so the reorder costs negligible precision: worst |Δ| vs
-                // the 944 append block is 5.35e-6 (was 4.62e-6 pre-batch),
-                // ~2 orders below the module's 5e-4 tolerance
-                // (`free_extras_match_the_944_append_block`).
-
-                // === Free BOUNDED ERROR (`false` / `lum_bins`) ===
-                // `pd` is the same register the `acc.mse` line above just
-                // used; `s` is this channel's source row, which for the Y
-                // channel IS the reference-luma plane the bins weight by.
-                // No new plane, no new load, no new pass (class C — see the
-                // helper block at the top of this module).
             }
 
             let add_idx = vblur_add_idx(y, r, height);
@@ -1793,12 +1533,6 @@ fn fused_vblur_ssim_inner_v4x(
         // at the band's last inner row (see `raw_moments`). Dead code when
         // the caller did not ask.
         let (mut _fm_s, mut _fm_d, mut _fm_s2, mut _fm_d2) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
-        // Revision 2's paired second moment and first difference (see
-        // `raw_moments_accumulate16`).
-        // Free bounded-error lane accumulators (`false` /
-        // `false`) — same band-batched shape and rationale as
-        // `fm_*` above: vector-add every row, reduce ONCE at the band's
-        // last inner row.
         let (mut _be_m, mut _be_wdn, mut _be_wdd, mut _be_wbn, mut _be_wbd) =
             (0.0f32, 0.0f32, 0.0f32, 0.0f32, 0.0f32);
 
@@ -1897,13 +1631,6 @@ fn fused_vblur_ssim_inner_v4x(
                 }
 
                 // === Free raw moments (`raw_moments`) — scalar tail ===
-
-                // === Free BOUNDED ERROR (`false` / `lum_bins`) ===
-                // `pd` is the same register the `acc.mse` line above just
-                // used; `s` is this channel's source row, which for the Y
-                // channel IS the reference-luma plane the bins weight by.
-                // No new plane, no new load, no new pass (class C — see the
-                // helper block at the top of this module).
             }
 
             let add_idx = vblur_add_idx(y, r, height);
@@ -1948,13 +1675,7 @@ fn fused_vblur_ssim_inner_v3(
     ssq_out: &mut [f32],
     s12_out: &mut [f32],
     store_sigma: bool,
-    // `free`: which FREE extra accumulators to carry alongside the existing
-    // sums — the four raw moments (Σs, Σd, Σs², Σd²) and/or the class-C
-    // bounded-error family. See [`FreeExtrasWork`] and
-    // `StripChannelAccum::sum_s` / `sum_msat`.
     free: FreeExtrasWork,
-    // Revision 3: form the dissimilarity with the direct-error moment that the
-    // H pass put in `h_sigma12` (see `blur::fused_blur_h_ssim`).
     direct: bool,
     ext: ExtPoolsWork,
     h_act: &[f32],
@@ -2046,7 +1767,6 @@ fn fused_vblur_ssim_inner_v3(
             f32x8::zero_t(token),
             f32x8::zero_t(token),
         );
-        // Revision 2\'s paired second moment (see `raw_moments_accumulate16`).
         let mut _fm_dd = f32x8::zero_t(token);
         let mut _fm_ds = f32x8::zero_t(token);
         // Free bounded-error lane accumulators (`false` /
@@ -2160,32 +1880,6 @@ fn fused_vblur_ssim_inner_v3(
                     let act = sum_act * inv_v;
                     ext_accumulate8(token, &mut acc, sd, ed, pd, act, ext);
                 }
-
-                // === Free raw moments (`raw_moments`) ===
-                // Plain sums of the raw pixels already in registers — no
-                // new plane, no new load, no new pass. They finalize the
-                // append block's GLOBAL_DMEAN / GLOBAL_CGAIN / GLOBAL_CLOSS
-                // and append2's LUMA_MEAN_REF, which are the only 944 slots
-                // whose value is a function of the RAW planes alone (see
-                // `benchmarks/free_features_2026-09-01.md`). UNLIKE every
-                // f64-reduce accumulator above it, this vector-adds across
-                // rows (`fm_*`) with no per-row reduce_add, then reduces
-                // ONCE at the band's last inner row — reduce_add is a
-                // horizontal SIMD op, so 4 of them every row (one per
-                // accumulator) is the shape this avoids; the doc above
-                // prices the result. The vector sum is bounded to
-                // `V1_BAND_ROWS` (32) rows of f32 before the f64 upgrade,
-                // so the reorder costs negligible precision: worst |Δ| vs
-                // the 944 append block is 5.35e-6 (was 4.62e-6 pre-batch),
-                // ~2 orders below the module's 5e-4 tolerance
-                // (`free_extras_match_the_944_append_block`).
-
-                // === Free BOUNDED ERROR (`false` / `lum_bins`) ===
-                // `pd` is the same register the `acc.mse` line above just
-                // used; `s` is this channel's source row, which for the Y
-                // channel IS the reference-luma plane the bins weight by.
-                // No new plane, no new load, no new pass (class C — see the
-                // helper block at the top of this module).
             }
 
             let add_idx = vblur_add_idx(y, r, height);
@@ -2226,12 +1920,6 @@ fn fused_vblur_ssim_inner_v3(
         // at the band's last inner row (see `raw_moments`). Dead code when
         // the caller did not ask.
         let (mut _fm_s, mut _fm_d, mut _fm_s2, mut _fm_d2) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
-        // Revision 2's paired second moment and first difference (see
-        // `raw_moments_accumulate16`).
-        // Free bounded-error lane accumulators (`false` /
-        // `false`) — same band-batched shape and rationale as
-        // `fm_*` above: vector-add every row, reduce ONCE at the band's
-        // last inner row.
         let (mut _be_m, mut _be_wdn, mut _be_wdd, mut _be_wbn, mut _be_wbd) =
             (0.0f32, 0.0f32, 0.0f32, 0.0f32, 0.0f32);
 
@@ -2330,13 +2018,6 @@ fn fused_vblur_ssim_inner_v3(
                 }
 
                 // === Free raw moments (`raw_moments`) — scalar tail ===
-
-                // === Free BOUNDED ERROR (`false` / `lum_bins`) ===
-                // `pd` is the same register the `acc.mse` line above just
-                // used; `s` is this channel's source row, which for the Y
-                // channel IS the reference-luma plane the bins weight by.
-                // No new plane, no new load, no new pass (class C — see the
-                // helper block at the top of this module).
             }
 
             let add_idx = vblur_add_idx(y, r, height);
@@ -2380,13 +2061,7 @@ fn fused_vblur_ssim_inner(
     ssq_out: &mut [f32],
     s12_out: &mut [f32],
     store_sigma: bool,
-    // `free`: which FREE extra accumulators to carry alongside the existing
-    // sums — the four raw moments (Σs, Σd, Σs², Σd²) and/or the class-C
-    // bounded-error family. See [`FreeExtrasWork`] and
-    // `StripChannelAccum::sum_s` / `sum_msat`.
     free: FreeExtrasWork,
-    // Revision 3: form the dissimilarity with the direct-error moment that the
-    // H pass put in `h_sigma12` (see `blur::fused_blur_h_ssim`).
     direct: bool,
     ext: ExtPoolsWork,
     h_act: &[f32],
@@ -2422,7 +2097,6 @@ fn fused_vblur_ssim_inner(
             f32x8::zero_t(token),
             f32x8::zero_t(token),
         );
-        // Revision 2\'s paired second moment (see `raw_moments_accumulate16`).
         let mut _fm_dd = f32x8::zero_t(token);
         let mut _fm_ds = f32x8::zero_t(token);
         // Free bounded-error lane accumulators (`false` /
@@ -2553,32 +2227,6 @@ fn fused_vblur_ssim_inner(
                     let act = f32x8::from_array_t(token, sum_act_a) * inv_v;
                     ext_accumulate8(token, &mut acc, sd, ed, pd, act, ext);
                 }
-
-                // === Free raw moments (`raw_moments`) ===
-                // Plain sums of the raw pixels already in registers — no
-                // new plane, no new load, no new pass. They finalize the
-                // append block's GLOBAL_DMEAN / GLOBAL_CGAIN / GLOBAL_CLOSS
-                // and append2's LUMA_MEAN_REF, which are the only 944 slots
-                // whose value is a function of the RAW planes alone (see
-                // `benchmarks/free_features_2026-09-01.md`). UNLIKE every
-                // f64-reduce accumulator above it, this vector-adds across
-                // rows (`fm_*`) with no per-row reduce_add, then reduces
-                // ONCE at the band's last inner row — reduce_add is a
-                // horizontal SIMD op, so 4 of them every row (one per
-                // accumulator) is the shape this avoids; the doc above
-                // prices the result. The vector sum is bounded to
-                // `V1_BAND_ROWS` (32) rows of f32 before the f64 upgrade,
-                // so the reorder costs negligible precision: worst |Δ| vs
-                // the 944 append block is 5.35e-6 (was 4.62e-6 pre-batch),
-                // ~2 orders below the module's 5e-4 tolerance
-                // (`free_extras_match_the_944_append_block`).
-
-                // === Free BOUNDED ERROR (`false` / `lum_bins`) ===
-                // `pd` is the same register the `acc.mse` line above just
-                // used; `s` is this channel's source row, which for the Y
-                // channel IS the reference-luma plane the bins weight by.
-                // No new plane, no new load, no new pass (class C — see the
-                // helper block at the top of this module).
             }
 
             // Slide V-blur window
@@ -2625,12 +2273,6 @@ fn fused_vblur_ssim_inner(
         // at the band's last inner row (see `raw_moments`). Dead code when
         // the caller did not ask.
         let (mut _fm_s, mut _fm_d, mut _fm_s2, mut _fm_d2) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
-        // Revision 2's paired second moment and first difference (see
-        // `raw_moments_accumulate16`).
-        // Free bounded-error lane accumulators (`false` /
-        // `false`) — same band-batched shape and rationale as
-        // `fm_*` above: vector-add every row, reduce ONCE at the band's
-        // last inner row.
         let (mut _be_m, mut _be_wdn, mut _be_wdd, mut _be_wbn, mut _be_wbd) =
             (0.0f32, 0.0f32, 0.0f32, 0.0f32, 0.0f32);
 
@@ -2729,13 +2371,6 @@ fn fused_vblur_ssim_inner(
                 }
 
                 // === Free raw moments (`raw_moments`) — scalar tail ===
-
-                // === Free BOUNDED ERROR (`false` / `lum_bins`) ===
-                // `pd` is the same register the `acc.mse` line above just
-                // used; `s` is this channel's source row, which for the Y
-                // channel IS the reference-luma plane the bins weight by.
-                // No new plane, no new load, no new pass (class C — see the
-                // helper block at the top of this module).
             }
 
             let add_idx = vblur_add_idx(y, r, height);
@@ -3799,15 +3434,6 @@ impl VblurPools<crate::featcanon::Lanes16F32> {
     }
 }
 
-// ============================================================
-// featacc blur axis: the V-blur window state behind the fused
-// canon/exact bodies. `Rec` is the shipped per-column f32 sliding
-// sums (bit-identical to production — a product build has only
-// this variant and `blur_axis()` is a constant `Rec` there).
-// `Rec64` runs the same recurrence in f64; `Fresh` keeps no state
-// at all — `at*` re-sums the window per position in f64.
-// ============================================================
-
 /// The blurred planes a V window reads, plus its geometry.
 struct VWinPlanes<'a> {
     m1: &'a [f32],
@@ -3836,8 +3462,6 @@ impl VWinPlanes<'_> {
 }
 
 enum VWin {
-    /// The same sliding recurrence in f64 — THE REV4 CANON's window state
-    /// (rev4canon: `BlurMode::Rec64`).
     F64 {
         m1: Vec<f64>,
         m2: Vec<f64>,
@@ -3845,9 +3469,6 @@ enum VWin {
         s12: Vec<f64>,
         act: Vec<f64>,
     },
-    /// No state — per-position f32 `localwin` pair tree — THE REV5 CANON's
-    /// window (`BlurMode::Local`). Also the measurement arm for an explicit
-    /// `ZENSIM_FEATCANON_BLUR=local`.
     Local,
 }
 
@@ -4001,9 +3622,6 @@ impl VWin {
         }
     }
 
-    /// The `F64` variant's five per-column f64 window states — `None` on the
-    /// other variants. The canon64 vector bodies are entered only under
-    /// `BlurMode::Rec64` (the caller's axis gate), which constructs `F64`.
     #[inline(always)]
     fn f64_states(&self) -> Option<[&[f64]; 5]> {
         match self {
@@ -4019,21 +3637,6 @@ impl VWin {
     }
 } // impl VWin
 
-/// [`VWin::slide`]'s `F64` arm with each column's `state + add − rem`
-/// evaluated eight columns at a time through `f64x8` — per-column op
-/// sequence identical (the recurrence is per-column; SIMD lanes never
-/// mix), `width % 8` tail scalar. Other variants fall through to `slide`;
-/// the canon64 vector bodies invoke this only on `F64`.
-///
-/// This is a macro, not a method: the `f64x8` ops must compile INSIDE each
-/// caller's `#[target_feature]` region — a trait-generic helper left
-/// out-of-line compiles each op into a call to a `core::arch` shim that
-/// cannot inline back (the measured dominant single-kernel cost of the Rev4
-/// bake; see the note above `raw_moments_accumulate16`). `#[inline(always)]`
-/// on the equivalent method was still emitted as an out-of-line call, so the
-/// body expands at each call site instead. `f64x8` resolves to each
-/// `#[magetypes]` caller's per-tier alias. The `chunks_exact` iterators keep
-/// every load/store bounds-check-free without unsafe.
 #[cfg(target_arch = "x86_64")] // only the x86_64 canon64 bodies invoke it
 macro_rules! vwin_slide64x8 {
     ($win:expr, $token:expr, $y:expr, $p:expr) => {{
@@ -4283,8 +3886,6 @@ fn fused_vblur_ssim_canon<P: crate::featcanon::Pool>(
     direct: bool,
     ext: ExtPoolsWork,
     h_act: &[f32],
-    // The computation's canonical mode — selects the blur window's own
-    // arithmetic (`canon_blur_axis`): `Rec64` under the c64 canon.
     mode: crate::featcanon::Mode,
 ) -> StripChannelAccum {
     let form = free.luma_form();
@@ -4293,9 +3894,6 @@ fn fused_vblur_ssim_canon<P: crate::featcanon::Pool>(
     let r = radius;
     let inner_end = inner_start + inner_h;
 
-    // rev4canon: the mode's OWN blur axis — `Rec64` under the c64 canon,
-    // `Local` under this computation's Rev5 era, `Rec` only for the
-    // superseded `c32` oracle reproduction.
     let planes = VWinPlanes {
         m1: h_mu1,
         m2: h_mu2,
@@ -4565,30 +4163,6 @@ fn fused_vblur_ssim_local<P: crate::featcanon::Pool>(
     acc
 }
 
-/// **canon64 vector body** — [`fused_vblur_ssim_canon`]'s `P = LanesF64` arm
-/// over the `Rec64` window, with the ~30 pool element formulas evaluated
-/// eight columns at a time through `f32x8`, the `(state * inv64) as f32`
-/// window reads through `f64x8`, and the `width % 8` tail on
-/// [`vblur_ssim_elem_canon`] — literally the scalar element step.
-///
-/// **Why this is bit-identical to the `LanesF64` scalar body.** Every
-/// column is an independent computation: the Rec64 window slides per
-/// column (`state + add − rem`, elementwise — `vwin_slide64x8!`), `at32`
-/// is a per-element `* inv64` + single f64→f32 narrow, every element
-/// formula is elementwise across columns, and pool adds are lane-local.
-/// Column `x` maps to canonical lane `x & 7`, so an 8-aligned chunk's
-/// `to_array()` lanes ARE the canonical lanes in order — each chunk add is
-/// `add(l, v_l)` for `l = 0..8` with the same values in the same pool, in
-/// the same per-pool order. No reduction is reassociated. The `mul_add`
-/// spellings are `SsimSplats8`'s — the documented same-op-sequence sibling
-/// of `ssim_dissim_raw_scalar`/`ssim_direct_raw_scalar` — fused FMA on
-/// v3/v4/v4x/NEON.
-///
-/// Entered only when [`crate::featcanon::canon_blur_axis`] resolves `Rec64`
-/// (the Canon64 arm's own axis; an oracle `ZENSIM_FEATCANON_BLUR` override
-/// falls back to the scalar body, which honours the other variants).
-/// `_scalar`/`_wasm128` keep the scalar canonical body: their `mul_add` is
-/// unfused either way, so the scalar body is already their exact form.
 #[magetypes(define(f32x8, f32x16, f64x8), v4x, v4, v3, -scalar)]
 #[allow(clippy::too_many_arguments)]
 fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
@@ -4687,11 +4261,6 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
             }
         }};
     }
-    // Pools whose features difference or ratio large sums keep f64 lanes
-    // (f32 row sums lose up to 2.4e-4 of those features to the
-    // cancellation): the band raw moments, and through revision 6 the v1
-    // variance, texture and contrast sums, which revision 7 accumulates in
-    // the f32 lanes as differences instead (`VblurPools::fold_into`).
     macro_rules! pool_add64 {
         ($tgt:ident, $field:ident, $x0:expr, $v:expr) => {{
             let values = ($v).to_array();
@@ -4945,9 +4514,6 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
                     }
                 }};
             }
-            // The configuration B and Tga run (radius 0, direct SSIM, edges and
-            // HF on, no peaks, extensions, free extras or stores) has its own
-            // loops at revision 7.
             let lean = rev7
                 && radius == 0
                 && direct
@@ -5599,15 +5165,11 @@ fn fused_vblur_edge_canon<P: crate::featcanon::Pool>(
     mu1_out: &mut [f32],
     mu2_out: &mut [f32],
     store_mu: bool,
-    // The computation's canonical mode — selects the blur window's own
-    // arithmetic (`canon_blur_axis`): `Rec64` under the c64 canon.
     mode: crate::featcanon::Mode,
 ) -> StripChannelAccum {
     let r = radius;
     let inner_end = inner_start + inner_h;
 
-    // rev4canon: the mode's OWN blur axis — `Rec64` under the c64 canon,
-    // `Rec` only for the superseded `c32` oracle reproduction.
     let planes = VWinPlanes {
         m1: h_mu1,
         m2: h_mu2,
@@ -5652,11 +5214,6 @@ fn fused_vblur_edge_canon<P: crate::featcanon::Pool>(
     acc
 }
 
-/// **canon64 vector body** — [`fused_vblur_edge_canon`]'s `P = LanesF64`
-/// arm over the `Rec64` window, same bit-identical construction as
-/// [`fused_vblur_ssim_canon64_vec`]: eight independent columns per
-/// `f32x8`/`f64x8` op, chunk lanes = canonical lanes, `width % 8` tail on
-/// [`vblur_edge_elem_canon`].
 #[magetypes(define(f32x8, f64x8), v4x, v4, v3, -scalar)]
 #[allow(clippy::too_many_arguments)]
 fn fused_vblur_edge_canon64_vec(
@@ -5898,11 +5455,6 @@ fn fused_vblur_edge_canon64_vec_neon(
 mod tests {
     use super::*;
 
-    /// REV4VEC2 bit-exactness gate: the f64x8/f32x8 canon64 vblur bodies
-    /// must reproduce the scalar `LanesF64` canonical body **bit for bit**
-    /// — every `StripChannelAccum` field and every stored output plane.
-    /// Each compiled tier variant is invoked directly on its summoned
-    /// token; `mode = Canon64` pins the Rec64 window axis.
     mod rev4vec2 {
         use super::*;
         use crate::featcanon::LanesF64;
@@ -6384,12 +5936,6 @@ mod tests {
             assert!(compiled >= 1);
         }
 
-        /// Revision 7's lean sixteen-column loop (the configuration B and Tga
-        /// run: radius 0, direct SSIM, edges and HF on, no peaks, extensions,
-        /// free extras or stores) against the generic chunk body: every
-        /// compiled tier and the scalar body accumulate the same bits, over
-        /// remainder columns, a single row and a width past the 4,096-column
-        /// fold.
         #[test]
         fn vblur_ssim_rev7_lean_loop_matches_every_tier() {
             let mut rng = Rng(0x7E57_1EA2_5EED_0007);

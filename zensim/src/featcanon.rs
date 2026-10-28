@@ -1,55 +1,14 @@
-//! Featcanon (2026-09-25): canonical feature arithmetic behind
-//! [`crate::feature_defs::FormulaRevision::Rev4`], plus the measurement
-//! substrate that chose it (`benchmarks/featcanon_WORKLOG.md`).
+//! Canonical feature accumulation and blur arithmetic.
 //!
-//! The problem: several extraction kernels emit different bits per SIMD tier
-//! because (a) `mul_add` is fused on v3/v4/neon but plain `a*b+c` on the
-//! magetypes scalar and wasm128 backends, (b) `reduce_add`'s tree is
-//! backend-defined (16-lane native on v4, 2×8-lane on v3, array-order on
-//! scalar), and (c) per-tier tail/chunk geometry differs (width-16 vs width-8
-//! vs remainder paths). [`era2_reduce8`] established the
-//! fix pattern for the dense block kernel; this module generalises it: one
-//! body, fixed virtual-lane accumulation, a written-out reduction tree, and
-//! `f32::mul_add` (the fused intrinsic on every target) wherever the formula
-//! is a product-sum.
-//!
-//! **The arithmetic is chosen PER COMPUTATION, never per process.** Every
-//! canonical leaf receives the revision of the computation it serves and asks
-//! [`mode`] with it. `ZENSIM_FORMULA_REV` does not reach a leaf through this
-//! module: it only chooses which revision a caller that did not name one
-//! gets, and the entries refuse every request whose revision disagrees with
-//! the process revision when either is Rev4 (see
-//! [`crate::ssim_form::refuse_rev4_mix`]), because other formula gates still
-//! read the process switch.
-//!
-//! **Served at Rev4 (REV4SERVE).** The served leaves are canonical too:
-//! the PU front end runs `color::pu_xyb_canon` over the `_at_revision`
-//! transfer decoders, `streaming::active_channels` routes every active
-//! channel through the fused SSIM kernels at Rev4 (the edge-only
-//! `blur::fused_blur_h_mu` chain and the MSE-only `sq_diff_sum` leaf never
-//! run), and the fold walk's block kernels already select their canon arms.
-//! Rev1–Rev3 bytes are unchanged; a Rev4 process serves Rev4 computations
-//! bit-identically across tiers, and [`crate::ssim_form::refuse_rev4_mix`]
-//! keeps every cross-boundary mix refused.
-//!
-//! **Measurement modes are not in a product build.** `ZENSIM_FEATCANON`
-//! (`exact`/`c32`/`c64`/`neum`/`off`) and the f64 exact-oracle bodies exist
-//! only with the `oracle` cargo feature, the crate's precedent for a ruler
-//! that is not semantics. A product build knows two arithmetics: production
-//! (Rev1–Rev3) and [`Mode::Canon64`] (Rev4).
+//! Revision 1 retains legacy arithmetic. Revisions 5 and 7 use canonical
+//! accumulation; revision 7 also uses row lanes and stable difference forms.
 
 use crate::feature_defs::FormulaRevision;
 
 /// Arithmetic mode of the canonical leaves for ONE computation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Mode {
-    /// Production dispatch (no canonical routing): Rev1–Rev3.
     Off,
-    /// THE REV4 CANON (rev4canon): fused `mul_add` elements + fixed
-    /// 8-virtual-lane f64 partials + the same fixed pairwise reduction as
-    /// (d), over the f64 sliding blur recurrence ([`BlurMode::Rec64`]).
-    /// FEATACC's measured recommendation; the only arithmetic a product
-    /// build can select at Rev4.
     Canon64,
 }
 
@@ -60,27 +19,6 @@ impl Mode {
     }
 }
 
-/// The canonical-leaf arithmetic for a computation at `revision`.
-///
-/// `revision` is the revision the leaf's CALLER is computing — the one it
-/// already carries for its other formula gates (`fused_blur_h_ssim_at_revision`'s
-/// `revision`, `FreeExtrasWork::revision()`, `V2NewFeatureToggles::formula_revision`,
-/// `ZensimConfig::formula_revision`). `Rev4` selects [`Mode::Canon64`], the
-/// featacc-measured recommendation landed by rev4canon; every earlier revision
-/// selects [`Mode::Off`], so Rev1–Rev3 bytes cannot depend on this module.
-///
-/// With the `oracle` feature, `ZENSIM_FEATCANON` overrides the result for
-/// measurement (`exact`/`c32`/`c64`/`neum`, or `off` to force production even
-/// at Rev4). The override is read once per process; a product build does not
-/// contain it.
-///
-/// REV4SERVE reach note: the `_at_revision` PU-XYB/PU21/transfer decoders
-/// dispatch their canonical bodies on `mode(revision).active()`, so an
-/// oracle build's `ZENSIM_FEATCANON` forces canonical PU/transfer bits at
-/// Rev1–Rev3 where a product run uses the production bodies — the same
-/// convention `srgb_to_positive_xyb_planar_into_at_revision` already had.
-/// Measurement runs under that env get canon bits by design; product
-/// builds are unaffected (`mode() == Off` below Rev4).
 #[inline]
 pub(crate) fn mode(revision: FormulaRevision) -> Mode {
     if revision >= FormulaRevision::Rev5 {
@@ -90,26 +28,8 @@ pub(crate) fn mode(revision: FormulaRevision) -> Mode {
     }
 }
 
-// ============================================================================
-// The blur-recurrence axis (featacc) — `Rec64` is the Rev4 canon; the rest
-// of the axis is measurement-only
-// ============================================================================
-//
-// The blurred planes feeding every feature kernel carry a THIRD kind of
-// numerical error, separate from element rounding and accumulation order:
-// the production box/SSIM blurs evaluate each window by updating the
-// previous window's sum (`sum + add − rem`), so rounding error accrues
-// with position rather than being re-bounded per output. `BlurMode` names
-// the axis: `Rec64` is the Rev4 canon's choice; under `oracle`
-// `ZENSIM_FEATCANON_BLUR` isolates it for measurement:
-
-/// How the blur windows evaluate their sums. `Rec` is the shipped form for
-/// Rev1–Rev3; `Rec64` is the Rev4 canon; `Local` is the Rev5 canon.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BlurMode {
-    /// The same sliding recurrence in f64 — THE REV4 CANON's blur axis
-    /// (rev4canon). Under `oracle` it is also a measurement arm measuring
-    /// the f32 storage of the running sums, not the recurrence's existence.
     Rec64,
     /// THE REV5 CANON's blur axis (`localwin`): each output's 11-tap window
     /// is summed independently in f32 over the spec's fixed pair tree —
@@ -126,8 +46,6 @@ pub(crate) const fn canon_blur_axis(_mode: Mode) -> BlurMode {
     BlurMode::Rec64
 }
 
-/// Non-oracle sibling: `Local` at Rev5+, `Rec64` below (canonical bodies only
-/// run under an active canon mode, i.e. Rev4+).
 #[inline(always)]
 pub(crate) fn canon_blur_axis_for(
     _mode: Mode,
@@ -165,17 +83,6 @@ pub(crate) fn tap_mirror(j: isize, n: usize) -> usize {
 // Canonical accumulators — the three measured candidates
 // ============================================================================
 
-/// The era-2 horizontal reduction — **part of the semantics**.
-///
-/// Pairwise rather than sequential (tighter error, equally fixed), and written
-/// out rather than delegated: `GenericF32x8::reduce_add` resolves to a
-/// per-backend order (§14.2 of `benchmarks/era2_perf_break_2026-08-31.md`),
-/// so calling it would make the reduction tree an unspecified, tier-dependent
-/// operation — precisely what the era-2 identity theorem forbids.
-///
-/// Owned here, not in `feature_v2` (which re-exports it for the era-2 dense
-/// kernel), because the canonical leaves compile in every build and
-/// `feature_v2` exists only with `feature-regime-v2`.
 #[inline(always)]
 pub(crate) fn era2_reduce8(a: [f32; 8]) -> f64 {
     (((a[0] + a[1]) + (a[2] + a[3])) + ((a[4] + a[5]) + (a[6] + a[7]))) as f64
@@ -186,12 +93,6 @@ pub(crate) fn era2_reduce8(a: [f32; 8]) -> f64 {
 /// `benchmarks/era2_perf_break_2026-08-31.md` §2.0).
 pub(crate) const CANON_LANES: usize = 8;
 
-/// THE REV4 CANON (rev4canon): 8 f64 virtual lanes — same lane mapping and
-/// the same adjacent-pairwise tree shape as [`LanesF32`], but every partial
-/// is f64, so per-term error is only the term's own f32 rounding. FEATACC's
-/// recommendation (`c64`); under `oracle` also a measurement arm.
-///
-/// 64-byte aligned for the same reason as [`Lanes16F64`].
 #[derive(Debug, Clone, Copy, Default)]
 #[repr(align(64))]
 pub(crate) struct LanesF64(pub [f64; CANON_LANES]);
@@ -412,15 +313,10 @@ impl Pool for f64 {
 pub(crate) enum SumVar {
     /// Sequential f64 — production accumulation.
     Seq(f64),
-    /// 8 f64 lanes + the f64 pairwise tree — THE REV4 CANON (`c64`,
-    /// rev4canon); under `oracle` also the `c64` measurement arm.
     L64(LanesF64),
 }
 
 impl SumVar {
-    /// Variant for kernels whose summed terms are f64-native — `c32` keeps
-    /// `Seq` (production) so the f32-lane column never masks element error
-    /// as accumulation error; `c64` takes the f64 lanes (the Rev4 canon).
     pub(crate) fn f64_elems(mode: Mode) -> Self {
         match mode {
             Mode::Off => Self::Seq(0.0),

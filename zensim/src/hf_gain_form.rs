@@ -1,56 +1,7 @@
-//! THE v1 HF-energy ratio family — one owner for three expressions that were
-//! hand-copied at three sites, and the home of the **F17** fix.
+//! Pooled high-frequency loss and gain from variance and absolute-deviation ratios.
 //!
-//! # The family, and which member is broken
-//!
-//! v1's basic block ends with three ratio slots built from two pooled second
-//! moments (`var_* = Σ(x − μ)²/n`) and one pooled first absolute moment
-//! (`mad_* = Σ|x − μ|/n`):
-//!
-//! ```text
-//! var_loss     = max(0, 1 − var_dst/var_src)      bounded [0, 1]
-//! tex_loss     = max(0, 1 − mad_dst/mad_src)      bounded [0, 1]
-//! contrast_inc = max(0, var_dst/var_src − 1)      UNBOUNDED ABOVE
-//! ```
-//!
-//! All three are `max(0, ·)` of a difference over the **source** term. That
-//! bounds the two `loss` members structurally — their numerator can never
-//! exceed their denominator — and bounds nothing at all for the `gain` member,
-//! whose numerator is the distorted term. A flat source drives `var_src → 0`
-//! past the [`VAR_SRC_FLOOR`] gate while the distorted image still carries HF,
-//! and the ratio runs away. **The gate is a threshold, not a stabiliser**: it
-//! decides *whether* to divide, never *what* to divide by.
-//!
-//! # F17, measured
-//!
-//! Over the R6 rev1 tables — 216,756 real pairs, eight corpora, all 372 slots
-//! (`docs/PLAN_FEATURE_REV2_2026-09-05.md` §11.2): the twelve `contrast_inc`
-//! slots are the **top twelve of all 372 by maximum**, worst **36,465.74**, and
-//! the thirteenth slot is **1.972**. The population separates with no overlap.
-//! Against the gold photographic holdout's own p99.9 over those slots
-//! (CID22, 0.34687) the worst value is **×105,127**. Its two siblings max at
-//! exactly `1.000000`, as the algebra above says they must.
-//!
-//! This is **not** F4's shape. F4's 5.8e6 lives in a bigcodec sweep with no
-//! local pixels and fires on ZERO of those 216,756 rows; F17 fires on five
-//! distortion corpora and on the training leg, on 0.0198 % of cells.
-//!
-//! # The fixed form already exists one block over
-//!
-//! v2's `HF_GAIN` — the same quantity in the same units (squared XYB energy),
-//! computed per pixel instead of per pool — is
-//! `bounded_excess_pair(hf_dst², hf_src², C_HF)`, i.e.
-//! `max(0, a−b)/(a+b+C_HF)`, with `C_HF` declared as *"stabilizer for the HF
-//! gain/loss/mag-loss bounded-excess forms"*. So F17 is not a missing idea; it
-//! is one block that did not use the idea. [`HfGainForm::BoundedExcess`] is
-//! that owner's form applied here.
-//!
-//! # Why an arm and not just a clamp
-//!
-//! Because `contrast_inc` is nonzero on 12 % (CID22) to 52 % (KADID) of cells,
-//! any bounded form necessarily moves healthy content — so *which* bounded form
-//! is a measurement, pre-registered as §11 of the rev2 plan and decided by it,
-//! exactly as `ssim_form` handled F4.
+//! Revision 1 uses ratio excess for gain; canonical revisions use saturating
+//! excess. The source floor decides whether a ratio is formed.
 
 use crate::feature_defs::FormulaRevision;
 
@@ -107,58 +58,6 @@ impl HfGainForm {
         }
     }
 
-    /// The arm revision 2 ships — **`SaturatingExcess`, DECIDED BY MEASUREMENT**
-    /// (`benchmarks/feature_rev2_2026-09-05.md` §11, R6b).
-    ///
-    /// Named ONCE so the R6b probe and the kernels cannot disagree about what
-    /// "rev2" means for this family.
-    ///
-    /// # How the pre-registered rule selected it
-    ///
-    /// Five arms were extracted from ONE binary over 216,756 rows (the seven
-    /// human eval corpora + the full 196,086-row safesyn training leg), fitted
-    /// through the shipped Profile-D recipe at two slices × two solvers, and
-    /// graded on the gates `docs/PLAN_FEATURE_REV2_2026-09-05.md` §11.8 fixed
-    /// before any of it ran. Rule 1 (H3/H4/H5) left exactly one arm standing:
-    ///
-    /// * [`Self::Log1pExcess`] fails **H3** — log growth is a compression, not
-    ///   a bound, and it measures **10.504** where the other arms cannot exceed
-    ///   1. Carried precisely so that cost is measured rather than assumed.
-    /// * [`Self::BoundedExcess`] fails **H5** with **263,195** adjacent-pair
-    ///   inversions: it reads the MAGNITUDE of `var_src`, so it does not bound
-    ///   the shipped statistic, it replaces it with a scale-dependent one.
-    /// * [`Self::CappedExcess`] fails **H5** with **67,224** new ties — F4's
-    ///   `Clamp` analogue, which was free there (0 moved cells) and is not here
-    ///   (2.59 % of cells exceed `g = 1`).
-    /// * `SaturatingExcess` passes all three: max **0.99997** against its
-    ///   declared bound of 1, **0** inversions, **0** new ties.
-    ///
-    /// Rule 2 then fired on its own terms — it is the sole survivor AND wins a
-    /// strict majority of {CID22, KonJND, AIC-3} with CI-excluding paired
-    /// bootstrap deltas in 2 of the 4 variants (CID22 **+0.0027…+0.0090**,
-    /// AIC-3 **+0.0009…+0.0032**). Its two constant-free derivations survived
-    /// the measurement: it agrees with revision 1 to FIRST order in `g`, and
-    /// `g/(g+1) = max(0, 1 − var_src/var_dst)` makes the family symmetric by
-    /// changing only the member that is broken.
-    ///
-    /// # What it buys, and what it costs — both measured
-    ///
-    /// **LIVE goes 0.7357 → 0.9500** (+0.214) and 0.7960 → 0.9503 on the
-    /// `lasso` variants, with TID +0.033/+0.040 and KADID +0.021/+0.031: the
-    /// unbounded slot was actively wrecking the fit on the corpora where it
-    /// fires (LIVE holds 122 of 779 rows above 100).
-    ///
-    /// **KonJND regresses, on every arm and every variant**
-    /// (`satexcess` −0.013…−0.080, CI-excluding on 3 of 4). Two structurally
-    /// different bounded maps produce the same sign, so this is a property of
-    /// BOUNDING `contrast_inc`, not of this arm's shape: the near-threshold
-    /// corpus is using the unbounded magnitude and no bounded form returns it.
-    /// If that axis is worth recovering it is an APPEND slot under the
-    /// append-only numbering, not a reason to keep an unbounded one.
-    ///
-    /// The dial (H7) does not regress: monotonicity within 0.0011 of revision 1,
-    /// tied rate 0.0000–0.0001, negative-tail fraction within 0.022 (and
-    /// BETTER on `s228_bvls`), at a reach cost of 2.2–11.8 points.
     pub(crate) const REV2_HFGAIN: Self = Self::SaturatingExcess;
 
     /// Whether the arm has a **structural** upper bound (gate H3).
@@ -174,8 +73,6 @@ impl HfGainForm {
         }
     }
 
-    /// Stable lower-case token — the `ZENSIM_HF_GAIN` spelling, and the arm
-    /// label in every R6b artefact.
     pub(crate) const fn as_str(self) -> &'static str {
         match self {
             Self::RatioExcess => "ratio",

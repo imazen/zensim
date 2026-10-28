@@ -1,101 +1,8 @@
-//! **THE one owner of libc-independent arithmetic on the feature path.**
+//! Root and power operations used by feature pooling and score mapping.
 //!
-//! # The defect this module exists for
-//!
-//! `powf` is **not** correctly rounded, and no standard requires two libc
-//! implementations to agree on it. So a feature built with `x.powf(0.25)` is
-//! a function of *which libm the binary was linked against*, not only of the
-//! pixels — which breaks the one property every stored feature table and
-//! every `to_bits()` gate in this crate depends on.
-//!
-//! MEASURED (`benchmarks/libm_pow_nondeterminism_2026-09-06.md`), found by
-//! the rev2 fleet wave's own rev1 correctness gate because nothing weaker
-//! than `to_bits()` equality would have seen it:
-//!
-//! | build | corpus | cells | differ | worst \|Δ\| |
-//! |---|---|--:|--:|--:|
-//! | **musl** | csiq | 322,152 | **77** (0.0239 %) | 1.11e-16 |
-//! | **musl** | tid | 1,116,000 | **328** (0.0294 %) | 1.11e-16 |
-//! | **glibc** | csiq | 322,152 | **0** | — |
-//!
-//! Every delta is exactly one ULP at f64, and the differing positions inside
-//! the basic block are **exactly `≡ 1, 4, 7 (mod 13)`** — precisely the three
-//! `.powf(0.25)` slots and nothing else. A libm-free probe closed the
-//! mechanism: `x ** 0.25` over 400,000 random doubles disagrees on **276 of
-//! 400,000 (0.069 %)** between glibc 2.43 and musl, and **0 of 400,000**
-//! between two different glibc versions.
-//!
-//! Consequence, stated plainly: **the fleet had to build its Feature executor
-//! against glibc (`exec-featrev2glibc-88477e38`) to reproduce the dev box's
-//! tables bit-for-bit.** A statically-linked musl worker — which is what a
-//! worker *should* be, so it is immune to the base image's glibc version —
-//! silently produced different features.
-//!
-//! # The fix, derived rather than chosen
-//!
-//! `x^(1/4) = sqrt(sqrt(x))` and `x^(1/8) = sqrt(sqrt(sqrt(x)))`. IEEE-754
-//! **requires** `sqrt` to be correctly rounded, and it is a hardware
-//! instruction on every target this crate builds for, so the composition is
-//! bit-identical on every platform and every libc. **For these two exponents
-//! the replacement is unique; there is no arm to select.**
-//!
-//! ## CORRECTION to the source record: it is NOT more accurate
-//!
-//! `benchmarks/libm_pow_nondeterminism_2026-09-06.md` §3 says the composition
-//! "is *more* accurate than one `pow` call as well as cheaper". The second
-//! half stands; the first is **falsified**, and by the obvious measurement:
-//! `sqrt∘sqrt` rounds TWICE where `pow` rounds once, so it inherits a
-//! double-rounding error `pow` does not have. MEASURED against a 60-digit
-//! `Decimal` Newton reference over 4,000 log-uniform doubles spanning
-//! `e^±30`: the two agree on **3,455 (86.4 %)**; of the **545** that differ —
-//! always by exactly **1 ULP** — glibc's `pow` is nearer the true value in
-//! **544** and `sqrt∘sqrt` in **1**. On the record's own witness
-//! (`57076.535008512925`) glibc errs by 8.8776e-16 and the composition by
-//! 8.8860e-16.
-//!
-//! So the case for the fix is **determinism and a bounded error**, not
-//! accuracy: two correctly-rounded operations compose to a *provably* ≤1 ULP
-//! answer that is the same on every platform, whereas `pow`'s error is
-//! implementation-defined and bounded by no standard at all. Stating it as an
-//! accuracy win would be a claim this lane's own measurement contradicts.
-//! (`the_two_arms_differ_by_at_most_one_ulp` pins the ULP bound in-tree.)
-//!
-//! It is not free: `sqrt∘sqrt` double-rounds where `powf(0.25)` rounds once,
-//! so the two differ by up to one ULP and landing it **moves revision-1
-//! bytes**. That is why it is an era item rather than a plain fix —
-//! [`RootForm::LibmPowf`] stays the default and
-//! [`crate::ssim_form::active_revision()`] stays `Rev1`.
-//!
-//! # What is in scope here, and what is deliberately NOT
-//!
-//! Everything on the SDR feature path that calls a libm transcendental is
-//! routed through this module. The audit that established the list is
-//! recorded in `benchmarks/libc_determinism_2026-09-06.md`; the summary:
-//!
-//! | site | call | status |
-//! |---|---|---|
-//! | v1 basic / peaks / masked / IW L4+L8 pools (`feature_v2`, `streaming`, `iw_pool`) | `powf(0.25)`, `powf(0.125)` | **routed here** — 144 slots, era `v1detroot` |
-//! | v2 `ssim_dev4` (`feature_v2` `OnlineMoments::finish`, dense + append finalizers) | `powf(0.25)` | **routed here** — 12 more slots at 944, same era |
-//! | attribution basic-pool mirrors (`attribution`) | `powf(0.25)` | **routed here** — must track the features it attributes |
-//! | sRGB → linear (`color::srgb_u8_to_linear`) | — | **already deterministic**: `linear_srgb`'s LUT / rational polynomial, no libm |
-//! | opsin cube root (`color::cbrtf_fast`, `cbrt_midp`) | — | **already deterministic**: bit-trick seed + Halley iteration in pure IEEE arithmetic; the SIMD form is magetypes' own `cbrt_midp` |
-//! | SIMD PU-XYB (`color::pu_xyb_rows_inner`) | — | **already deterministic**: magetypes' `log2_midp_precise` / `exp2_midp_precise` |
-//! | scalar PU21 (`pu21::pu21_encode`) | `powf(P[3])`, `powf(P[4])`, … | **NOT routed** — HDR-only, and it already disagrees with the SIMD path it is a reference for by ≤ 2e-3 (that module's own `simd_matches_scalar_within_band`), so it is not on any bit-exact path today |
-//! | HDR transfer (`transfer::pq_eotf`, `hlg_*`) | `powf`, `exp`, `log10` | **NOT routed** — HDR decode path; no stored HDR table is under a `to_bits()` gate |
-//! | IW info-content weight (`iw_pool`, `log2(1 + w/σ²)`) | `log2` | **NOT routed** — `info_log_sigma_e_sq` defaults to `None` and every non-test construction leaves it `None`, so it is off on every shipped path. Registered, not silently changed |
-//! | `HfGainForm::Log1pExcess` | `ln_1p` | **NOT routed** — a measurement arm; rev2's decided arm is `SaturatingExcess`, which is division only |
-//! | score mapping + heads + size axes (`metric.rs`) | `powf`, `exp`, `log2` | **routed here** as of F19 — [`PowForm`], era `scorepow`. The exponents (0.5979, 1.2244, 0.6130, the profile-supplied `b` = 0.7, and a bake's p-norm `p`) are not powers of two, so no `sqrt` derivation exists and the arm is an *algorithm* choice: `libm::{pow, exp, log2}`, one Rust source per target. MEASURED: the score differed across libcs on 1 of 220 cells under BOTH root arms before this, and 0 after |
-//! | scalar PU21, HDR transfer, `HfGainForm::Log1pExcess` | `powf`, `exp`, `log10`, `ln_1p` | **still NOT routed** — see the rows below; F19 deliberately does not reach them |
-//! | `zenpredict::feature_transform` (`signed_cbrt`, `signed_pow`, `soft_clip`, `yeo_johnson`, `log`/`log1p` family, `Sinusoidal`) | `cbrt`, `powf`, `ln`, `ln_1p`, `sin`, `cos` | **NOT routable from here — REGISTERED.** Reached on the PRODUCT path by `metric.rs`'s `predict_transformed`, and LIVE in shipped Profiles A, BHdr and C (their `zentrain.feature_transforms` declare `signed_cbrt` / `yeo_johnson` / `clip_then_log1p`). Profiles **B (the default) and D are clean** — their only transform is `winsor_p99`, which is a clamp. It lives in the `zenanalyze` sibling repo, which this lane must not edit; `zenpredict`'s own `no_std` twins already call `libm::` explicitly, so the fix there is to make that the `std` path too |
-//! | `zensim-validate` `bake_runtime` heads + its `bake_compare` fork | — | **CLOSED 2026-09-06 — the mirror is DELETED, not routed.** It used to read: *"NOT routed — REGISTERED, and a BLOCKER on flipping `SHIPPED_REVISION`… routing it needs a `pub` surface on this module, i.e. a public-API change, which is out of this lane's scope."* That `pub` surface is now this module (`#[doc(hidden)]`, zero SUPPORTED-API delta) plus [`crate::score_math`], and both `zensim::metric` and the validate runtime call the one owner. The prose-only bit-exactness claim was measured and found to be exactly the predicted defect: `bake_verdict --full-json` on six shipped/board bakes × five corpora was **byte-identical under `ZENSIM_POW_FORM=libm` and `=pure`** before, and moves on the two per-sample-α bakes after, with every default-arm verdict byte-identical. Gates: `zensim-validate/tests/{score_owner_parity,no_score_path_libm}.rs`, both mutation-verified. Record: `benchmarks/score_owner_consolidation_2026-09-06.md` |
-//! | `zenstats` panel (`logistic_eval`, `run_lm`, `phi`, MRR `atanh`, `GeomeanSPP` `cbrt`) and `bake_verdict`'s G3 `cbrt` | `exp`, `cbrt`, `atanh` | **NOT routed — VERDICT-ONLY and staying that way.** These shape reported statistics, never a shipped score. Registered so the next audit does not re-derive the classification |
-//! | `output_calibration_spline` / `dial_spline` | — | **already deterministic**: the PCHIP basis is `powi` only, which is a multiply chain. Audited 2026-09-06, zero transcendentals |
-//!
-//! `powi` is **not** an exposure: `f64::powi` lowers to `llvm.powi`, which
-//! LLVM expands to a multiply chain (or `compiler_rt`'s `__powidf2`, also a
-//! multiply chain). It never reaches libm. It is a *compiler*-version
-//! dependence, not a libc one, and no measurement in this repo has seen it
-//! move.
+//! Revision 1 retains platform `powf` roots. Canonical feature revisions use
+//! nested square roots. Callers pass a form explicitly when the arithmetic
+//! belongs to a particular revision.
 
 use crate::feature_defs::FormulaRevision;
 
@@ -111,9 +18,6 @@ pub(crate) enum RootForm {
     /// with, and **libc-dependent**. Shipped.
     #[default]
     LibmPowf,
-    /// `sqrt∘sqrt` / `sqrt∘sqrt∘sqrt` — bit-identical on every libc, and
-    /// cheaper. NOT more accurate (see the module's correction section).
-    /// Revision 2.
     NestedSqrt,
 }
 
@@ -132,17 +36,6 @@ impl RootForm {
     }
 }
 
-/// The pooled-root operations, as a method chain so a call site reads the
-/// same as the `.powf(0.25)` it replaces.
-///
-/// A trait rather than free functions because all 31 call sites are
-/// `(<expr>).max(0.0).powf(0.25)`-shaped: keeping the shape means the diff
-/// that introduced the owner is a mechanical substitution that cannot
-/// silently reassociate the expression feeding it.
-///
-/// The 31: `feature_v2` 15 (the two v1 pool finalizers, plus `ssim_dev4` in
-/// `OnlineMoments::finish` and the dense and append finalizers), `streaming`
-/// 12, `attribution` 3, `iw_pool` 1.
 pub(crate) trait DetRoots: Copy {
     /// `x^(1/4)` for a pooled 4th raw moment.
     ///
@@ -269,8 +162,6 @@ pub enum PowForm {
     /// Shipped.
     #[default]
     LibmPowf,
-    /// `libm::{pow, exp, log2}` — one Rust source for every target.
-    /// Revision 2.
     PureRust,
 }
 
@@ -284,27 +175,6 @@ impl PowForm {
     }
 }
 
-/// The pow form the active revision selects.
-///
-/// Read it ONCE above any loop — same discipline, and same reason, as
-/// [`active_root_form`].
-///
-/// `ZENSIM_POW_FORM` is a MEASUREMENT override and nothing else; no shipping
-/// path sets it. Its two accepted values are the SAME BYTE LENGTH on purpose
-/// (`benchmarks/era2_perf_break_2026-08-31.md` §22.5 — an environment block's
-/// size has been measured shifting this binary's layout by ~10 % at 2304²).
-///
-/// It is a **sibling** of `ZENSIM_ROOT_FORM` rather than an extension of it,
-/// because the two axes are independent: the feature path can be deterministic
-/// while the score path is not, and the cross-libc gate has to be able to
-/// measure exactly that cell to show the score exposure survives the F18 fix.
-///
-/// # ★ Same honest limitation as [`active_root_form`]
-///
-/// This is a PROCESS switch, not a per-bake one. A bake that declares `Rev2`
-/// gets revision 2's feature arithmetic and **the process's pow form**.
-/// Threading it per-request is the same dispatch change the luma and root
-/// forms need, and it should be done for all three at once or not at all.
 #[inline]
 pub fn active_pow_form() -> PowForm {
     PowForm::for_revision(FormulaRevision::Rev1)
@@ -350,47 +220,10 @@ impl DetPow for f64 {
     }
 }
 
-// ============================================================================
-// Canonical f32 mid-precision transcendentals (REV4SERVE)
-// ============================================================================
-//
-// Scalar replications of magetypes' generated `*_midp` formulas
-// (`simd/generic/generated/transcendentals_f32x8.rs`, magetypes 0.9.28) —
-// the SAME polynomials and IEEE bit manipulation the production SIMD path
-// evaluates lane-wise, written in inherent `f32` ops so every tier produces
-// identical bits by construction. This is the Rev4 canonical arithmetic for
-// the PU/HDR front-end (`transfer` decode + `color`'s PU-XYB conversion):
-// the production code reaches these transcendentals through per-tier SIMD
-// vectors whose `mul_add` fuses on v3+/neon but NOT on scalar/wasm128, and
-// through platform libm (`powf`, `exp`, `log10`) which is not even
-// libc-stable — both defects this module exists to remove.
-//
-// Replication discipline, exactly as `color::opsin_px_canon` sets it for the
-// cube-root path: every polynomial step is a fused `f32::mul_add` (the
-// fused-tier semantics is the canonical one), `round()`/`to_i32_round()`
-// are ties-to-even (`f32::round_ties_even`, matching `_mm256_round_ps
-// (NEAREST)` and magetypes' scalar `roundevenf`/`convert_f32_to_i32_round`),
-// and min/max/blend keep the generated code's operand order. Non-finite
-// inputs follow the generated code's blend order so even NaN produces the
-// same deterministic (garbage) bits on every tier.
-
 /// The seed of [`cbrt_newton_f32`]: `MAGIC − bits(x)/3` approximates the bits
 /// of `x^(−1/3)` to about five bits (the classic reciprocal-root bit trick).
 pub(crate) const CBRT_NEWTON_MAGIC: i32 = 0x54a2_fa8c;
 
-/// Revision 7's cube root ([`FormulaRevision::cbrt_newton`]): one Newton step
-/// on the reciprocal cube root `r ≈ x^(−1/3)` from a bit-pattern seed, then
-/// `y = x·r²` and one Halley step written as a residual correction,
-/// `y + y·(x − y³)/(2y³ + x)`: one division. For positive normal inputs below
-/// `2^126` it is within 3 ulp, and correctly rounded for 72.7% of `[1, 8)`
-/// (exhaustive; the seed's error pattern repeats every three binades);
-/// [`magetypes::nostd_math::cbrt_midp_f32`], the opsin root through revision 6,
-/// is also within 3 ulp there but correctly rounded for 56%, and divides twice
-/// (`benchmarks/byconstruction_2026-10-22.md`, "Speed pass"). From `2^126` up
-/// it loses accuracy (`cbrt_midp_f32` overflows there). The seed's `bits/3` is
-/// formed in f32 (`(bits as f32 · ⅓) as i32`), as the vector form does it.
-/// `±0` returns itself; the sign carries through. [`cbrt_newton_x16`] is the
-/// same arithmetic lane for lane.
 #[inline(always)]
 pub(crate) fn cbrt_newton_f32(x: f32) -> f32 {
     let a = x.abs();
