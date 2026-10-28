@@ -294,12 +294,6 @@ fn dense_slots_of(id: &FeatureSetId) -> Option<SlotSet> {
     for t in id.compute().iter() {
         union = union.union(&crate::feature_defs::family_slots(t, ns));
     }
-    if id.compute().has_palette() {
-        union = union.union(&crate::feature_defs::family_slots(
-            crate::feature_defs::Family::Palette,
-            ns,
-        ));
-    }
     let dense = union.clipped_to(crate::feature_defs::full_width(ns));
     // A set that IS the identity range is not a dense layout, it is the
     // identity one under another name — `Layout::dense(0..372)` and

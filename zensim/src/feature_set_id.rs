@@ -89,39 +89,6 @@ pub enum ComputeToken {
     Iw,
     /// v2-348 dense block, `f372..719`.
     V2,
-    /// append-204, `f720..923`.
-    Append,
-    /// append2 / BANDVIS, `f924..943`.
-    Append2,
-    /// CSFW tier-1, `f944..955`.
-    Csfw,
-    /// RESERVED for the future HDR block. Append-only; its enum position
-    Hdr,
-    /// Rev4 grid-aligned blocking phase profile, `f986..1081`.
-    ///
-    Gridblk = 13,
-    /// Rev4 ringing-magnitude basis histogram, `f1082..1153`.
-    Ringbasis,
-    /// Rev4 tail histograms of the dense per-pixel maps, `f1154..1297`.
-    Tailhist,
-    /// Rev4 artifact-type descriptors, `f1298..1321`.
-    Arttype,
-    /// Experimental GMSBANK gradient similarity basis, `f1322..1501`.
-    Gmsbank,
-    /// Restored cut (COST_CUTS_AUDIT A1): per-scale, per-channel deviation
-    /// (std) of the MSE and HF-energy/magnitude maps, `f1502..1561`.
-    Mapdev,
-    /// Restored cut (COST_CUTS_AUDIT B2): the 228-slot basic+peaks surface
-    /// pooled over ungated 5x5 block maxima instead of pixels, `f1562..1789`.
-    Z1max,
-    /// Restored cut (COST_CUTS_AUDIT Ambiguous 7): C8's X/B gradient
-    /// loss/gain/deviation bank at native scale, `f1790..1819`.
-    Gmsnative,
-    /// Global affine-change descriptor, `f1867..1890` (formula revision 6):
-    /// per scale and XYB channel, the share of the mean squared error a
-    /// least-squares fit `dst ≈ a·src + b` over the whole plane explains, and
-    /// that explained error.
-    GlobAff,
 }
 
 impl ComputeToken {
@@ -133,19 +100,6 @@ impl ComputeToken {
         ComputeToken::Masked,
         ComputeToken::Iw,
         ComputeToken::V2,
-        ComputeToken::Append,
-        ComputeToken::Append2,
-        ComputeToken::Csfw,
-        ComputeToken::Gridblk,
-        ComputeToken::Ringbasis,
-        ComputeToken::Tailhist,
-        ComputeToken::Arttype,
-        ComputeToken::Gmsbank,
-        ComputeToken::Mapdev,
-        ComputeToken::Z1max,
-        ComputeToken::Gmsnative,
-        ComputeToken::GlobAff,
-        ComputeToken::Hdr,
     ];
 
     /// The token's wire spelling (charset `[a-z0-9_]+`, per the
@@ -159,19 +113,6 @@ impl ComputeToken {
             ComputeToken::Masked => "masked",
             ComputeToken::Iw => "iw",
             ComputeToken::V2 => "v2",
-            ComputeToken::Append => "append",
-            ComputeToken::Append2 => "append2",
-            ComputeToken::Csfw => "csfw",
-            ComputeToken::Gridblk => "gridblk",
-            ComputeToken::Ringbasis => "ringbasis",
-            ComputeToken::Tailhist => "tailhist",
-            ComputeToken::Arttype => "arttype",
-            ComputeToken::Gmsbank => "gmsbank",
-            ComputeToken::Mapdev => "mapdev",
-            ComputeToken::Z1max => "z1max",
-            ComputeToken::Gmsnative => "gmsnative",
-            ComputeToken::GlobAff => "globaff",
-            ComputeToken::Hdr => "hdr",
         }
     }
 
@@ -214,16 +155,6 @@ impl ComputeParts {
         self.0 & t.bit() != 0
     }
 
-    // Private research wire bit: no supported ComputeToken variant or iterator
-    // item. Existing public token bits/order remain exactly unchanged.
-    pub(crate) const fn with_palette(self) -> Self {
-        Self(self.0 | (1 << 22))
-    }
-
-    pub(crate) const fn has_palette(self) -> bool {
-        self.0 & (1 << 22) != 0
-    }
-
     /// Is the set empty?
     #[must_use]
     pub const fn is_empty(self) -> bool {
@@ -249,11 +180,7 @@ impl ComputeParts {
         }
         let mut out = Self::EMPTY;
         for part in s.split('+') {
-            out = if part == "palette" {
-                out.with_palette()
-            } else {
-                out.with(ComputeToken::parse(part)?)
-            };
+            out = out.with(ComputeToken::parse(part)?);
         }
         Some(out)
     }

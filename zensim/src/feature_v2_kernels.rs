@@ -1584,111 +1584,6 @@ fn dense_block_kernel_at_revision(
     )
 }
 
-/// Co-sited B samples for the X gradient walk. Packed f32 XYB B, one sample
-/// per pixel, with the same width/height as the current strip (no halo).
-#[derive(Clone, Copy)]
-struct ChromaStrip<'a> {
-    reference: &'a [f32],
-    distorted: &'a [f32],
-}
-
-#[derive(Clone, Copy)]
-struct GmsBankWork<'a> {
-    chroma: Option<ChromaStrip<'a>>,
-}
-
-impl<'a> GmsBankWork<'a> {
-    fn new(_channel: usize, chroma: Option<ChromaStrip<'a>>) -> Self {
-        Self {
-            chroma,
-        }
-    }
-
-}
-
-/// Difference-form joint opponent loss. Equal constants reproduce 1-MDSI CS
-/// on the author's unshifted H/M coordinates. XYB uses its declared centering.
-/// Called inside the existing magetypes/arcane gradient entries; the generic
-/// backend cannot carry a standalone rite token attribute.
-#[inline(always)]
-fn chromaticity_loss(reference: [f64; 2], distorted: [f64; 2], constants: [f64; 2]) -> f64 {
-    let [xr, br] = reference;
-    let [xd, bd] = distorted;
-    let [cx, cb] = constants;
-    let dx = xr - xd;
-    let db = br - bd;
-    (dx * dx / cx + db * db / cb)
-        / (xr * xr / cx + xd * xd / cx + br * br / cb + bd * bd / cb + 1.0)
-}
-
-/// C8 per-constant pair of signed gradient-change means and a Welford
-/// population variance of `1-GMS`. Variance is unchanged by the translation
-/// `GMS = 1 - delta`, while this form makes identity exactly zero.
-#[derive(Default, Clone, Copy)]
-struct GmsBankCell {
-    loss: f64,
-    gain: f64,
-    n: u64,
-    mean: f64,
-    m2: f64,
-}
-
-impl GmsBankCell {
-    #[inline]
-    fn push(&mut self, delta: f64, loss: bool) {
-        if loss {
-            self.loss += delta;
-        } else {
-            self.gain += delta;
-        }
-        self.n += 1;
-        // std(GMS) == std(1-GMS) exactly. Welford on delta=1-GMS
-        // preserves small deviations that would round away in 1-delta.
-        let change = delta - self.mean;
-        self.mean += change / self.n as f64;
-        self.m2 += change * (delta - self.mean);
-    }
-
-    #[inline]
-    fn merge(&mut self, other: &Self) {
-        if other.n == 0 {
-            return;
-        }
-        self.loss += other.loss;
-        self.gain += other.gain;
-        if self.n == 0 {
-            self.n = other.n;
-            self.mean = other.mean;
-            self.m2 = other.m2;
-            return;
-        }
-        let total = self.n + other.n;
-        let shift = other.mean - self.mean;
-        self.m2 += other.m2 + shift * shift * (self.n as f64 * other.n as f64 / total as f64);
-        self.mean += shift * (other.n as f64 / total as f64);
-        self.n = total;
-    }
-}
-
-/// featacc: measurement-mode sibling of [`GmsBankCell`] — the `loss`/`gain`
-/// sums ride [`SumVar::f64_elems`] (f64-native deltas: `c32` stays
-/// sequential so the f32 column never conflates element precision with
-/// accumulation order) and the Welford `(n, mean, m2)` triple rides
-/// [`WelfordVar`]. Resolves to the production `GmsBankCell` shape at the
-/// strip boundary so `GradientAccum::accumulate`'s plain-f64 fold is
-/// unchanged for every mode.
-struct GmsBankCellVar {
-}
-
-impl GmsBankCellVar {
-    #[inline]
-    fn for_mode() -> Self {
-        Self {
-        }
-    }
-
-}
-
 /// Per-row-reduced f64 accumulator for the gradient block.
 #[derive(Default, Clone, Copy)]
 pub(crate) struct GradientAccum {
@@ -1711,8 +1606,6 @@ pub(crate) struct GradientAccum {
     /// bit-identical when append2 is off.
     sum_bv_gain: f64,
     sum_bv_loss: f64,
-    bank: [GmsBankCell; 5],
-    chroma: [GmsBankCell; 5],
 }
 
 impl GradientAccum {
@@ -1728,12 +1621,6 @@ impl GradientAccum {
         self.sum_grad_dst += other.sum_grad_dst;
         self.sum_bv_gain += other.sum_bv_gain;
         self.sum_bv_loss += other.sum_bv_loss;
-        for (mine, next) in self.bank.iter_mut().zip(&other.bank) {
-            mine.merge(next);
-        }
-        for (mine, next) in self.chroma.iter_mut().zip(&other.chroma) {
-            mine.merge(next);
-        }
     }
 }
 
@@ -1804,29 +1691,6 @@ fn gradient_block_kernel_generic<T: F32x8Backend + Copy>(
 
     let mut acc = GradientAccum::default();
 
-    let bank = GmsBankWork::new(1, None);
-    if let Some(chroma) = bank.chroma {
-        debug_assert_eq!(chroma.reference.len(), width * height);
-        debug_assert_eq!(chroma.distorted.len(), width * height);
-    }
-    let _chroma_pixel = |x: usize, y: usize, cells: &mut [GmsBankCell; 5]| {
-        if let Some(chroma) = bank.chroma {
-            let i = y * width + x;
-            let h = i + width;
-            let reference = [
-                f64::from(src_h[h]) - f64::from(0.42_f32),
-                f64::from(chroma.reference[i]) - f64::from(0.55_f32),
-            ];
-            let distorted = [
-                f64::from(dst_h[h]) - f64::from(0.42_f32),
-                f64::from(chroma.distorted[i]) - f64::from(0.55_f32),
-            ];
-            for (cell, constants) in cells.iter_mut().zip(GMSBANK_CS_C) {
-                cell.push(chromaticity_loss(reference, distorted, constants), true);
-            }
-        }
-    };
-
     // Scalar helper for one pixel — used for the first/last COLUMN of
     // every row (x-axis boundary only; the y-axis "first/last row"
     // special case from phase 4 is GONE, per this function's new halo
@@ -1835,9 +1699,7 @@ fn gradient_block_kernel_generic<T: F32x8Backend + Copy>(
     // rows or a caller-supplied reflected true-edge row).
     let scalar_pixel = |x: usize,
                         y: usize,
-                        acc: &mut GradientAccum,
-                        _bank_row: &mut [GmsBankCell; 5],
-                        _chroma_row: &mut [GmsBankCell; 5]| {
+                        acc: &mut GradientAccum| {
         let xl = x.saturating_sub(1);
         let xr = (x + 1).min(width - 1);
         let row = (y + 1) * width; // +1: src_h/dst_h carry 1 halo row up front
@@ -1885,14 +1747,14 @@ fn gradient_block_kernel_generic<T: F32x8Backend + Copy>(
     };
 
     for y in 0..height {
-        let mut bank_row = [GmsBankCell::default(); 5];
-        let mut chroma_row = [GmsBankCell::default(); 5];
+
+
         let row = (y + 1) * width;
         let row_u = y * width;
         let row_d = (y + 2) * width;
         let act_row = y * width;
 
-        scalar_pixel(0, y, &mut acc, &mut bank_row, &mut chroma_row);
+        scalar_pixel(0, y, &mut acc);
         if width > 2 {
             let interior_end = width - 1;
             let interior_w = interior_end - 1; // pixels [1, width-2]
@@ -1959,15 +1821,13 @@ fn gradient_block_kernel_generic<T: F32x8Backend + Copy>(
             acc.sum_grad_dst += r_gdst.reduce_add() as f64;
 
             for x in chunk_end..=interior_end - 1 {
-                scalar_pixel(x, y, &mut acc, &mut bank_row, &mut chroma_row);
+                scalar_pixel(x, y, &mut acc);
             }
         }
         scalar_pixel(
             width - 1,
             y,
             &mut acc,
-            &mut bank_row,
-            &mut chroma_row,
         );
     }
 
@@ -2157,9 +2017,6 @@ fn gradient_interior_elem_canon<
     x: usize,
     _bv_lo: f32,
     _bv_hi: f32,
-    _bank: GmsBankWork<'_>,
-    _bank_row: &mut [GmsBankCellVar; 5],
-    _chroma_row: &mut [GmsBankCellVar; 5],
     r_gsrc: &mut Q,
     r_gdst: &mut Q,
     r_gms: &mut Q,
@@ -2254,10 +2111,8 @@ fn gradient_block_kernel_canon<
     _mode: crate::featcanon::Mode,
 ) -> GradientAccum {
     let mut acc = GradientAccum::default();
-    let bank = GmsBankWork::new(1, None);
-    let mut _bank_acc: [GmsBankCellVar; 5] = std::array::from_fn(|_| GmsBankCellVar::for_mode());
-    let mut _chroma_acc: [GmsBankCellVar; 5] =
-        std::array::from_fn(|_| GmsBankCellVar::for_mode());
+
+
     // Revision 7: the interior pools' f64 lanes live for the whole call (each
     // row's f32 row lanes fold into them) and finish once, after the last row.
     let mut call_pools = [P::zero(); 8];
@@ -2266,10 +2121,8 @@ fn gradient_block_kernel_canon<
         let row_u = y * width;
         let row_d = (y + 2) * width;
         let act_row = y * width;
-        let mut bank_row: [GmsBankCellVar; 5] =
-            std::array::from_fn(|_| GmsBankCellVar::for_mode());
-        let mut chroma_row: [GmsBankCellVar; 5] =
-            std::array::from_fn(|_| GmsBankCellVar::for_mode());
+
+
 
         gradient_border_pixel::<R7>(
             src_h,
@@ -2328,9 +2181,6 @@ fn gradient_block_kernel_canon<
                         x,
                         bv_lo,
                         bv_hi,
-                        bank,
-                        &mut bank_row,
-                        &mut chroma_row,
                         q_gsrc,
                         q_gdst,
                         q_gms,
@@ -2371,9 +2221,6 @@ fn gradient_block_kernel_canon<
                     x,
                     bv_lo,
                     bv_hi,
-                    bank,
-                    &mut bank_row,
-                    &mut chroma_row,
                     &mut *r_gsrc,
                     &mut *r_gdst,
                     &mut *r_gms,
@@ -2505,10 +2352,8 @@ fn gradient_block_kernel_canon64_vec<
     _mode: crate::featcanon::Mode,
 ) -> GradientAccum {
     let mut acc = GradientAccum::default();
-    let bank = GmsBankWork::new(1, None);
-    let mut _bank_acc: [GmsBankCellVar; 5] = std::array::from_fn(|_| GmsBankCellVar::for_mode());
-    let mut _chroma_acc: [GmsBankCellVar; 5] =
-        std::array::from_fn(|_| GmsBankCellVar::for_mode());
+
+
     // Revision 7 (`rowlanes`): the chunks' adds of the six non-cancelling
     // pools go to f32 row lanes, folded into the f64 lanes every
     // `ROW_LANES_FOLD` columns and at the end of the chunks (the scalar body's
@@ -2578,10 +2423,8 @@ fn gradient_block_kernel_canon64_vec<
         let row_u = y * width;
         let row_d = (y + 2) * width;
         let act_row = y * width;
-        let mut bank_row: [GmsBankCellVar; 5] =
-            std::array::from_fn(|_| GmsBankCellVar::for_mode());
-        let mut chroma_row: [GmsBankCellVar; 5] =
-            std::array::from_fn(|_| GmsBankCellVar::for_mode());
+
+
 
         gradient_border_pixel::<R7>(
             src_h,
@@ -2686,9 +2529,6 @@ fn gradient_block_kernel_canon64_vec<
                     x,
                     bv_lo,
                     bv_hi,
-                    bank,
-                    &mut bank_row,
-                    &mut chroma_row,
                     &mut *r_gsrc,
                     &mut *r_gdst,
                     &mut *r_gms,
@@ -2910,9 +2750,6 @@ fn gradient_block_kernel_canon64_vec<
                     x,
                     bv_lo,
                     bv_hi,
-                    bank,
-                    &mut bank_row,
-                    &mut chroma_row,
                     &mut *r_gsrc,
                     &mut *r_gdst,
                     &mut *r_gms,

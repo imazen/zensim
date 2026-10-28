@@ -249,11 +249,6 @@ pub enum FormulaRevision {
 }
 
 impl FormulaRevision {
-    /// Whether the `globaff` family (f1867..1890) is computed at this revision.
-    pub(crate) const fn computes_globaff(self) -> bool {
-        matches!(self, Self::Rev7)
-    }
-
     /// Whether the pools add columns in f32 row lanes and the central
     /// moments are two-pass per row ([`Self::Rev7`]'s `rowlanes` era).
     pub(crate) const fn row_lanes(self) -> bool {
@@ -280,7 +275,6 @@ impl FormulaRevision {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Family {
     Supported(ComputeToken),
-    Palette,
 }
 
 impl From<ComputeToken> for Family {
@@ -299,7 +293,6 @@ impl Family {
     pub(crate) const fn as_str(self) -> &'static str {
         match self {
             Self::Supported(token) => token.as_str(),
-            Self::Palette => "palette",
         }
     }
 }
@@ -743,18 +736,11 @@ pub(crate) fn def_at(id: usize, n_scales: usize) -> Option<FeatureDef> {
 /// [`tests::carrier_slots_match_the_feature_v2_owner`].
 pub(crate) const CARRIER_SLOTS: [usize; 10] = [178, 190, 196, 226, 231, 237, 243, 303, 321, 333];
 
-/// Every slot of `family` at `n_scales`, as a [`SlotSet`].
-///
-/// THE family→slots derivation. Covers all twelve [`ComputeToken`]s: the
-/// eight contiguous blocks, the two scattered free tranches, and the carrier
-/// subset. Gated equal to `ComputeSet::populated_slots` for every token by
-/// [`tests::family_slots_match_compute_set_populated_slots`].
+/// Every slot of a family at `n_scales`.
+/// Carriers is a subset of the v1 pools, so it has no separate block.
 pub(crate) fn family_slots(family: impl Into<Family>, n_scales: usize) -> SlotSet {
     match family.into() {
         Family::Supported(ComputeToken::Carriers) => SlotSet::from_slots(CARRIER_SLOTS),
-        // `Hdr` is RESERVED — registered in the vocabulary, emitted by
-        // nothing, so its slot set is legitimately empty rather than absent.
-        Family::Supported(ComputeToken::Hdr) => SlotSet::default(),
         other => match block_base(other, n_scales) {
             Some((base, block)) => SlotSet::from_ranges([(base, base + block.width(n_scales))]),
             None => SlotSet::default(),

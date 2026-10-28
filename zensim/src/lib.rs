@@ -224,8 +224,6 @@ pub(crate) mod feature_v2_blocks;
 pub(crate) mod feature_v2_stream;
 pub(crate) mod fold_engine;
 mod fused;
-pub(crate) mod globaff;
-mod gmsbank_constants;
 pub(crate) mod hf_gain_form;
 pub mod mapping;
 mod metric;

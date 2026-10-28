@@ -197,7 +197,6 @@ pub const K_PJND_MASK_HIGH: f64 = 16.0;
 /// in unit-XYB scale, not blur residuals, but the dynamic range is
 /// comparable).
 pub const C_GMS: f64 = 1e-4;
-use crate::gmsbank_constants::GMSBANK_CS_C;
 /// Saturating half-point for the reference-edge indicator used by ringing
 /// (`edge_r` in the A.10 table's `err · dilate(edge_r) · (1−edge_r)` form).
 pub const C_RING_EDGE: f64 = 0.02;
@@ -2253,7 +2252,6 @@ fn rev5_block_walk<S: ImageSource, D: ImageSource, const ALL_CHANNELS: bool>(
     slots: &mut Vec<Rev5StripJob>,
     pool: &std::sync::Arc<crate::feature_v2_blocks::BlockPool>,
     totals: &mut [StreamChannelAccums; 3],
-    globaff: &mut [[crate::globaff::GlobAffAccum; 3]],
     stop: Option<&dyn enough::Stop>,
 ) {
     use crate::feature_v2_blocks::{CHUNK_ROWS, RowBlock, gather_window, produce_chunk};
@@ -2278,7 +2276,6 @@ fn rev5_block_walk<S: ImageSource, D: ImageSource, const ALL_CHANNELS: bool>(
     let limit = limit.min(12);
     // The streaming producer's conversion revision.
     let revision = toggles.formula_revision;
-    let globaff_on = !globaff.is_empty();
     let compute = *compute;
 
     rayon::in_place_scope(|scope| {
@@ -2390,18 +2387,6 @@ fn rev5_block_walk<S: ImageSource, D: ImageSource, const ALL_CHANNELS: bool>(
                     if next_ch[s] == 0 {
                         // `globaff`: every strip of every scale, all three
                         // channels, in strip order, before the dead-scale skip.
-                        if globaff_on {
-                            let y1 = info.y0 + info.strip_h;
-                            for (ch, acc) in globaff[s].iter_mut().enumerate() {
-                                let [src, dst] = [&planes[0][ch][s], &planes[1][ch][s]];
-                                for (bs, bd) in src.iter().zip(dst) {
-                                    let (a, b) = (bs.r0().max(info.y0), bs.end().min(y1));
-                                    if a < b {
-                                        acc.add_rows(bs.rows(a, b), bd.rows(a, b), info.plane_w);
-                                    }
-                                }
-                            }
-                        }
                         if compute.scale_dead(s) {
                             #[cfg(test)]
                             SKIPPED_SCALES.with_borrow_mut(|v| *v |= 1 << s);
@@ -3653,7 +3638,6 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
         // scale-zero chroma rows stay in the rolling planes.
         !compute.full_res_xb,
     );
-    let mut globaff: Vec<[crate::globaff::GlobAffAccum; 3]> = Vec::new();
 
     #[cfg(feature = "threads")]
     let mut queued = 0;
@@ -3690,7 +3674,6 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
             rev5_jobs,
             block_pool,
             &mut accums,
-            &mut globaff,
             stop,
         );
     }

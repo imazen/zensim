@@ -94,16 +94,9 @@ fn rev5_unsupported(
         return None;
     }
     let ns = crate::NUM_SCALES;
-    let mut supported = crate::feature_defs::family_slots(ComputeToken::Basic, ns)
+    let supported = crate::feature_defs::family_slots(ComputeToken::Basic, ns)
         .union(&crate::feature_defs::family_slots(ComputeToken::Peaks, ns))
         .union(&crate::feature_defs::family_slots(ComputeToken::V2, ns));
-    // Revision 6 adds the globaff family to the scope.
-    if revision.computes_globaff() {
-        supported = supported.union(&crate::feature_defs::family_slots(
-            ComputeToken::GlobAff,
-            ns,
-        ));
-    }
     let supported = supported.clipped_to(layout_width);
     // `a.missing_from(&b)` is b∖a — so this is want∖supported, the
     // requested slots Rev5 does not compute.
@@ -219,41 +212,16 @@ impl Plan {
             V1PoolsMode::Off
         };
 
-        let append = touches(ComputeToken::Append);
-        let append2 = touches(ComputeToken::Append2);
         // append2 requires append (the block sits at f924+ and reuses append
         // accumulators — `V2NewFeatureToggles::append2_block` asserts it).
-        let append = append || append2;
-        let csfw = touches(ComputeToken::Csfw);
-        let gridblk = touches(ComputeToken::Gridblk);
-        let ringbasis = touches(ComputeToken::Ringbasis);
-        let tailhist = touches(ComputeToken::Tailhist);
-        let arttype = touches(ComputeToken::Arttype);
-        let gmsbank = touches(ComputeToken::Gmsbank);
-        let mapdev = touches(ComputeToken::Mapdev);
-        let z1max = touches(ComputeToken::Z1max);
-        let gmsnative = touches(ComputeToken::Gmsnative);
         // `globaff` reads every channel's planes at every scale but runs no
         // kernel: its slots are kept out of the channel and scale derivations
         // below (`kernel_want`), so asking for it never turns on X/B kernels.
-        let _globaff = touches(ComputeToken::GlobAff);
-        let kernel_want =
-            crate::feature_defs::family_slots(ComputeToken::GlobAff, ns).missing_from(&want);
+        let kernel_want = want.clone();
         // `csfw_on` is `csfw_block && v2_blocks` in the walk, so a CSFW
         // request implies the v2-era pass regardless of what else is asked.
         // The four Rev4 feature-bank families are `rev4_* && v2_blocks` too.
-        let v2_blocks = touches(ComputeToken::V2)
-            || append
-            || append2
-            || csfw
-            || gridblk
-            || ringbasis
-            || tailhist
-            || arttype
-            || gmsbank
-            || mapdev
-            || z1max
-            || gmsnative;
+        let v2_blocks = touches(ComputeToken::V2);
 
         let requested = ComputeSet {
             // A slot-set request carries no bake, so it takes the process's
@@ -296,9 +264,7 @@ impl Plan {
                     // `edge_width_change` at scale s reads the gradient sums
                     // of s and s+1 — and arttype's `blur` multiplies that
                     // same finished slot, so it inherits the dependency.
-                    if d.signal.name == "edge_width_change"
-                        || (d.signal.family == ComputeToken::Arttype && d.signal.name == "blur")
-                    {
+                    if d.signal.name == "edge_width_change" {
                         let s = usize::from(d.scale).min(ns - 2);
                         mask | (1 << s) | (1 << (s + 1))
                     } else {
@@ -474,29 +440,9 @@ impl Plan {
         let layout = crate::feature_layout::declared_layout(model);
         let want = bake_read_slots(model).ok_or(PlanError::UnreadableBake)?;
         let walk_width = layout.walk_width();
-        let palette = want.intersect(&crate::feature_defs::family_slots(
-            crate::feature_defs::Family::Palette,
-            crate::NUM_SCALES,
-        ));
-        if !palette.is_empty() {
-            return Err(PlanError::Uncomputable {
-                missing: palette,
-                layout_width,
-            });
-        }
-        let globaff = want.intersect(&crate::feature_defs::family_slots(
-            ComputeToken::GlobAff,
-            crate::NUM_SCALES,
-        ));
-        if !globaff.is_empty() && !revision.computes_globaff() {
-            return Err(PlanError::Uncomputable {
-                missing: globaff,
-                layout_width,
-            });
-        }
         // Revision 6 derives at its own revision (see `derive_with_layout_at`);
         // earlier bakes keep the process-revision derivation they always had.
-        let mut plan = if revision.computes_globaff() {
+        let mut plan = if revision == crate::feature_defs::FormulaRevision::Rev7 {
             Plan::derive_with_layout_at(&want, layout, revision)?
         } else {
             Plan::derive_with_layout(&want, layout)?
@@ -569,9 +515,7 @@ impl Plan {
     /// `v1_only: true, ..Default::default()`, which pins every layout flag off
     /// and so pins the emitted width to the v1 layout.
     pub(crate) fn toggles(&self) -> crate::feature_v2::V2NewFeatureToggles {
-        let ns = crate::NUM_SCALES;
         let c = &self.compute;
-        let _layout = LayoutBlocks::for_width(self.layout.walk_width(), ns);
         crate::feature_v2::V2NewFeatureToggles {
             omit_pjnd_fragility: c.omit_pjnd_fragility,
             // THE revision this walk computes. Forwarded from the plan, so a
@@ -710,35 +654,6 @@ impl Plan {
         // the identity layout at the wider walk width.
         Plan::normalized(compute, Layout::identity(layout_width))
     }
-}
-
-/// Which optional blocks a declared layout width reaches.
-///
-/// The chain is nested by construction: `append2` implies `append`, `csfw`
-/// these implications.
-struct LayoutBlocks {}
-
-impl LayoutBlocks {
-    fn for_width(width: usize, ns: usize) -> Self {
-        let append = width > base_of(ComputeToken::Append, ns);
-        let append2 = append && width > base_of(ComputeToken::Append2, ns);
-        let csfw = append2 && width > base_of(ComputeToken::Csfw, ns);
-        let gridblk = csfw && width > base_of(ComputeToken::Gridblk, ns);
-        let ringbasis = gridblk && width > base_of(ComputeToken::Ringbasis, ns);
-        let tailhist = ringbasis && width > base_of(ComputeToken::Tailhist, ns);
-        let arttype = tailhist && width > base_of(ComputeToken::Arttype, ns);
-        let gmsbank = arttype && width > base_of(ComputeToken::Gmsbank, ns);
-        let mapdev = gmsbank && width > base_of(ComputeToken::Mapdev, ns);
-        let z1max = mapdev && width > base_of(ComputeToken::Z1max, ns);
-        let gmsnative = z1max && width > base_of(ComputeToken::Gmsnative, ns);
-        let _globaff = gmsnative && width > base_of(ComputeToken::GlobAff, ns);
-        Self {}
-    }
-}
-
-/// Base slot of a registered block at `n_scales`.
-fn base_of(t: ComputeToken, ns: usize) -> usize {
-    crate::feature_defs::block_base(t, ns).map_or(usize::MAX, |(b, _)| b)
 }
 
 /// The wider of two pool modes. `Carriers` is a strict subset of `Peaks`'
