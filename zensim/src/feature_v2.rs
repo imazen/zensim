@@ -4440,8 +4440,9 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
         let scale_base = scale * 3 * FEATURES_PER_CHANNEL_V2_TOTAL;
         let mut grads: [(f64, f64); 3] = [(0.0, 0.0); 3];
 
+        // A scale without v2 work keeps its v2 slots at the structural 0.
         for (ch, acc) in accums.iter().enumerate() {
-            if !ALL_CHANNELS && !compute.channel_active(scale, ch) {
+            if !v2_blocks || !ALL_CHANNELS && !compute.channel_active(scale, ch) {
                 continue;
             }
             let out = &mut features_v12
@@ -4563,9 +4564,13 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
 
         for ch in 0..3 {
             let (gsrc, gdst) = grads[ch];
+            // A channel the walk skipped at either scale has no gradient sums
+            // there, so its slot keeps the structural 0.
             if let Some((prev_gsrc, prev_gdst)) = prev_grad[ch]
                 && compute.at_scale(scale).gradient
                 && compute.at_scale(scale - 1).gradient
+                && (ALL_CHANNELS
+                    || compute.channel_active(scale, ch) && compute.channel_active(scale - 1, ch))
             {
                 let decay_src = gsrc / (prev_gsrc + C_GRAD_DECAY);
                 let decay_dst = gdst / (prev_gdst + C_GRAD_DECAY);

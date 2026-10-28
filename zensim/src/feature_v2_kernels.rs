@@ -1133,6 +1133,7 @@ impl ComputeSet {
                     .filter(move |&id| {
                         crate::feature_defs::def_at(id, n_scales)
                             .is_some_and(|d| usize::from(d.scale) == scale)
+                            && self.computes_edge_width_change(id, n_scales)
                     })
                     .collect::<Vec<_>>()
             }));
@@ -1166,7 +1167,8 @@ impl ComputeSet {
             .union(&SlotSet::from_slots(scattered))
             .clipped_to(layout_width);
         SlotSet::from_slots(slots.iter_slots().filter(|&id| {
-            (!self.omit_pjnd_fragility
+            self.computes_edge_width_change(id, n_scales)
+                && (!self.omit_pjnd_fragility
                 || !(v1_total..v2_end).contains(&id)
                 || (id - v1_total) % FEATURES_PER_CHANNEL_V2_TOTAL != idx::PJND_FRAGILITY)
                 && (!self.local_only
@@ -1186,6 +1188,27 @@ impl ComputeSet {
                     && crate::feature_defs::def_at(id, n_scales)
                         .is_some_and(|d| self.pools_at(usize::from(d.scale)) != V1PoolsMode::Full))
         }))
+    }
+
+    /// An edge-width-change slot pairs two scales (the last scale's slot copies
+    /// the one below), so the walk computes it only where it has gradient work
+    /// and the slot's channel at both. Every other slot passes.
+    fn computes_edge_width_change(&self, id: usize, n_scales: usize) -> bool {
+        let Some(d) = crate::feature_defs::def_at(id, n_scales) else {
+            return true;
+        };
+        if d.signal.name != "edge_width_change" {
+            return true;
+        }
+        let ch = match d.channel {
+            crate::feature_defs::Channel::X => 0,
+            crate::feature_defs::Channel::Y => 1,
+            crate::feature_defs::Channel::B => 2,
+        };
+        let s = usize::from(d.scale).min(n_scales - 2);
+        [s, s + 1]
+            .into_iter()
+            .all(|x| self.at_scale(x).gradient && self.channel_active(x, ch))
     }
 
     /// The v1 activity chains are channel-local, so masked/IW subsets may

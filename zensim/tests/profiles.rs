@@ -220,6 +220,48 @@ fn rev7_scores_are_identical_across_thread_settings() {
     }
 }
 
+/// `compute_all_features` fills every slot `compute` fills, with the same bits:
+/// both extract at the profile's own formula revision.
+#[cfg(feature = "training")]
+#[test]
+fn all_features_agree_with_compute_on_every_slot_compute_fills() {
+    // The tier test disables SIMD tiers process-wide while it runs.
+    let _token = archmage::testing::lock_token_testing();
+    for id in [
+        "31x17-photo-noise",
+        "65x63-text-blocks",
+        "200x150-edges-blur",
+        "333x251-photo-posterize",
+    ] {
+        let p = pair(id);
+        let src = RgbSlice::new(bytemuck::cast_slice(&p.src), p.width, p.height);
+        let dst = RgbSlice::new(bytemuck::cast_slice(&p.dst), p.width, p.height);
+        for profile in [
+            ZensimProfile::E,
+            ZensimProfile::ECodec,
+            ZensimProfile::A,
+            ZensimProfile::PreviewV0_2,
+        ] {
+            let z = Zensim::new(profile);
+            let served = z.compute(&src, &dst).unwrap();
+            let all = z.compute_all_features(&src, &dst).unwrap();
+            assert!(
+                all.features().len() >= served.features().len(),
+                "{profile} {id}"
+            );
+            for (i, (&s, &a)) in served.features().iter().zip(all.features()).enumerate() {
+                if s != 0.0 {
+                    assert_eq!(
+                        s.to_bits(),
+                        a.to_bits(),
+                        "{profile} {id} f{i}: compute {s}, all {a}"
+                    );
+                }
+            }
+        }
+    }
+}
+
 #[test]
 fn latest_and_codec_target_select_the_rev7_profiles() {
     assert_eq!(ZensimProfile::latest(), ZensimProfile::E);

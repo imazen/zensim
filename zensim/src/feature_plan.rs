@@ -165,6 +165,7 @@ impl Plan {
     /// slots is served by the free accumulators instead of the (expensive)
     /// owning kernel, which is what makes `basic+peaks+moments` a cheap plan
     /// rather than a full 944 walk.
+    #[cfg(test)]
     pub(crate) fn derive(want: &SlotSet, layout_width: usize) -> Result<Plan, PlanError> {
         Plan::derive_with_layout(want, Layout::identity(layout_width))
     }
@@ -377,8 +378,11 @@ impl Plan {
                     )
                 {
                     chroma |= 1 << d.scale;
+                    // The same two scales as `v2_scales`: the last scale's slot
+                    // copies the one below it.
                     if id >= v2_start && d.signal.name == "edge_width_change" {
-                        chroma |= 1 << (usize::from(d.scale).min(ns - 2) + 1);
+                        let s = usize::from(d.scale).min(ns - 2);
+                        chroma |= (1 << s) | (1 << (s + 1));
                     }
                 }
             }

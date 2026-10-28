@@ -322,6 +322,107 @@ pub(crate) mod tests {
         }
     }
 
+    /// Edge-width change pairs two adjacent scales (the last scale's slot copies
+    /// the one below). A declared plan that reads it for a chroma channel
+    /// computes that channel at both scales and emits the full plan's bits on
+    /// every slot of its emit set, and the structural 0 everywhere else.
+    #[test]
+    fn edge_width_change_plans_emit_the_full_plans_bits_and_zero_elsewhere() {
+        use crate::feature_defs::FormulaRevision;
+        use crate::feature_layout::Layout;
+        use crate::feature_plan::Plan;
+        use crate::feature_set_id::SlotSet;
+        let (w, h) = (160, 128);
+        let src: Vec<[u8; 3]> = (0..w * h)
+            .map(|i| {
+                let (x, y) = (i % w, i / w);
+                [((x * 7 + y * 3) % 256) as u8, ((x * x + y) % 256) as u8, ((y * 5 + x / 3) % 256) as u8]
+            })
+            .collect();
+        let dst: Vec<[u8; 3]> = src
+            .iter()
+            .enumerate()
+            .map(|(i, p)| p.map(|v| v.saturating_add((i * 2654435761 % 7) as u8)))
+            .collect();
+        let (sref, dref) = (RgbSlice::new(&src, w, h), RgbSlice::new(&dst, w, h));
+        let run = |plan: &Plan| {
+            foldapp_streaming_walk(
+                &sref,
+                &dref,
+                false,
+                plan.toggles(),
+                crate::feature_v2_stream::FrontEnd::Sdr,
+                &mut V2Scratch::new(),
+                FoldWalkExtras {
+                    compute: Some(plan.compute),
+                    ..FoldWalkExtras::default()
+                },
+            )
+            .into_features()
+        };
+        let ns = crate::NUM_SCALES;
+        let ewc = |scale: usize, ch: usize| {
+            372 + (scale * 3 + ch) * FEATURES_PER_CHANNEL_V2_TOTAL + idx::EDGE_WIDTH_CHANGE
+        };
+        let all: Vec<usize> = (0..228).chain(372..720).collect();
+        for revision in [FormulaRevision::Rev1, FormulaRevision::Rev7] {
+            let plan_for = |ids: &[usize]| {
+                Plan::derive_with_layout_at(
+                    &SlotSet::from_slots(ids.iter().copied()),
+                    Layout::identity(720),
+                    revision,
+                )
+                .unwrap()
+            };
+            let f_full = run(&plan_for(&all));
+            // Every Y-channel v2 slot keeps v2 work live at every scale, so the
+            // chroma channel is skipped at scales where its gradients exist.
+            let luma: Vec<usize> = (0..ns)
+                .flat_map(|scale| {
+                    let base = 372 + (scale * 3 + 1) * FEATURES_PER_CHANNEL_V2_TOTAL;
+                    base..base + FEATURES_PER_CHANNEL_V2_TOTAL
+                })
+                .collect();
+            for ch in [0, 2] {
+                for scale in 0..ns {
+                    for with_luma in [false, true] {
+                        let id = ewc(scale, ch);
+                        let mut ids = vec![id];
+                        if with_luma {
+                            ids.extend(&luma);
+                        }
+                        let plan = plan_for(&ids);
+                        let s = scale.min(ns - 2);
+                        for at in [s, s + 1] {
+                            assert!(
+                                plan.compute.channel_active(at, ch),
+                                "{revision:?} f{id}: channel {ch} off at scale {at}"
+                            );
+                        }
+                        let f = run(&plan);
+                        let emit = plan.compute.populated_slots(ns, 720);
+                        for (i, &v) in f.iter().enumerate() {
+                            if emit.contains(i) {
+                                assert_eq!(
+                                    v.to_bits(),
+                                    f_full[i].to_bits(),
+                                    "{revision:?} f{id} (luma {with_luma}): f{i} {v} vs {}",
+                                    f_full[i]
+                                );
+                            } else {
+                                assert_eq!(
+                                    v, 0.0,
+                                    "{revision:?} f{id} (luma {with_luma}): f{i} = {v} outside the emit set"
+                                );
+                            }
+                        }
+                        assert!(emit.contains(id), "{revision:?} f{id} not emitted by its own plan");
+                    }
+                }
+            }
+        }
+    }
+
     // ========================================================================
     // HDR route gates (HDR_PLAN chunk 2 — streaming PU front-end)
     // ========================================================================

@@ -1486,11 +1486,18 @@ impl Zensim {
             let want = family_slots(ComputeToken::Basic, config.num_scales)
                 .union(&family_slots(ComputeToken::Peaks, config.num_scales))
                 .union(&family_slots(ComputeToken::V2, config.num_scales));
-            Some(crate::feature_plan::Plan::derive(&want, 720).map_err(|_| {
-                ZensimError::ModelLoadFailed {
+            // At the profile's revision, as `Plan::for_bake` serves it: a slot
+            // request alone would take the shipped revision (1).
+            Some(
+                crate::feature_plan::Plan::derive_with_layout_at(
+                    &want,
+                    crate::feature_layout::Layout::identity(720),
+                    config.revision(),
+                )
+                .map_err(|_| ZensimError::ModelLoadFailed {
                     reason: "cannot derive the full supported Rev5 extraction plan",
-                }
-            })?)
+                })?,
+            )
         } else {
             None
         };
