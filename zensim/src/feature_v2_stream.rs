@@ -1,43 +1,3 @@
-//! Streaming strip-plane producer for the folded-720+append walk.
-//!
-//! C1 of `docs/STREAMING_FOLDAPP_C0_DESIGN_2026-07-26.md` (plan:
-//! `STREAMING_FOLDAPP_PLAN_2026-07-26.md`): produce, per pair, the exact
-//! per-kernel-strip plane windows the v2 walk consumes — WITHOUT ever
-//! materializing a full-image f32 plane on either side.
-//!
-//! # Architecture (design note §3)
-//!
-//! - **Rolling planes:** 2 sides × 3 channels × [`crate::NUM_SCALES`]
-//!   scales of row-windowed buffers ([`RollingPlane`]: linear rows,
-//!   `[lo, hi)` window, memmove compaction — kernels get ordinary
-//!   contiguous `&[f32]` row slices, never ring indexing).
-//! - **Scale-0 fill** converts source rows in chunks through
-//!   [`crate::streaming::convert_source_to_xyb_into_slices`] with
-//!   `abs_row_offset` so even translucent-alpha noise-background phase
-//!   matches the whole-image conversion bit-for-bit.
-//! - **Pyramid fill:** scale s+1 rows come from
-//!   [`crate::blur::downscale_2x_into`] over even row pairs of scale s —
-//!   the same arithmetic `build_v2_ref_scales` documents as bit-identical
-//!   to the materialized walk's `downscale_2x_inplace`.
-//! - **Per-scale kernel-strip cursors:** scale s emits its next
-//!   [`STRIP_ROWS`]-row kernel strip (the 128-row tiling of the FULL
-//!   plane, rooted at row 0 — identical to
-//!   `compute_channel_scale_v2_with_fold`'s loop) as soon as the rolling
-//!   window covers the strip's `HALO_P`-padded wide window. Strips of a
-//!   scale always emit in ascending order; scales interleave (shallowest
-//!   ready first) — irrelevant to parity because every consumer
-//!   accumulates per-(scale, channel).
-//!
-//! # Parity contract (C1 unit gate)
-//!
-//! For every emitted strip, [`StripPlaneProducer::fill_wide`] writes ONE
-//! channel-side's wide window with bytes EQUAL to
-//! [`gather_strip_halo`]`(full_plane, …)` run against the materialized
-//! pyramid of the same image — including `reflect_101` rows at the true
-//! top/bottom. [`StripPlaneProducer::wide_window`] additionally returns
-//! the window as a zero-copy slice when no reflection is needed
-//! (interior strips — the fast path the C2 walk reads in place).
-
 use crate::feature_v2::{HALO_P, STRIP_ROWS, reflect_101};
 use crate::source::{ImageSource, SubsetView};
 
@@ -328,8 +288,6 @@ pub(crate) struct StripPlaneProducer<'a, S: ImageSource, D: ImageSource> {
     /// Scale-0 rows converted per [`Self::produce`] call, and hence this
     /// producer's rolling-window capacity — see [`advance_rows_for`].
     advance_rows: usize,
-    /// The walk's formula revision — what the scale-0 opsin conversion runs
-    /// (canonical at Rev4, featcanon D1).
     revision: crate::feature_defs::FormulaRevision,
 }
 
@@ -911,9 +869,6 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
                 }
             }
         }
-
-        // `ZENSIM_PYRAMID=linear`: the same rows in linear RGB, the parents of
-        // every coarse level.
 
         // --- Cascade downscales: fill each deeper scale from complete
         //     even row pairs of its parent. ---

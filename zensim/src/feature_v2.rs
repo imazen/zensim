@@ -1,51 +1,7 @@
-//! V2 "bounded" feature extraction — additive regime.
+//! Streaming multi-scale feature extraction for the embedded profiles.
 //!
-//! Gated behind `feature-regime-v2` (default ON since 2026-09-01 — the
-//! Profile-D no-tax refactor, `benchmarks/profile_d_notax_2026-09-01.md`;
-//! `--no-default-features` still removes this whole module). Full defect inventory
-//! (D1-D9), design principles, per-feature formula/bound/citation table,
-//! and iteration-1 as-built: `docs/FEATURE_V2_SPEC_2026-07-18.md` Part A/B.
-//! This file is iteration 2 ("phase 2" / "feature-v2b"): §A.11/§A.12 of
-//! that doc cover the fused kernel design, spill counts, per-feature
-//! marginal cost, and the speed-gate verdict.
-//!
-//! # Iteration 2: single-pass, O(1)-accumulator kernel
-//!
-//! Iteration 1 stored NINE full-image `Vec<f32>` per-pixel maps (one per
-//! basic-family signal) and processed them in two passes. Measured against
-//! v1 (`docs/FEATURE_V2_SPEC_2026-07-18.md` §A.12): 2-5x SLOWER than v1's
-//! full 372-feature extraction — an unacceptable baseline for adding more
-//! features on top. Iteration 2 replaces this with a genuinely single-pass
-//! kernel using O(1) running accumulators:
-//!
-//! - **Simple means** (art, det, mse, hf_*, pjnd_*, gms, ringing, banding,
-//!   blockiness): a running sum, divided by `n` at the end. No storage.
-//! - **SSIM mean/dev2/dev4**: Terriberry's (2007) single-pass online
-//!   higher-order moments (mean + M2 + M3 + M4 running scalars) — the
-//!   GMSD-style deviation-from-mean moments (iteration 1's D8 fix) computed
-//!   WITHOUT a second pass or any array, unlike iteration 1's
-//!   store-then-revisit approach.
-//! - **Masked / IW / soft-peak weighted pooling**: running
-//!   `(Σw·v, Σw)` numerator/denominator pairs, divided at the end
-//!   (`WeightedPool`'s `Σw·v/Σw` form, computed inline rather than
-//!   materializing weight or value arrays).
-//!
-//! The only per-scale arrays that remain are the blur-pass outputs
-//! (`mu1`, `mu2`, `s12`, `ssq`, `activity`) — these are inherently
-//! multi-pixel (a box blur cannot be expressed as a running per-pixel
-//! accumulator), and v1's own architecture carries the same five arrays
-//! for the same reason (`streaming.rs`). Everything downstream of them is
-//! now one `for y { for x { ... } }` loop with O(1) extra space.
-//!
-//! # Iteration 2: seven new candidates (`docs/FEATURE_V2_SPEC_2026-07-18.md`
-//! §A.10, phase-congruency explicitly excluded — LARGE/log-Gabor cost)
-//!
-//! All reuse the SAME per-pixel gradient computed once per (channel,
-//! scale) pixel and shared across every gradient-consuming feature (GMS,
-//! chroma-edge-GMS [=GMS evaluated on the X/B channels via the existing
-//! per-channel loop — no extra computation], ringing, banding, oriented
-//! blockiness, edge-width-change) — see `idx` module and
-//! `compute_channel_scale_v2`'s per-pixel loop.
+//! Revision 1 uses the legacy kernels; revisions 5 and 7 use canonical kernels.
+//! Extraction plans select the computed scales, channels, and feature families.
 
 use crate::det_math::DetRoots;
 use crate::error::ZensimError;
@@ -221,114 +177,18 @@ pub const C_EDGEWIDTH: f64 = 1e-3;
 /// (`decay = mean_grad(coarser) / (mean_grad(finer) + C_GRAD_DECAY)`).
 pub const C_GRAD_DECAY: f64 = 1e-4;
 
-// ============================================================================
-// f720+ APPEND block — additions from the 2026-07-26 gap audit
-// (`zenpapers/docs/zensim-720-feature-gaps-2026-07-26.md` §5, candidates
-// A1-A5 + A9). Append-only: emitted AFTER the frozen f0..f719 layout, in a
-// separate region `f720 + scale*(3*17) + ch*17 + local` (scale-major, same
-// convention as the v2 block). Gated by `V2NewFeatureToggles::append_block`
-// (default OFF — every existing path/byte is unchanged when off). Computed
-// by a SEPARATE second kernel pass over the cache-hot strip planes
-// (`append_block_kernel`) so the tuned dense/gradient kernels are not
-// touched (their §A.14/§A.16 register-pressure story stays intact) and
-// f0..f719 bit-stability is structural, not incidental.
-// ============================================================================
-
-/// Named local offsets within one channel's append block.
 pub mod idx_append {}
 
-// ============================================================================
-// append2 (f924+) constants — BANDVIS + luminance conditioner + HL bins.
-// δ values are EMPIRICAL (test `bandvis_delta_derivation_table` prints the
-// measurement; derivation committed in
-// `benchmarks/append2_bandvis_gates_2026-07-27.md`). PROVISIONAL until the
-// measurement lands — the derivation test brackets them against the live
-// front-ends so a front-end change that invalidates them fails loudly.
-// ============================================================================
-
-/// Stabilizer for the BANDVIS FR `bounded_excess` pair (indicators are
-/// [0,1] products — same class as `C_EDGE`).
 pub(crate) const C_BV: f64 = 1e-4;
 
-/// Named local offsets within one scale's append2 block (all Y-only).
 pub mod idx_append2 {}
 
-// ============================================================================
-// CSFW (f944+) constants — chunk-3 luminance-CSF tier-1: Y-only
-// luminance-weighted GLOBAL_* pooling lanes
-// (`docs/CSF_CHUNK3_DESIGN_2026-07-28.md`; coordinator descope 2026-07-28:
-// tier-1 ships the 12 achromatic lanes f944..f955 only — the chroma tiers
-// keep the f956..f979 claim). The φ quadratics are DERIVED AND FROZEN, not
-// fitted: castleCSF's published achromatic-sustained luminance sensitivity
-// (Eq. 21, constants 56.49/7.547/0.1445/5.583e−7/9.669e9) divided by each
-// route's own encoding derivative (cube root on the SDR route; PU21
-// `banding_glare` from `pu21.rs` on the HDR route), normalized at the
-// route anchor (sRGB code 128 = 43.73 cd/m² SDR; 100 cd/m² HDR), quadratic
-// least-squares in the ENCODED coordinate over codes 4–255 (SDR) /
-// L ∈ [1, 4000] cd/m² (HDR — below ~0.5 cd/m² PU21's glare term and
-// castleCSF's glare-free model disagree; the clamp owns that region).
-// `csfw_phi_derivation_table` recomputes the derivation against the LIVE
-// front-ends and brackets these constants — the `bandvis_delta_derivation_
-// table` pattern that keeps them honest.
-// ============================================================================
-
-/// Named local offsets within one scale's CSFW block (all Y-only).
-///
-/// Each lane is the luminance-CSF-weighted twin of the same scale's
-/// unweighted Y-channel [`idx_append`] GLOBAL_* statistic: the pooling
-/// mean `Σv/n` becomes `Σw·v/Σw` with the per-pixel REF-side weight
-/// `w(y) = clamp(1 + κ_Y·λ_b·φ_Y(y), CSFW_W_MIN, CSFW_W_MAX)` evaluated
-/// at the reference Y-plane value (the same per-pixel `ref_y` the HL
-/// bins read). Same constants (`C_GDMEAN`/`C_GCONTRAST`), same clamps,
-/// same bounds as the unweighted twins. E2-CLASS CAVEAT: the weighted
-/// twins are correlated with their unweighted originals BY CONSTRUCTION
-/// (`κ→0` makes them identical) — trainers must treat each (weighted,
-/// unweighted) pair as non-orthogonal; LOO on a 956 bake adjudicates
-/// slot-worth, exactly the BANDVIS discipline.
 pub mod idx_csfw {}
 
-// ============================================================================
-// REV4 candidate bank (2026-09-23 lane — `benchmarks/rev4_featbank_impl_
-// 2026-09-23.md`, spec `docs/REV4_FEATURE_BANK_PLAN_2026-09-23.md` §1.1).
-// Four append-only families at f986+; every slot is difference-form and
-// every flag is independent (the emit tail is absolute-positioned, so any
-// subset stays index-stable). Layouts mirror `feature_defs::BLOCKS`:
-// gridblk/ringbasis/tailhist are PerChannel (`(scale*3 + ch)*per_cell +
-// local`), arttype is PerScale (`scale*ARTTYPE_PER_SCALE + local`).
-// ============================================================================
-
-/// Named local offsets within one scale's arttype block.
 pub(crate) mod idx_arttype {}
 
-// ---------------------------------------------------------------------------
-// Calibration diagnostics (registry-revision tooling, 2026-09-24).
-// `ZENSIM_REV4_DIAG` set at process start enables per-cell fine-grained
-// histogram dumps on stderr at finalize — used only for the C3 top-edge
-// and C1 hat-centre calibration over TRAIN corpora. Default off; the
-// `Option` check is one predictable branch per scatter/rescan pass.
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// REV4 per-(scale, channel) accumulator cell
-//
-// Merge-free by construction: the streaming and materialized walks both run
-// the SAME kernel strips in the SAME order and write into the cell directly
-// (the `blockiness_sparse_strip_wide` running-total pattern — "a per-strip
-// partial would reassociate"), so serial, parallel-channel and
-// streaming-vs-materialized paths all produce identical f64 op sequences.
-// ---------------------------------------------------------------------------
-
-/// All rev4 state for one (scale, channel) cell. Untouched when every
-/// rev4 compute flag is off.
 #[derive(Default)]
 struct Rev4CellAccum {}
-
-// ---------------------------------------------------------------------------
-// REV4 emission: one PerChannel cell = gridblk(8) + ringbasis(6) +
-// tailhist(12) = 26 slots in that order; arttype is emitted per scale by
-// `finish_arttype_scale` (its blur term needs the cross-scale EWC value,
-// which only exists at finalize).
-// ---------------------------------------------------------------------------
 
 /// Box blur radius at scale 0 — matches v1's `ZensimConfig::default()`.
 pub(crate) const BLUR_RADIUS: usize = 5;
@@ -485,21 +345,8 @@ fn square_into(input: &[f32], out: &mut [f32]) {
     }
 }
 
-/// Per-channel, per-scale raw sums for the folded v1 feature blocks.
-/// The canonical fused kernel supplies basic and peak (max/L8) accumulators,
-/// plus the weighted pools and free extras requested by the feature plan.
-/// Finalizers below emit the corresponding slots with global scale
-/// normalization. Peak slots 156..228 are supported and consumed by candidate
-/// models; they are not deprecated or silently discarded.
 #[derive(Debug, Clone, Copy)]
 struct V1BasicSums {
-    // featacc: every f64 sum slot is a `featcanon::SumVar` — production
-    // resolves to `Seq` (the plain `+=` below), a measurement mode to the
-    // matching lane/Neumaier form. Two constructors pick the ELEMENT axis:
-    // `meas_f64` for slots fed f64 strip partials (`accumulate`), `meas_f32`
-    // for slots fed f32-native terms (`accumulate_block` in z1max) — under
-    // `c32` the former stays sequential (f64 terms) and the latter takes
-    // f32 lanes.
     ssim_d: crate::featcanon::SumVar,
     ssim_d4: crate::featcanon::SumVar,
     ssim_d2: crate::featcanon::SumVar,
@@ -539,14 +386,6 @@ struct V1BasicSums {
     iw_art4: crate::featcanon::SumVar,
     iw_det4: crate::featcanon::SumVar,
     iw_mse: crate::featcanon::SumVar,
-    // --- FREE raw moments ([`V1FreeExtras::RawMoments`]) ---
-    // Σsrc, Σdst, Σsrc², Σdst² over this (scale, channel). Zero unless the
-    // request asked for them; the fused kernel's own fields of the same
-    // name are their only source.
-    // --- FREE bounded error ([`V1FreeExtras::RawMomentsPlusBoundedErr`]) ---
-    // Σ sat((s−d)², C_MSE) over this (scale, channel), and the Y-only
-    // dark/bright weighted sums of that same per-pixel value. Zero unless
-    // the request asked for them.
 }
 
 impl V1BasicSums {
@@ -684,8 +523,6 @@ impl V1BasicSums {
         debug_assert_eq!(masked.len(), 6);
         debug_assert_eq!(iw.len(), 6);
         let one_over_n = 1.0 / n as f64;
-        // Hoisted out of the nine root calls below: it reads a `OnceLock`,
-        // which LLVM cannot hoist for you. Same discipline as `gain_form`.
         let root_form = crate::det_math::RootForm::at_revision(Some(revision));
         peaks[0] = self.ssim_max;
         peaks[1] = self.edge_art_max;
@@ -931,12 +768,6 @@ fn fold_v1_one_band(
     raw: [&[f32]; 2],
     sums: &mut V1BasicSums,
     mut pools: Option<(&mut FoldPoolScratch, BandPoolWork)>,
-    // `free`: which FREE extra accumulators the fused kernel should carry —
-    // the raw moments (Σs, Σd, Σs², Σd²) that finalize the append block's
-    // GLOBAL_* trio and append2's LUMA_MEAN_REF, and/or the class-C
-    // bounded-error family (v2 `MSE` + the Y luminance bins). None of them
-    // needs a new plane, load or pass ([`V1FreeExtras`],
-    // [`crate::fused::FreeExtrasWork`]).
     free: crate::fused::FreeExtrasWork,
 ) -> usize {
     let [src, dst] = raw;
@@ -1145,12 +976,6 @@ fn fold_v1_one_band(
             &mu1_h[span_h.clone()],
             &mut act_raw[..band_n],
         );
-        // Revision 3: the SAME fused extension the streaming path runs
-        // (`streaming.rs`, `fused_ext`) — the activity's V blur and every
-        // masked/IW pool ride inside the SSIM V sweep, over the same bands
-        // in the same order, which is what keeps the rev-3 fold/streaming
-        // pool parity gate bit-exact. Here `act` then holds the H-BLURRED
-        // activity the sweep V-blurs in-register.
         let fused_ext = stable;
         if fused_ext {
             crate::blur::box_blur_h(
@@ -1642,24 +1467,6 @@ pub(crate) fn finish_channel_scale_at_revision(
 // Top-level entry point
 // ============================================================================
 
-// ============================================================================
-// STREAMING folded-720[+append] walk (C2 of
-// docs/STREAMING_FOLDAPP_C0_DESIGN_2026-07-26.md).
-//
-// Consumes `feature_v2_stream::StripPlaneProducer`'s kernel strips instead
-// of materialized full-image pyramids: per emitted strip, phase A fills
-// each channel's wide windows (`gather_strip_halo` semantics from the
-// rolling planes) + runs the SAME blur pass the materialized walk runs on
-// its moments-free path + the P2 strip-tiled bs2 chain; phase B runs the
-// SAME dense/gradient/append/fold kernels and folds their per-strip
-// accumulators into per-(scale, channel) totals in kernel-strip order —
-// the exact f64 op sequence of the materialized walk. Finalize replays
-// the materialized walk's per-scale epilogue (finish + fold finalize +
-// edge-width chain) on the merged accumulators. Output is BITWISE equal
-// to the materialized pair path (test-gated below); no full-image f32
-// plane exists on either side at any point.
-// ============================================================================
-
 /// Per-channel accumulator state for the streaming walk: per-scale totals
 /// for every family the walk pools, merged strictly in kernel-strip order.
 struct StreamChannelAccums {
@@ -1811,9 +1618,6 @@ impl Rev5StripJob {
     }
 }
 
-/// Rev5's basic hook reads vertical planes, so horizontal moments are dead
-/// after vertical blur. Reuse two of those planes as activity-chain temps;
-/// no append bs2 or separate activity temps are retained in queued jobs.
 #[cfg(feature = "threads")]
 fn rev5_job_scratch(n: usize) -> ScratchV2Strip {
     let mut scratch = ScratchV2Strip::new_for(n, StripPlaneNeeds::NONE);
@@ -2086,7 +1890,6 @@ fn rev5_merge_job(
             sum_v.merge_from(v);
             sum_h.merge_from(h);
         } else {
-            // Revisions 4–6 keep one running sum: the strip's windows, here.
             let n = info.plane_w * info.wide_h();
             let src =
                 rev5_cached_window(reference, info, job.ch).unwrap_or(&job.scratch.src_wide[..n]);
@@ -2229,15 +2032,6 @@ enum BlockWalkMsg {
     Job(usize, std::thread::Result<Box<Rev5StripJob>>),
 }
 
-/// The plain revision-5+ walk with parallel row production
-/// ([`crate::feature_v2_blocks`]): chunk tasks convert rows and downscale them
-/// into immutable blocks, strip jobs copy their own windows out of the blocks,
-/// and this thread only schedules, adds the `globaff` rows and merges finished
-/// jobs. Jobs are submitted, and merged, in the streaming walk's order: strips
-/// in ascending order within each scale and channels in order within a strip,
-/// so every accumulator receives the same partials in the same order and every
-/// value keeps its bits. Production runs at most a few chunks ahead of the
-/// rows the next strip needs.
 #[cfg(feature = "threads")]
 #[allow(clippy::too_many_arguments)]
 fn rev5_block_walk<S: ImageSource, D: ImageSource, const ALL_CHANNELS: bool>(
@@ -2384,14 +2178,10 @@ fn rev5_block_walk<S: ImageSource, D: ImageSource, const ALL_CHANNELS: bool>(
                     if hi[s] < (info.y0 + info.strip_h + HALO_P).min(info.plane_h) {
                         break;
                     }
-                    if next_ch[s] == 0 {
-                        // `globaff`: every strip of every scale, all three
-                        // channels, in strip order, before the dead-scale skip.
-                        if compute.scale_dead(s) {
-                            #[cfg(test)]
-                            SKIPPED_SCALES.with_borrow_mut(|v| *v |= 1 << s);
-                            next_ch[s] = 3;
-                        }
+                    if next_ch[s] == 0 && compute.scale_dead(s) {
+                        #[cfg(test)]
+                        SKIPPED_SCALES.with_borrow_mut(|v| *v |= 1 << s);
+                        next_ch[s] = 3;
                     }
                     let local = compute.at_scale(s);
                     let strip_toggles = V2NewFeatureToggles {
@@ -2502,7 +2292,6 @@ fn rev5_block_walk<S: ImageSource, D: ImageSource, const ALL_CHANNELS: bool>(
                         let chunk =
                             run.unwrap_or_else(|payload| std::panic::resume_unwind(payload));
                         arrived.entry(k).or_default()[side] = Some(chunk);
-                        // Append whole chunks (both sides) in order.
                         while let Some(both) = arrived.get(&appended)
                             && both.iter().all(Option::is_some)
                         {
@@ -2670,19 +2459,6 @@ fn stream_windows_shared<'w, S: ImageSource, D: ImageSource>(
     }
 }
 
-/// The wide-window GATHER half of [`stream_phase_a`], for the self-blur band
-/// shape that skips the rest of phase A.
-///
-/// Interior strips take the producer's rolling-plane slices directly and this
-/// is a no-op; only a strip touching the true top or bottom needs the
-/// reflect-padded copy into the scratch, which is exactly what
-/// [`stream_windows_shared`] then reads back. Byte-identical to what phase A
-/// does — it is the same two calls, lifted.
-///
-/// Its only call site is inside a `#[cfg(feature = "threads")]` block, so a
-/// `threads`-off build (e.g. the `feature-regime-v2`-alone CI permutation)
-/// has no caller for it; `cfg_attr` scopes the allow to exactly that case
-/// rather than silencing dead-code detection when `threads` IS on.
 fn stream_gather_windows<S: ImageSource, D: ImageSource>(
     producer: &crate::feature_v2_stream::StripPlaneProducer<'_, S, D>,
     info: &crate::feature_v2_stream::StripInfo,
@@ -2699,13 +2475,6 @@ fn stream_gather_windows<S: ImageSource, D: ImageSource>(
     }
 }
 
-/// Phase A of one (strip, channel): resolve the wide windows (zero-copy
-/// producer slices for interior strips; `fill_wide` into the scratch
-/// buffers when the strip touches the true top/bottom), then the
-/// materialized walk's moments-free blur pass (fused H + 4x V +
-/// activity), plus the P2 strip-tiled bs2 σ-split chain when the append
-/// cell is active (`abs_src`/`activity_tmp` are dead after the activity
-/// chain and serve as its square/H temps).
 fn stream_phase_a<S: ImageSource, D: ImageSource>(
     producer: &crate::feature_v2_stream::StripPlaneProducer<'_, S, D>,
     info: &crate::feature_v2_stream::StripInfo,
@@ -2773,13 +2542,6 @@ fn stream_phase_a<S: ImageSource, D: ImageSource>(
         parallel,
         revision,
     );
-    // BANDVIS dst self-mask (`append2_dst_activity`, Y channel only): the
-    // exact dst twin of the ref activity chain — `box_blur(|dst − mu2|)`
-    // over the same wide window, mu2 already produced by the fused blur
-    // pass above. `abs_src`/`activity_tmp` are dead after the ref chain
-    // and serve as its temps (the same reuse the bs2 fill below makes —
-    // which runs after and overwrites them again, so ordering here is
-    // load-bearing: act-dst BEFORE bs2).
     if want_act_dst {
         if activity_dst.len() < n_wide {
             activity_dst.resize(n_wide, 0.0);
@@ -2979,11 +2741,6 @@ fn stream_fold_v1(
             V1PoolsMode::Full => Some((&mut acc.pool_scratch[..], BandPoolWork::Full)),
         },
         band_parallel,
-        // FREE EXTRAS: the fused kernel carries an extra accumulator only
-        // when a block that is OFF will finalize it (`ComputeSet::
-        // free_work`). With the owning blocks on, their own kernels own
-        // those slots and every flag is false, so the full 944 walk is
-        // untouched.
         free,
     );
 }
@@ -3043,60 +2800,6 @@ fn blockiness_sparse_strip_wide(
         sum_h.merge_from(&ph);
     }
 }
-
-// ============================================================================
-// REV4 C1 `gridblk` strip kernel (design note §C1).
-//
-// `ẽ = (|Δdst| − |Δsrc|) / ((act_a + act_b)/2 + C_ACTIVITY)` is computed
-// for EVERY vertical boundary (x ∈ 1..w) and horizontal boundary
-// (y ∈ 1..h) — not the sparse lattice-only subset `blockiness` visits,
-// because the winning phase is data-dependent and the profile needs all
-// `2n` boundaries. The winning phase is only known after the whole plane
-// is walked, so the kernel STORES `ẽ` into the cell's `plane_v`/`plane_h`
-// f32 buffers and `finish_gridblk_cell` rescans the on-grid positions
-// only (~2n/P hat evaluations — the store-then-rescan shape).
-//
-// Wide-window contract (same as `blockiness_sparse_strip_wide`, extended
-// by the activity plane): `*_wide` are `width * (strip_h + 2*HALO_P)`,
-// buffer row `HALO_P + k` = plane row `y0 + k`. `act_wide` covers the
-// identical wide window including halo rows (phase A fills all of
-// `scratch.activity`), so the H boundary at plane row `y0` reads the REAL
-// plane row `y0 − 1` from the halo, and the scalar/V8 paths index the
-// same offsets.
-//
-// PROFILE DETERMINISM: the emitted values are defined by THIS kernel —
-// per-phase `Σ|ẽ|`/`Σẽ` accumulate as: (a) two V8 lane pairs for the
-// chunked V span (chunks start at x = 1 + 8c, so lane k of parity-j
-// chunks covers positions ≡ (1 + 8j + k) mod period — the fold happens
-// once per strip into the f64 phase totals); (b) per-row V8 accumulators
-// for H (a row's boundaries share phase `y mod period`), lane-summed in
-// fixed f32 order then added to f64; (c) scalar tails fold into the f64
-// phase totals in row order. Every engine, tier and thread count replays
-// the identical sequence, so the feature is bit-deterministic while its
-// values carry f32-lane accumulation precision — the documented
-// exception to the row-ordered-f64 convention, chosen because a
-// per-boundary scalar scatter cannot meet the family's runtime budget.
-// ============================================================================
-
-// ============================================================================
-// REV4 C4 `arttype` bleed mask builder (design note §C4).
-//
-// The mask marks every pixel within Chebyshev distance 1 of a dst-Y
-// edge — where "edge" is the gradient kernel's own test
-// (`(gx² + gy²).sqrt() >= C_RING_EDGE`, x-neighbours column-clamped,
-// y-neighbours the caller-supplied rows). Built once per strip before
-// the channel fan-out so the serial path (X/B processed before Y) has it
-// ready for the chroma gradient hooks.
-//
-// `dh` holds the dst-Y plane rows `reflect_101(y0 − 2 + r, plane_h)` for
-// `r ∈ 0..strip_h + 4`, fetched by the caller (producer `rows` in the
-// streaming walk, `gather_strip_halo` in the materialized path). The
-// edge formula is evaluated in V8 f32 uniformly at every position —
-// the deterministic definition; scalar tails use the identical f32 op
-// sequence. `mul_add` is deliberately NOT used (its FMA fusion is
-// tier-dependent — the same reason the production kernels spell
-// `a*b + c` out).
-// ============================================================================
 
 pub(crate) fn compute_folded_v1_372_streaming_stoppable(
     source: &impl ImageSource,
@@ -3250,16 +2953,6 @@ pub(crate) fn compute_folded_v1_372_with_ref_stoppable(
     Some((res.into_features(), mo.finish()))
 }
 
-/// Whether `precomputed` can feed the source side of a fold walk over
-/// `distorted` under `plan` — the ref-cached form's admission test, shared by
-/// [`compute_folded_v1_372_with_ref_impl`] and the retaining
-/// [`compute_folded_with_ref_retained`].
-///
-/// Refuses a sampled cache or plan, a pre-Rev5 v2 plan, HDR input, a
-/// distorted image not at the cache's compute dims, a cache that fails
-/// [`cached_ref_feed_usable`], and a plan with a restored-cut side pass
-/// (`mapdev` / `z1max`): those rebuild both pyramids from the source pixels,
-/// which a ref-fed walk does not have (the walk asserts on that combination).
 pub(crate) fn ref_feed_admits(
     precomputed: &crate::streaming::PrecomputedReference,
     distorted: &impl ImageSource,
@@ -3278,40 +2971,6 @@ pub(crate) fn ref_feed_admits(
         && cached_ref_feed_usable(&precomputed.scales, cw, ch)
 }
 
-/// The streaming walk body (inputs already validated + ≥ 64px).
-/// `retention`: the fused compare's extractor-side hooks (appendix N) —
-/// `Some` copies per-strip planes + finalize accumulators into the
-/// [`FoldRetention`]; `None` (every pre-existing caller) is the untouched
-/// walk. The hooks only COPY: accumulation, kernels, and finalize are
-/// identical either way, so retained and plain walks emit bitwise-equal
-/// features (G-N1).
-/// Per-scale-0-row `Σ_x (src[x] − dst[x])` sums, in f64, one triple per row —
-/// the decomposition that lets the streaming fold reproduce the buffered
-/// path's `ZensimResult::mean_offset` **bit-exactly** rather than to a
-/// tolerance.
-///
-/// `streaming::compute_xyb_mean_offset` sums 64-row chunks, each chunk
-/// summing per-row f64 sums of `(s[i] − d[i]) as f64` — note the subtraction
-/// happens in **f32** and only the difference is widened. Two properties make
-/// it reproducible from a strip walk that visits scale-0 rows in a different
-/// grouping:
-///
-/// 1. It is already **thread-invariant**: the rayon arm is an
-///    order-preserving `into_par_iter().map().collect()` and the final
-///    reduction walks that `Vec` serially in row order, so parallelism never
-///    reassociates it.
-/// 2. It **decomposes per row**: chunk `acc` is a left-to-right f64 sum of
-///    per-row sums, so recording the per-row sums as the strips go past and
-///    performing [`Self::finish`]'s identical chunk reduction afterwards
-///    lands on the same bits.
-///
-/// Cost is one `Vec<[f64; 3]>` of `height` entries (55 KB at 2304², against
-/// the walk's measured 163 MB peak RSS) plus one f32 subtract + f64 add per
-/// scale-0 pixel per channel, taken while the producer's rolling plane rows
-/// are already cache-hot.
-/// Rows per task in [`MeanOffsetRows::add_strip`]'s fan-out. Purely a
-/// schedule parameter — the values are per-row and assignment-only, so no
-/// choice here can move a byte (`mean_offset_row_bands_are_bit_exact`).
 #[cfg(feature = "threads")]
 const MEAN_OFFSET_BAND_ROWS: usize = 16;
 
@@ -3623,9 +3282,6 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
             compute.formula_revision,
         )
     });
-    // BANDVIS dst self-mask live: phase A additionally produces the Y
-    // channel's dst-activity plane (and ONLY the Y channel's — the block
-    // is Y-only, so X/B never pay the chain).
     let mut producer = StripPlaneProducer::new_with_ref_feed(
         source,
         distorted,
@@ -3634,8 +3290,6 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
         front_end,
         ref_planes,
         toggles.formula_revision,
-        // `globaff` reads every channel's rows at every scale, so the
-        // scale-zero chroma rows stay in the rolling planes.
         !compute.full_res_xb,
     );
 
@@ -3690,8 +3344,6 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
             break;
         };
         let scale = info.scale;
-        // `globaff`: every strip of every scale, all three channels, in
-        // strip order — before the dead-scale skip, which knows nothing of it.
         let local = compute.at_scale(scale);
         let v2_blocks = local.v2_blocks;
         let toggles = V2NewFeatureToggles {
@@ -3917,8 +3569,6 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                     );
                 });
             let scratches: &[ScratchV2Strip; 3] = scratch_strips;
-            // Retention hooks (appendix N): serial copies between the two
-            // fan-outs — pure reads of the phase-A scratches + windows.
             accums.par_iter_mut().enumerate().for_each(|(ch, acc)| {
                 if !ALL_CHANNELS && !compute.channel_active(scale, ch) {
                     return;
@@ -4090,11 +3740,6 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
             );
         }
 
-        // Retention hooks (appendix N): the EXACT pooled cells + the
-        // mean-gradients this finalize just derived — the fused compare's
-        // coefficient inputs (the standalone derives them from its own
-        // 1e-9-parity pass-A replication instead).
-
         if fold_v1 {
             for (ch, acc) in accums.iter().enumerate() {
                 if !ALL_CHANNELS && !compute.channel_active(scale, ch) {
@@ -4106,22 +3751,6 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                     &mut features_v12[base..base + 13],
                     compute.formula_revision,
                 );
-                // FREE EXTRAS ([`V1FreeExtras::RawMoments`]): the v2-era
-                // slots this walk can finalize from the fused kernel's raw
-                // moments, written ONLY where the owning block is off — so
-                // this can never race the append/append2 finalize below.
-                // Index-stable: every other slot of those blocks keeps its
-                // structural 0.0.
-                // `!= Off`, not `== RawMoments`: every variant is a
-                // SUPERSET of the raw moments, so an exact-equality test
-                // here silently zeroes these 40 slots the moment a wider
-                // variant is requested (caught by
-                // `class_c_extras_are_pure_addition_to_the_free_walk`).
-                // CLASS-C FREE EXTRAS: the bounded-error slots, written under
-                // the same "only where the owning block is off" rule. The v2
-                // finalize above already ran and left `MSE` at its structural
-                // `clamp01(0/n) = 0.0` when `v2_blocks` is off, so this
-                // overwrite is the value's first and only real write.
                 if toggles.v1_pools != V1PoolsMode::Off {
                     // v1's block-major 372 layout: [basic 156][peaks 72]
                     // [masked 72][iw 72], each pool block scale-major then
@@ -4202,72 +3831,9 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
         }
     }
 
-    // --- append2 finalize (Y-only, per scale): BANDVIS means from the Y
-    //     gradient accumulators, the free luminance conditioner from the
-    //     Y append accumulator's Σs, and the HDR highlight bins. ---
-
-    // --- CSFW finalize (Y-only, per scale): the weighted GLOBAL_* twins
-    //     from the Y CSFW accumulators (design §4.1). ---
-
-    // --- REV4 finalize (per scale): C1 cells rescan their stored `ẽ`
-    //     planes; C2/C3 fold their accumulators; C4's blur reads the
-    //     already-emitted EWC_Y × HF_LOSS_Y — final only after the scale
-    //     loop's cross-scale EWC fill, which is why this sits after it.
-
     ZensimV2Result { features }
 }
 
-// ============================================================================
-// Attribution densities for the v2 (f372-719) + append (f720-923) blocks
-// (task #67 C2a — the coverage levers the C1 basic density measured missing).
-//
-// Same contract as `crate::attribution`: per-pixel density whose rectangle
-// sum over a block approximates `Σ_k s_k·Δf_k(block)` — the first-order
-// score change from refining the block to reference — with TRUE integrands
-// and ABSOLUTE normalization. `s` slices are the RAW model gradient
-// `∂score/∂f_k`; the sign fold happens via the `density = Σ_k s_k·(δf_k)_i`
-// rule ((δf_k)_i = the first-order feature change from refining pixel i's
-// content, e.g. `−v_i/N` for a mean-pooled error signal).
-//
-// Integrand classes (all derived from the production kernels in this file):
-//  - mean pools (v2: ssim_mean/art/det/mse/hf×3/pjnd×3/gms/ringing/banding;
-//    append: xmask/lumt/mscn×2/contrast×2/tex): (δf)_i = −v_i/N. Exact.
-//  - reference-weighted pools (masked/iw, append luminance bins):
-//    (δf)_i = −w_i·v_i/Σw (w reference-side). Exact.
-//  - self-weighted soft-peak (w_i = sat(v_i, C_PEAK), f = Σw·v/Σw):
-//    (δf)_i = w(v_i)·(f − v_i)/Σw — SIGNED; full-plane sum is exactly 0.
-//  - deviation pools (v2 SSIM_DEV2/DEV4; append GMS/ART/DET_DEV2):
-//    central-moment chain rule, SIGNED (zeroing a mean-valued pixel RAISES
-//    the deviation). DEV2: (δf)_i = (2μv−v²)/(2f·N); DEV4 via raw moments.
-//  - global slots (append GLOBAL_DMEAN/CGAIN/CLOSS): exact chain rule on
-//    whole-plane means/variances, SIGNED.
-//  - blockiness: lattice-step terms with one-sided shares per step end plus a per-step pair term
-//    applied by rectangle queries at cut steps (exact for footprint-aligned rectangle repairs; the
-//    sampling-geometry path keeps the symmetric 50/50 split).
-//  - EDGE_WIDTH_CHANGE: exact two-scale chain rule on the adjacent-scale
-//    mean-gradient ratios (incl. the last-scale copy's weight).
-//  - reference-only (PJND_FRAGILITY, GRAD_SRC_MEAN): (δf)_i = 0 exactly.
-//  - structural zeros (X/B transducer slots, the (B, scale 0) append cell):
-//    features are constant 0.0 in the regime ⇒ Δf ≡ 0 ⇒ integrand 0,
-//    regardless of the probed gradient (mirrors the harness's f156-371
-//    structural-zero handling).
-//
-// The finalize clamps (`clamp01`/`clamp02`) are treated as inert (features
-// live strictly inside their bounds on real content; at a saturated clamp
-// the true gradient is 0 and the density would over-attribute — accepted
-// and documented as an approximation).
-//
-// Pass A replays the MATERIALIZED strip walk (STRIP_ROWS + HALO_P halos,
-// `run_blur_pass_strip`, the σ-split `bs2` chain from `stream_phase_a`) and
-// then runs the PRODUCTION kernels over the cached planes, so every pooled
-// scalar feeding a coefficient is production-arithmetic (parity-gated by
-// `v2_append_attr_features_match_production`). Pass B re-derives the
-// per-pixel signals in f64 from the same planes — the density's plane sums
-// therefore match production features to per-pixel f32-vs-f64 recompute
-// noise (~1e-7 rel), not 1e-9; the pooled-scalar parity is the strict gate.
-// ============================================================================
-
-// Coarse per-section timers for ZENSIM_ATTR_PERF=1 (seconds, thread-local).
 thread_local! {
     static PERF_BLUR: std::cell::Cell<f64> = const { std::cell::Cell::new(0.0) };
     static PERF_KERN: std::cell::Cell<f64> = const { std::cell::Cell::new(0.0) };

@@ -30,6 +30,7 @@
 - `PrecomputedReference::width` / `height`; `try_score_from_features` (`training` feature).
 
 #### Changed
+- Remove obsolete research commentary from the extraction and scoring code.
 - Remove the constant transducer channel gate after auditing profile, cached, and training paths.
 - Fold revision-1 defaults in legacy kernels; canonical kernels retain explicit per-call revisions.
 - Remove empty research feature families and their unused planner and accumulator code.

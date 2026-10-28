@@ -1,23 +1,3 @@
-//! **The extraction PLAN** — one derivation from "what a consumer needs" to
-//! "what the walk must run and how wide the answer is".
-//!
-//! Design: `docs/FEATURE_SYSTEM_DESIGN_2026-09-05.md` §5. Phases + gates:
-//! `docs/PLAN_FEATURE_SYSTEM_2026-09-05.md`.
-//!
-//! Declared feature IDs and the formula revision determine one compute/layout
-//! plan for dense and legacy identity bakes. The previous block-profile
-//! fallback is retired; it enabled a BANDVIS variant absent from training.
-//! The September 7 canonical-pixel and serving-census gates cover the change.
-//!
-//! ## Universal servability
-//!
-//! The contract (user directive, 2026-09-05: *"also make sure everything can
-//! be served"*): **every bake whose read set consists of registered feature
-//! ids at a supported revision is servable**, in any declared layout. There is
-//! no "trains fine, cannot be served" class. A genuinely unregistered read is
-//! refused LOUDLY, by [`PlanError`], naming the slots — never served as
-//! silent zeros.
-
 use crate::feature_layout::Layout;
 use crate::feature_set_id::{ComputeToken, SlotSet};
 use crate::feature_v2::{ComputeSet, V1PoolsMode};
@@ -150,14 +130,6 @@ impl Plan {
         self.layout.walk_width()
     }
 
-    /// Plan for an explicit slot request at an explicit layout width.
-    ///
-    /// The derivation is one rule applied per family: a family runs iff the
-    /// request touches a slot it owns. The one subtlety is the free tranches —
-    /// a request that touches the append or append2 block ONLY at tranche
-    /// slots is served by the free accumulators instead of the (expensive)
-    /// owning kernel, which is what makes `basic+peaks+moments` a cheap plan
-    /// rather than a full 944 walk.
     #[cfg(test)]
     pub(crate) fn derive(want: &SlotSet, layout_width: usize) -> Result<Plan, PlanError> {
         Plan::derive_with_layout(want, Layout::identity(layout_width))
@@ -170,12 +142,6 @@ impl Plan {
         Plan::derive_with_layout_at(want, layout, crate::ssim_form::active_revision())
     }
 
-    /// [`Plan::derive_with_layout`] at an explicit formula revision rather
-    /// than the process's: the scope check, and the normalization that drops
-    /// layout-only families, use `revision`. A revision-6 bake's read set
-    /// reaches f1890, so its layout spans every optional block; deriving at
-    /// the process revision would treat those blocks as computed and force the
-    /// scale-zero chroma kernels on.
     pub(crate) fn derive_with_layout_at(
         want: &SlotSet,
         layout: Layout,
@@ -212,15 +178,7 @@ impl Plan {
             V1PoolsMode::Off
         };
 
-        // append2 requires append (the block sits at f924+ and reuses append
-        // accumulators — `V2NewFeatureToggles::append2_block` asserts it).
-        // `globaff` reads every channel's planes at every scale but runs no
-        // kernel: its slots are kept out of the channel and scale derivations
-        // below (`kernel_want`), so asking for it never turns on X/B kernels.
         let kernel_want = want.clone();
-        // `csfw_on` is `csfw_block && v2_blocks` in the walk, so a CSFW
-        // request implies the v2-era pass regardless of what else is asked.
-        // The four Rev4 feature-bank families are `rev4_* && v2_blocks` too.
         let v2_blocks = touches(ComputeToken::V2);
 
         let requested = ComputeSet {
@@ -261,9 +219,6 @@ impl Plan {
                 })
                 .fold(0, |mask, d| {
                     let bit = 1 << d.scale;
-                    // `edge_width_change` at scale s reads the gradient sums
-                    // of s and s+1 — and arttype's `blur` multiplies that
-                    // same finished slot, so it inherits the dependency.
                     if d.signal.name == "edge_width_change" {
                         let s = usize::from(d.scale).min(ns - 2);
                         mask | (1 << s) | (1 << (s + 1))
@@ -352,42 +307,6 @@ impl Plan {
         Ok(plan)
     }
 
-    /// Build a plan whose `compute` is **what the walk will actually run**,
-    /// not merely what was asked for, and whose `emit` follows from it.
-    ///
-    /// ## Why this exists (found by phase 2's perturbation probe, 2026-09-05)
-    ///
-    /// `V2NewFeatureToggles` has exactly ONE layout/compute separation:
-    /// `v1_only`, which turns every v2-era kernel off while leaving the
-    /// declared width alone. There is no *per-block* layout-only flag —
-    /// [`ComputeSet::from_toggles`] derives `append`/`append2`/`csfw` from the
-    /// SAME `*_block` flags that decide the width (`append_block &&
-    /// v2_blocks`, …), and it hard-sets `v1_basic: true` because no toggle can
-    /// turn v1's basic block off.
-    ///
-    /// So a plan that said "compute the append block but not CSFW, at layout
-    /// 956" described a walk that cannot exist: `toggles()` set `csfw_block`
-    /// from the WIDTH, the walk computed CSFW, and `emit` — derived from the
-    /// un-normalized request — said those twelve positions were structural
-    /// zeros. They were not. The probe measured `f944` at `0.0678` on a plan
-    /// that declared it unpopulated.
-    ///
-    /// The fix is a fixed point rather than a second rule: normalize through
-    /// the toggles the plan would emit, so
-    /// the family compute agrees with `ComputeSet::from_toggles(plan.toggles())`
-    /// ([`toggle_gates::normalization_is_a_fixed_point`]). The later private
-    /// full-resolution channel and per-scale restrictions are preserved
-    /// separately below; the public toggles continue to describe all scales.
-    /// `emit` only ever WIDENS, so no request that planned before stops
-    /// planning, and nothing that was served changes.
-    ///
-    /// The missing capability — a per-block layout-only flag, so a 956-wide
-    /// vector could carry a computed append block beside a zeroed CSFW one —
-    /// is REGISTERED, not built: it needs a walk change, and this lane's
-    /// scope is dispatch. Today the honest answer is that the walk computes
-    /// every block its declared width reaches on each selected v2 scale.
-    /// Declared IDs narrow those scales and retain adjacent gradient inputs;
-    /// within-scale block separation remains conservative.
     fn normalized(requested: ComputeSet, layout: Layout) -> Plan {
         let ns = crate::NUM_SCALES;
         let probe = Plan {
@@ -402,8 +321,6 @@ impl Plan {
         compute.v1_scales = requested.v1_scales;
         compute.v2_scales = requested.v2_scales;
         compute.omit_pjnd_fragility = requested.omit_pjnd_fragility;
-        // The globaff LAYOUT flag follows the width; the computation follows
-        // the request (it is cheap, but a wide layout must not imply it).
         compute.full_res_xb = requested.full_res_xb || !compute.allows_full_res_y_subset();
         compute.coarse_y_only_scales = if (!compute.v2_blocks || compute.chroma_local_families())
             && compute.v1_pools != V1PoolsMode::Full
@@ -427,11 +344,6 @@ impl Plan {
         }
     }
 
-    /// Plan for a loaded bake — **the servability entry point**.
-    ///
-    /// Declared feature IDs determine compute for both dense and legacy
-    /// identity layouts. The canonical BANDVIS activity variant is off,
-    /// matching training extraction (September 7 correction).
     pub(crate) fn for_bake(model: &crate::mlp::Model) -> Result<Plan, PlanError> {
         let revision = crate::feature_layout::formula_revision(model)
             .map_err(|_| PlanError::UnreadableBake)?;
@@ -439,8 +351,6 @@ impl Plan {
         let layout = crate::feature_layout::declared_layout(model);
         let want = bake_read_slots(model).ok_or(PlanError::UnreadableBake)?;
         let walk_width = layout.walk_width();
-        // Revision 6 derives at its own revision (see `derive_with_layout_at`);
-        // earlier bakes keep the process-revision derivation they always had.
         let mut plan = if revision == crate::feature_defs::FormulaRevision::Rev7 {
             Plan::derive_with_layout_at(&want, layout, revision)?
         } else {
@@ -453,23 +363,6 @@ impl Plan {
         if let Some(extra) = rev5_unsupported(&want, walk_width, revision) {
             return Err(PlanError::UnsupportedAtRev5 { extra });
         }
-        // **The SERVING-plan footprint policy, applied to both branches.**
-        // `fold_engine::pools_mode_for_need` owns the rule that `Off` is never
-        // the right answer for a served v1 walk: `Off` and `Peaks` compute the
-        // same sums (the peak accumulators are the fused V-blur's
-        // unconditional L8/max tier), but `Off` hands the band no scratch,
-        // which disables the band-local self-blur and falls back to phase A's
-        // four STRIP-wide H planes — a LARGER hot set for no arithmetic
-        // saving. `score_pool_mode` routes through that owner; the plan
-        // derives `v1_pools` from the touched families and does not.
-        //
-        // Before the dense flip nothing reached the second branch, so the
-        // divergence was invisible. MEASURED the moment shipped `D` declared
-        // its 28 basic ids: the id-space plan chose `Off`, and D's emitted
-        // vector went from real values at `f156..227` to zeros — the
-        // footprint regression the policy exists to prevent, with the score
-        // unmoved either way. Promoting here restores byte-identical
-        // behaviour and puts the policy back in one place.
         let plan = if revision < crate::feature_defs::FormulaRevision::Rev5
             && plan.compute.v1_basic
             && plan.compute.v1_pools == V1PoolsMode::Off
@@ -503,16 +396,6 @@ impl Plan {
         )
     }
 
-    /// The extraction request this plan resolves to.
-    ///
-    /// **The layout flags and the compute flags are different things**, and
-    /// the walk has always distinguished them — `layout_append =
-    /// toggles.append_block` decides the emitted WIDTH while `append_on =
-    /// compute.append` decides whether the kernel runs. That separation is
-    /// what makes a 944-wide vector with `f372..` at the structural `0.0`
-    /// expressible, and it is what the runtime never used: it hard-coded
-    /// `v1_only: true, ..Default::default()`, which pins every layout flag off
-    /// and so pins the emitted width to the v1 layout.
     pub(crate) fn toggles(&self) -> crate::feature_v2::V2NewFeatureToggles {
         let c = &self.compute;
         crate::feature_v2::V2NewFeatureToggles {
@@ -524,21 +407,6 @@ impl Plan {
             gradient_features: c.gradient,
             transducer_bank: c.transducer_bank,
             blockiness: c.blockiness,
-            // LAYOUT: a block's flag is on when the declared width reaches
-            // it, whether or not its kernel runs. The chain is NESTED, not
-            // four independent tests — `append2_block` asserts
-            // `append_block`, `csfw_block` asserts `append2_block`, and
-            // previous), so a width that reaches
-            // one necessarily reaches the ones below it. Written as a chain
-            // rather than four `>` tests so a future non-contiguous width
-            // cannot violate the assertion.
-            // The Rev4 feature bank extends the nested chain: each family's
-            // layout flag is on when the declared width reaches its base.
-            // A sub-toggle that REFINES a block cannot outlive it: the walk
-            // asserts `append2_dst_activity => append2_block`. `everything`
-            // (the fallback compute set for a wide bake) turns it on
-            // unconditionally, so a 720- or 924-wide bake reached that
-            // assertion — found by the board census, not by reading.
             v1_pools: c.v1_pools,
             // COMPUTE: `v1_only` turns every v2-era kernel off while leaving
             // the layout flags — and therefore the width — untouched.
@@ -665,26 +533,6 @@ fn pools_union(a: V1PoolsMode, b: V1PoolsMode) -> V1PoolsMode {
     if rank(a) >= rank(b) { a } else { b }
 }
 
-/// **THE owner of "which FEATURE IDS does this bake read".**
-///
-/// The in-crate twin of `zensim_validate::block_profile::used_caller_lines`,
-/// and NOT a duplicate of it: both are thin callers of
-/// [`crate::fold_engine::caller_line_reads`], which is the one owner of the
-/// caller-space fold. zensim cannot depend on zensim-validate (the dependency
-/// runs the other way), so the narrow primitive lives in the lower crate and
-/// the validate-side function keeps its richer per-line norms.
-///
-/// **`caller_line_reads` returns layer-0 POSITIONS, and a position is only a
-/// feature id under the identity layout.** That equality held for every bake
-/// that shipped before 2026-09-06 and is exactly the assumption the dense
-/// contract breaks: shipped `B` declares 95 ids spanning `f3..f369`, so its
-/// live positions are `0..94` and reading them as ids says it touches nothing
-/// above `f94` — which would tell the walk to skip the masked and IW pools
-/// `B` demonstrably reads. Mapping through
-/// [`crate::declared_feature_ids`] — the ONE owner of the declaration — is
-/// what makes this function answer the question its name asks. An
-/// identity-layout bake maps `i -> i`, so nothing shipped before the dense
-/// contract moves.
 pub(crate) fn bake_read_slots(model: &crate::mlp::Model) -> Option<SlotSet> {
     let reads = crate::fold_engine::caller_line_reads(model)?;
     // E33 `fx1`: a derived-input bake's model positions are entries over its

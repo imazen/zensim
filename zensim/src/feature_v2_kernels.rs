@@ -170,7 +170,6 @@ fn ssim_d_local_v<V: Vf32>(
     ssq: V,
     c1: V,
     c2: V,
-    // Revision 3: `s12` carries the direct error moment; see `ssim_d_local`.
     direct: bool,
     // Revision 7: the luminance term without cancellation; see `ssim_d_local`.
     stable: bool,
@@ -482,81 +481,8 @@ pub struct V2NewFeatureToggles {
     pub gradient_features: bool,
     pub transducer_bank: bool,
     pub blockiness: bool,
-    /// Emit v1's peak / masked / IW pool blocks (`f156..372`) LIVE inside
-    /// the folded walk instead of the structural zeros (2026-08-30, the
-    /// carrier lane: `benchmarks/balance_campaign_2026-08-28.md` "carriers
-    /// named + costed" → "un-zero the native slots under a regime flag").
-    /// Per v1-aligned band the fold hook replays v1's extended strip
-    /// section — see [`fold_v1_basic_bands`] — so at
-    /// `pyramid_plane_stride(w) == w` the block is BIT-IDENTICAL to v1's 372
-    /// extraction (`folded720_v1_pools_match_v1_path`). Default OFF: rows
-    /// with the block live are their OWN extraction regime — never
-    /// column-mix them with zeroed-block folded rows
-    /// (`ZensimV2Result::v1_pools`; extractor modes `foldapp2carriers` /
-    /// `foldapp2pools`). [`V1PoolsMode::Carriers`] emits ONLY the ten
-    /// carrier slots the `fused944native` tables carry (the peaks are free;
-    /// the masked/IW art-L4 slots need the activity map + the fused edge
-    /// kernel at scales 0-1 only); [`V1PoolsMode::Full`] emits all 216.
-    /// MEASURED (zenbench paired, `benches/fold_pools_bench.rs`): the full
-    /// block is NOT free — +25-32% @576², +34-40% @1152² over the zeroed
-    /// fold; see the campaign ledger for the carriers-only cost.
-    /// **Which FORMULA REVISION this extraction computes.**
-    ///
-    /// The revision axis is a PER-REQUEST property, not a process-global one,
-    /// and the reason is a measurement: `bake_block_profile` shows all three
-    /// shipped 944 bakes (`c_sdr_mlp944_corrmix`, `c_hdr_l1t1944`,
-    /// `c_sdr_purity944`) reading the full `GLOBAL_DMEAN`/`CGAIN`/`CLOSS` set
-    /// — 33 slots each — so a GLOBAL flip to `Rev2` would move 22 of 33
-    /// inputs per bake and silently re-price every one of them. A bake must
-    /// be able to declare the revision it was trained against and get it,
-    /// while a bake refit at a later revision coexists in the same process.
-    ///
-    /// Defaults to [`crate::ssim_form::active_revision`], so every existing
-    /// construction is byte-identical AND `ZENSIM_FORMULA_REV` keeps working
-    /// as the whole-process pin.
-    ///
-    /// **Honest scope: this carries the F5 axis, not F4's.** `Rev2`'s
-    /// `paired_global_contrast` is a FINALISER parameter, so it threads
-    /// per-walk for free. Its luma-form half (`ssim_form::active_luma_form`)
-    /// is a `OnceLock` read inside the SIMD kernels, and making THAT
-    /// per-request is a change to the kernel dispatch this lane does not own.
-    /// So a per-bake `Rev2` gets rev2's global-contrast arithmetic and the
-    /// process's luma form; `feature_plan` refuses rather than pretending
-    /// otherwise when the two disagree.
     pub formula_revision: crate::feature_defs::FormulaRevision,
     pub v1_pools: V1PoolsMode,
-    /// **TEST/BENCH INSTRUMENTATION — NOT A PRODUCT MODE** (`#[doc(hidden)]`
-    /// 2026-08-30 by user decision: 944 with all pools live is
-    /// the ONLY product mode; there is no 372-only product path and no public
-    /// or CLI surface offers one). Retained solely as the control arm for
-    /// `free_extras_are_pure_addition_to_the_v1_only_walk` and for pricing what the v2-era
-    /// blocks cost inside the one product walk.
-    ///
-    /// It stays `pub` only because the struct is constructed by external
-    /// crates with `..Default::default()`, and functional record update
-    /// requires every field to be visible — making it `pub(crate)` breaks
-    /// every out-of-crate constructor, zenmetrics included. `#[doc(hidden)]`
-    /// takes it off the documented surface, which is as far as this can go
-    /// without a builder-style redesign of the struct (listed for approval).
-    ///
-    /// BLOCK-SKIPPING (2026-08-30): compute ONLY v1's blocks — `f0..156`
-    /// basic plus, with [`Self::v1_pools`], `f156..372` pools — and skip
-    /// every v2-era block (dense-348, gradient, append, append2/BANDVIS,
-    /// CSFW). Skips their upstream work too: phase A drops the four
-    /// `box_blur_v_from_copy` sweeps that produce the V-blurred
-    /// `mu1/mu2/ssq/s12` strips AND the v2 activity chain, because nothing
-    /// v1 needs reads them (`fold_v1_basic_bands` takes the H-blurred
-    /// planes and computes its own activity internally).
-    ///
-    /// PURE COMPUTE-SKIPPING — the slots that ARE emitted are bit-identical
-    /// to the same request with this off (gated by
-    /// `free_extras_are_pure_addition_to_the_v1_only_walk`). Semantics are untouched; this
-    /// is not the padded-width question.
-    ///
-    /// The emitted vector keeps the requesting regime's WIDTH, with
-    /// `f372..` left at the structural 0.0 — the final 372-width plumbing
-    /// waits on the pad-semantics decision (campaign §8), so that this
-    /// lever can be measured and shipped independently of it.
     #[doc(hidden)]
     pub v1_only: bool,
 
@@ -592,10 +518,6 @@ pub enum V1PoolsMode {
 impl V1PoolsMode {
     /// The ten carrier slots (`Carriers`), in v1's 372 layout.
     pub const CARRIER_SLOTS: [usize; 10] = [178, 190, 196, 226, 231, 237, 243, 303, 321, 333];
-}
-
-impl V2NewFeatureToggles {
-
 }
 
 impl Default for V2NewFeatureToggles {
@@ -672,44 +594,8 @@ struct ScratchV2Strip {
     /// frees `abs_src`/`activity_tmp` for reuse as its temps. Unused by
     /// the materialized walk (which reads cached/replayed full planes).
     bs2: Vec<f32>,
-    /// Distorted-side activity plane (`box_blur(|dst − mu2|)`) for the
-    /// BANDVIS dst self-mask ([`V2NewFeatureToggles::append2_dst_activity`],
-    /// Y channel only). LAZILY grown — allocated empty so the default-OFF
-    /// heap profile (12 MP heaptrack 221.04 MB, append2 gates V5) is
-    /// bit-for-bit unchanged; sized on first use by `stream_phase_a`.
     activity_dst: Vec<f32>,
 }
-/// **Item D — the compute-set descriptor.** WHAT one extraction request
-/// actually computes, as one value, derived once.
-///
-/// This is the named home for the **compute** half of the layout-vs-compute
-/// split the walk already documents: the emitted vector keeps the WIDTH and
-/// REGIME the caller asked for (a `v1_only` 944 request is still a 944 row
-/// with `f372..` at the structural 0.0), while this decides what work runs.
-/// Before it, that decision lived in six ad-hoc locals recomputed from
-/// [`V2NewFeatureToggles`] at the top of the walk and re-derived again inside
-/// the strip loop; `from_toggles` is now the single derivation and
-/// `compute_set_matches_legacy_derivation` holds it to the old one.
-///
-/// **Why it is worth a type.** Two things the charter asks for are naturally
-/// expressed here and nowhere else:
-///
-/// 1. **Per-model drops (era-2 item E).** The v1 masked/IW/soft-peak pool pass
-///    is **41.2 ms — 13.6 % of the tiled 5 MP walk** — and it is worth
-///    *exactly nothing* to the 944 MLPs (they read those slots with zero
-///    weight) and 0.399 CID22 to `B`. So the right shipping form is neither
-///    "drop" nor "keep" but **"let the request say"**, computed from the
-///    model's declared read IDs through `Plan::for_bake`.
-/// 2. **HDR toggles.** The HDR append is a future regime whose blocks extend
-///    this struct **append-only**, exactly as the feature numbering does. The
-///    HDR front end already flows into the walk (`FrontEnd::Hdr` selects the
-///    BANDVIS deltas and the `hl_bins` lane); an HDR block set becomes fields
-///    here rather than more booleans on the public toggle struct.
-///
-/// **Public surface: none yet, deliberately.** `V2NewFeatureToggles` stays the
-/// public request type and is unchanged; this is `pub(crate)` and derived from
-/// it. Serving uses the internal feature planner; callers keep their existing
-/// public extraction APIs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ComputeSet {
     /// The formula revision this request computes — see
@@ -817,27 +703,6 @@ impl ComputeSet {
         set
     }
 
-    /// The two-family scope of [`crate::feature_defs::FormulaRevision::Rev5`]
-    /// (`benchmarks/rev5_spec_2026-10-04.md` §1): `basic + peaks + v2`.
-    ///
-    /// Every flag naming a family outside that set is cleared, the
-    /// masked/IW pool modes degrade to `Peaks`, and the free extras are
-    /// off — so a plan whose LAYOUT reaches further than the request (the
-    /// full-width `basic,peaks,v2` extraction is the driving case: the
-    /// layout turns on every block flag the width reaches, and without
-    /// this the walk would compute families nobody asked for) still
-    /// computes only them. [`Self::from_toggles`] applies it under the
-    /// Rev5 revision. Explicit unsupported requests are rejected first by
-    /// `feature_plan` (`PlanError::UnsupportedAtRev5`) or, at raw extraction
-    /// boundaries, `validate_raw_rev5_request`. Only validated plans may use
-    /// unsupported layout flags without requesting those families.
-    ///
-    /// Sub-toggles of the supported families (`gradient`, `blockiness`,
-    /// `transducer_bank`, `transducers_luma_only`, `v1_only` via
-    /// `v2_blocks`, `local_only`, `omit_edges`, `sampling`, and the
-    /// per-scale masks) are untouched — they narrow work inside the
-    /// supported families, which is exactly what a read-set-derived plan
-    /// is for.
     pub(crate) fn rev5_scope(&mut self) {
         if self.formula_revision < crate::feature_defs::FormulaRevision::Rev5 {
             return;
@@ -848,11 +713,6 @@ impl ComputeSet {
         self.v1_full_scales = Self::ALL_SCALES;
     }
 
-    /// The per-channel free-extras work order handed to the fused kernel.
-    /// `ch` decides the luminance bins alone: they read `sat(ref_Y, ..)`,
-    /// which is a register carry ONLY on the channel whose `src` IS the
-    /// reference luma ([`APPEND2_CHANNEL`]). Their owning block is the
-    /// append kernel, so they are also skipped whenever it runs.
     pub(crate) fn free_work(&self, ch: usize, scale: usize) -> crate::fused::FreeExtrasWork {
         if self.formula_revision >= FormulaRevision::Rev5 && scale == 0 && ch != 1 {
             // Count actual scale-zero chroma consumers, regardless of plan intent.
@@ -900,16 +760,6 @@ impl ComputeSet {
             && matches!(self.v1_pools, V1PoolsMode::Full | V1PoolsMode::Peaks)
     }
 
-    /// The slot set this request POPULATES, clipped to `layout_width`.
-    ///
-    /// Clipping is the LAYOUT rule: a family that does not exist at this width
-    /// cannot be populated at it (a 372-wide request's free tranches vanish
-    /// entirely — their slots live at `f720+`).
-    ///
-    /// Block bounds are composed from the same named constants the emit sites
-    /// use, never re-typed as literals; the two scattered tranches come from
-    /// [`free_slot_indices`] / [`class_c_slot_indices`], the SAME derivations
-    /// `Plan::for_bake` checks a bake against.
     pub(crate) fn populated_slots(
         &self,
         n_scales: usize,
@@ -1560,22 +1410,11 @@ fn dense_block_kernel_at_revision(
 #[derive(Default, Clone, Copy)]
 pub(crate) struct GradientAccum {
     pub(crate) sum_gms: f64,
-    /// Σ gms² — second raw moment of the SAME per-pixel gms values, for
-    /// the append block's GMSD-style deviation pooling
-    /// ([`idx_append::GMS_DEV2`]). Accumulated unconditionally (the
-    /// marginal cost is one FMA per pixel on values already in
-    /// registers); only consumed when the append block is on. Adding it
-    /// does not perturb `sum_gms` — the shared `g` is computed by the
-    /// identical operations in the identical order.
     pub(crate) sum_gms2: f64,
     pub(crate) sum_ringing: f64,
     pub(crate) sum_banding: f64,
     pub(crate) sum_grad_src: f64,
     pub(crate) sum_grad_dst: f64,
-    /// append2 BANDVIS sums — accumulated ONLY by the `BANDVIS = true`
-    /// kernel instantiation (Y channel with `append2_block` on); zero and
-    /// untouched everywhere else, so the existing lanes' operations are
-    /// bit-identical when append2 is off.
     sum_bv_gain: f64,
     sum_bv_loss: f64,
 }
@@ -1596,41 +1435,6 @@ impl GradientAccum {
     }
 }
 
-/// Gradient-block SIMD kernel body. Phase-5 (§A.15) NEW CONTRACT: `src_h`/
-/// `dst_h` carry ONE HALO ROW top and bottom (`width*(height+2)` total —
-/// local row `y+1` is the strip's real row `y`; local rows `0` and
-/// `height+1` are the caller-provided neighbor context, real data for an
-/// interior strip or a properly reflected row at the true image edge —
-/// see `gather_strip_halo`). This REMOVES the old `y==0`/`y==height-1`
-/// special-casing entirely: every output row now uses the identical
-/// "interior" halo-relative indexing, since the caller guarantees valid
-/// neighbor rows for ALL of them, not just strip-interior ones.
-/// `activity` is NOT halo-padded (`width*height`, exactly the strip) — it
-/// is read only at each pixel's own row, never a neighbor row (confirmed
-/// by inspection: only `ld_at!(activity, row + x)`/`activity[i]` below,
-/// no `row_u`/`row_d` indexing into it).
-///
-/// Interior pixels (`1..width-1`) are vectorized via SHIFTED unaligned
-/// loads for the x-neighbors (`row[x-1..x+7]` / `row[x+1..x+9]`) and
-/// full-row-offset loads for the y-neighbors (`row_u[x..x+8]` /
-/// `row_d[x..x+8]`) — the same shifted-window-read pattern as
-/// `~/work/archmage/docs/site/content/magetypes/examples/gaussian-blur.md`'s
-/// vertical pass. The single-pixel column border (`x==0`, `x==width-1`)
-/// still uses the scalar
-/// reflect-boundary formulas (`saturating_sub`/`.min(width-1)`) exactly as
-/// before — a tiny fraction of pixels (2 columns + 2 rows out of
-/// width*height), not worth the complexity of a SIMD boundary-clamp.
-/// `BV_DSTACT` (BANDVIS dst-activity combine, `append2_dst_activity`):
-/// when true, `act_dst` carries the distorted-side activity plane (same
-/// shape as `activity` — `width*height`, no halo, own-row reads only) and
-/// the BANDVIS GAIN polarity becomes the pure-band FR excess pooled under
-/// the dst's own flatness weight `1 − sat(act_dst, C_ACTIVITY)` (LOSS
-/// keeps the toggle-off math bit-exactly — see the adjudication record in
-/// `benchmarks/bandvis_dst_activity_2026-08-02.md` for why both
-/// in-ratio masking arms were rejected). Only meaningful with
-/// `BANDVIS = true`; with `BV_DSTACT = false` the parameter is dead
-/// (`&[]`) and the emitted operation sequence is the pre-fix one, bit
-/// for bit.
 #[inline]
 fn gradient_block_kernel_generic<T: F32x8Backend + Copy>(
     token: T,
@@ -1655,7 +1459,6 @@ fn gradient_block_kernel_generic<T: F32x8Backend + Copy>(
     let c_ring_edge = V8::<T>::splat_t(token, C_RING_EDGE as f32);
     let c_band_dst = V8::<T>::splat_t(token, C_BAND_DST as f32);
     let c_band_src = V8::<T>::splat_t(token, C_BAND_SRC as f32);
-    // append2 BANDVIS constants (dead splats when `BANDVIS == false`).
     let _bv_lo = V8::<T>::splat_t(token, bv_delta_lo);
     let _bv_hi = V8::<T>::splat_t(token, bv_delta_hi);
     let _c_bv = V8::<T>::splat_t(token, C_BV as f32);
@@ -1708,8 +1511,6 @@ fn gradient_block_kernel_generic<T: F32x8Backend + Copy>(
         let edge_r = saturate(grad_src_mag, C_RING_EDGE);
         let ring_i = err_b * act_b * (1.0 - edge_r);
         acc.sum_ringing += ring_i;
-        // REV4: C2's ring bins + C4's outside-mask bleed — same values,
-        // scalar per lane like the SIMD arm's `to_array()` tail.
 
         let edge_excess = bounded_excess(grad_dst_mag, grad_src_mag, C_BAND_DST);
         let src_smooth_b = 1.0 - saturate(grad_src_mag, C_BAND_SRC);
@@ -1772,9 +1573,6 @@ fn gradient_block_kernel_generic<T: F32x8Backend + Copy>(
                 let edge_r = saturate_v(token, grad_src_mag, c_ring_edge);
                 let ring_i = err_b * act_b * (one - edge_r);
                 r_ring += ring_i;
-                // REV4: C2 ring bins + C4 outside-mask bleed — scalarized
-                // per lane (the §A.14 register-pressure pattern; the
-                // u-domain bit lookup cannot vectorize anyway).
 
                 let edge_excess = bounded_excess_v(token, grad_dst_mag, grad_src_mag, c_band_dst);
                 let src_smooth_b = one - saturate_v(token, grad_src_mag, c_band_src);
@@ -1824,20 +1622,6 @@ fn gradient_block_kernel_entry(
         0.0,
     )
 }
-
-// ============================================================================
-// featacc gradient candidates — measurement-only bodies
-// ============================================================================
-//
-// The production kernel accumulates interior pixels in per-row f32 SIMD
-// lanes closed by `reduce_add()` (a TIER-DEPENDENT reduction tree) and the
-// two border columns + tail in sequential f64; the C8 bank/chroma cells
-// are sequential-f64 `GmsBankCell`s merged per row. The mirrors below put
-// the interior accumulation on the `Pool` axis (canonical lane `x mod 8`,
-// fixed `era2_reduce8`-shaped close) and the bank/chroma cells on
-// [`GmsBankCellVar`]. Borders stay sequential f64 in every mode — they are
-// already the exact element form, so only their bank-cell pushes ride the
-// mode axis.
 
 /// One gradient pixel's full term vector in f64 — the production
 /// `scalar_pixel` element math verbatim (clamped x-neighbors, so it serves
@@ -1925,9 +1709,6 @@ fn bex32(a: f32, b: f32, c: f32) -> f32 {
     (a - b).max(0.0) / (a + b + c)
 }
 
-/// Shared border-pixel step for the canon/exact bodies: f64 terms folded
-/// straight into `acc` (production's scalar-border shape), plus the bank /
-/// chroma / rev4 side effects at canonical lane `x mod 8`.
 #[allow(clippy::too_many_arguments)]
 fn gradient_border_pixel<
     const R7: bool,
@@ -2224,14 +2005,6 @@ fn gradient_block_kernel_canon<
     acc
 }
 
-/// The `f32x8` sibling of [`gradient_interior_elem_canon`]'s term
-/// evaluation — identical op order on the existing `*_v` helpers
-/// (`saturate_v` ≡ `sat32`, `bounded_sim_v` ≡ `bsim32`,
-/// `bounded_excess_v`/`bounded_excess_pair_v` ≡ `bex32`/`bex_pair32`; all
-/// plain unfused ops, so every lane IS one scalar element's rounding).
-/// The BANK / REV4 side effects are NOT in here — they stay scalarized
-/// per element in the caller (histogram scatters and Welford pushes
-/// cannot vectorize).
 #[inline(always)]
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn gradient_terms32_v<V: Vf32>(
@@ -2288,17 +2061,6 @@ fn gradient_terms32_v<V: Vf32>(
     (gsrc, gdst, g, g2, ring_i, band, bv_gain, bv_loss)
 }
 
-/// **canon64 vector body** — [`gradient_block_kernel_canon`]'s
-/// `P = LanesF64` arm with the interior evaluated eight columns at a time
-/// through `f32x8`. The interior `1..width-1` runs a lane-aligned head:
-/// `1..8` scalar via [`gradient_interior_elem_canon`], then `x ≡ 0 (mod 8)`
-/// chunks where chunk lane `l` is canonical lane `l` exactly (each
-/// `add_chunk` is the same eight `add(l, v)` calls in the same per-pool
-/// order), then the remainder scalar. `x - 1`/`x + 1` neighbors load
-/// unaligned via `from_array` — the same shifted-window-read pattern the
-/// production interior already uses. `gmsbank_pixel_var`, the chroma
-/// pushes and `rev4_grad_pixel` stay scalar per element. `_scalar` and
-/// `_wasm128` keep the scalar canonical body.
 #[magetypes(define(f32x8, f32x16), v4x, v4, v3, -scalar)]
 #[allow(clippy::too_many_arguments)]
 fn gradient_block_kernel_canon64_vec<
@@ -2534,12 +2296,6 @@ fn gradient_block_kernel_canon64_vec<
             let w_act = win!(activity, a0);
             let (_w_m1, _w_m2): (&[[f32; 8]], &[[f32; 8]]) =
                 { (&[], &[]) };
-            // Revision 7 on AVX-512 tiers: the chunks from x = 16 run two at a time,
-            // sixteen columns per step, so element e of a step is lane
-            // `(x0 + e) & 15`; the first chunk (x = 8) and an odd last one stay
-            // eight-wide. Every term is element-wise and every pool lane adds
-            // the same values in the same order, so the bits are unchanged.
-            // The gmsbank and rev4 bank paths keep the eight-wide step.
             let wide = rev7 && steps_sixteen::<Token>() && n >= 3;
             let m16 = if wide { (n - 1) / 2 } else { 0 };
             let mut k = 0usize;
@@ -3005,22 +2761,6 @@ fn blockiness_row_l64(
     }
 }
 
-// ============================================================================
-// f720+ APPEND kernel — second formula pass over the cache-hot strip planes.
-//
-// Deliberately a SEPARATE kernel from `dense_block_kernel_generic`: the dense
-// kernel's register budget is a documented hazard (§A.14 scalarized its pool
-// block after a measured regression; §A.16 measured a 5.3x collapse when the
-// body outgrew LLVM's inliner) — widening it again for 19 more accumulators
-// would re-open both. A second pass over strip-resident planes re-reads L2,
-// not DRAM (that locality is what §A.15's strip tiling bought), so the
-// marginal cost is close to the append block's own arithmetic. It also makes
-// the f0..f719 bit-stability guarantee structural: the tuned kernels are not
-// edited at all (the one exception, `GradientAccum::sum_gms2`, adds a
-// derived accumulator without altering any existing operation).
-// ============================================================================
-
-/// Per-row-reduced f64 accumulator for the append block.
 #[derive(Default, Clone, Copy)]
 struct AppendAccum {
 }
@@ -3028,35 +2768,6 @@ struct AppendAccum {
 impl AppendAccum {
 }
 
-// ============================================================================
-// featacc append candidates — measurement-only bodies
-// ============================================================================
-//
-// Same structure as the dense mirrors: `Pool`-generic per-row accumulation
-// (canonical lane `x mod 8`, fixed `era2_reduce8`-shaped close into the f64
-// `AppendAccum`), scalar f32 elements in the SIMD body's exact op order —
-// including the explicit `mul_add` transducer folds, which `f32::mul_add`
-// replays bit-exactly (fused on every hardware tier, correctly rounded on
-// the scalar tier). `exact` runs the f64 scalar-sibling elements (the
-// production tail's forms) into Neumaier pools. Every pixel goes through
-// the pools — the canonical close owns the width tail too.
-
-// ============================================================================
-// CSFW (f944+) kernel — chunk-3 tier-1 second pass over the Y strip rows.
-//
-// A SEPARATE const-gated pass, not a growth of the append kernel: the append
-// kernel already carries ~19 row-lane accumulators against the 16-register
-// AVX2/NEON budget with accepted L1 spills — five more lanes land on the
-// wrong side of that cliff (design §4.2). A second pass over strip-resident
-// planes re-reads L2, not DRAM (§A.15's locality), so the marginal cost is
-// close to the 10 ops/px of its own arithmetic. With `csfw_block` off this
-// pass is never invoked and every existing kernel is untouched machine code
-// — the byte-stability guarantee is structural.
-// ============================================================================
-
-/// Per-row-reduced f64 accumulators for the CSFW weighted-pool pass:
-/// `Σw, Σw·s, Σw·d, Σw·s², Σw·d²` (design §4.1 — pure sums of products,
-/// strip-foldable exactly like [`AppendAccum`]).
 #[derive(Default, Clone, Copy)]
 struct CsfwAccum {
 }

@@ -98,15 +98,6 @@ pub(crate) mod tests {
         }
     }
 
-    // =====================================================================
-    // CLASS-C free slots (`V1FreeExtras::RawMomentsPlusBoundedErr`) —
-    // `benchmarks/free_features_classC_2026-09-04.md`
-    // =====================================================================
-
-    // ------------------------------------------------------------------
-    // f720+ append block
-    // ------------------------------------------------------------------
-
     // ========================================================================
     // C2 streaming-walk parity gates
     // (docs/STREAMING_FOLDAPP_C0_DESIGN_2026-07-26.md §3)
@@ -368,21 +359,6 @@ pub(crate) mod tests {
 
     // ========================================================================
     // HDR route gates (HDR_PLAN chunk 2 — streaming PU front-end)
-    // ========================================================================
-
-    // ========================================================================
-    // append2 gates (BANDVIS + conditioner + HL bins)
-    // ========================================================================
-
-    // --- Shared BANDVIS fixtures (gates doc V3). Extracted 2026-08-02 so
-    // the P1.5 dst-activity adjudication tests measure the IDENTICAL
-    // pixel content as the OFF-math characterization pins (formulas
-    // verbatim from the original inline builders; the behavior test's
-    // value pins + the gates-doc printed numbers gate the motion).
-    // `benchmarks/bandvis_dst_activity_2026-08-02.md`. ---
-
-    // ========================================================================
-    // CSFW gates (chunk-3 tier-1: luminance-weighted GLOBAL_* twins)
     // ========================================================================
 
     // ========================================================================

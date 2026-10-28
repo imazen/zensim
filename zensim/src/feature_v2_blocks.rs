@@ -174,10 +174,6 @@ pub(crate) fn produce_chunk<S: ImageSource>(
         planes[2][0] = Some(b);
     }
     planes[1][0] = Some(y);
-    // `ZENSIM_PYRAMID=linear`: every coarse level from 2×2 averages of the
-    // parent's linear rows, then positive XYB (the streaming producer's form).
-    // The cascade: child row `j` reads parent rows `2j` and `2j + 1`, and the
-    // streaming producer's target `min(parent rows / 2, plane height)`.
     for s in 1..dims.len() {
         let (ws, hs) = dims[s];
         let pw = dims[s - 1].0;

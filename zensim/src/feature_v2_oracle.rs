@@ -35,9 +35,6 @@
 // allow comes off with the kernel.
 pub(crate) const ERA2_BAND_ROWS: usize = 32;
 
-/// The era-2 horizontal reduction — defined in [`crate::featcanon`], whose
-/// canonical kernels need it in every build (this module exists only with
-/// `feature-regime-v2`); re-exported here under its era-2 name.
 #[allow(unused_imports)]
 pub(crate) use crate::featcanon::era2_reduce8;
 
@@ -352,10 +349,6 @@ fn dense_block_kernel_era2_generic<T: F32x8Backend + Copy>(
                     p_kn[j] += kn[j];
                     p_kd[j] += kd[j];
                 }
-                // REV4: C3 histogram + C4 flat-HF — scalarized per lane
-                // (the §A.14 pattern; the bit-domain edges cannot
-                // vectorize). `t[7]` is `hfg`. One Option check per
-                // chunk; `None` is the pre-REV4 op sequence bit for bit.
                 x += 8;
             }
             // TAIL: masked, never zero-padded (see `v8_add_first`).
@@ -389,9 +382,6 @@ fn dense_block_kernel_era2_generic<T: F32x8Backend + Copy>(
                     p_kn[j] = v8_add_first(token, p_kn[j], &kn[j].to_array(), rem);
                     p_kd[j] = v8_add_first(token, p_kd[j], &kd[j].to_array(), rem);
                 }
-                // REV4 tail: only the first `rem` lanes are real pixels
-                // (the padded lanes' values are discarded, matching the
-                // masked-fold convention).
             }
 
             // Per-row reduction into the f64 band partial, via the FIXED tree.
@@ -1150,10 +1140,6 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64, const R7: bool>(
             let qrow = &ssq[row..row + full * 8];
             let prow = &s12[row..row + full * 8];
             let arow = &activity[row..row + full * 8];
-            // Per eight-column chunk `c`: the pool, moment and rev4 updates.
-            // `bufs` holds the chunk's 29 pooled term vectors in pool order
-            // and `act8` its activity (the rev4 bank also reads `bufs` 0 and
-            // 4–7: `d`, `art`, `det`, `mse` and the HF gain).
             macro_rules! chunk8_post {
                 ($c:expr, $bufs:expr, $act8:expr) => {{
                     let c: usize = $c;
@@ -1232,12 +1218,6 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64, const R7: bool>(
                 }};
             }
             let mut c = 0usize;
-            // Revision 7 on AVX-512 tiers: sixteen columns per step (two
-            // chunks). Every term is element-wise, so each lane computes the
-            // eight-wide step's bits; the sixteen values go to the sixteen f32
-            // row lanes in one vector op (lane `x & 15`, the two chunks'
-            // order), or, with the rev4 bank on, back through the two chunks'
-            // updates. Revisions 5 and 6 keep the eight-wide loop below.
             while rev7 && steps_sixteen::<Token>() && c + 2 <= full {
                 let i = c * 8;
                 macro_rules! ld16 {
@@ -1605,4 +1585,3 @@ fn dense_block_kernel_canon64_vec_neon<P: crate::featcanon::Pool64, const R7: bo
         revision,
     )
 }
-

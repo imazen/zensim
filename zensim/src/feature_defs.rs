@@ -1,64 +1,11 @@
-//! **The feature DEFINITION registry** — what each slot IS, one entry per
-//! signal, and the layout arithmetic that expands signals into slot ids.
+//! Feature definitions and their scale/channel placements.
 //!
-//! Design: `docs/FEATURE_SYSTEM_DESIGN_2026-09-05.md` §2. Phases + gates:
-//! `docs/PLAN_FEATURE_SYSTEM_2026-09-05.md`.
-//!
-//! [`crate::feature_set_id`] answers *"are these two vectors the same kind of
-//! thing?"* at the granularity of a slot FAMILY. This module answers *"what IS
-//! slot 353?"* — which, before it landed, nothing in-tree could. Per-slot
-//! naming existed only as a 13-entry array inside a `#[cfg(test)]` diagnostic
-//! (`streaming.rs`) and four `pub mod idx*` constant blocks that give a LOCAL
-//! offset inside one block.
-//!
-//! ## Signals, not slots
-//!
-//! A 944-wide vector holds 944 slots but only **85 distinct signals**: the
-//! layout replicates most of them across 4 pyramid scales × 3 channels. The
-//! registry stores the 85 and expands them, so declaring a new v2 signal is
-//! ONE entry rather than twelve, and the (scale, channel) arithmetic has one
-//! owner instead of being written out at every emit site.
-//!
-//! ## The layout arithmetic, in one place
-//!
-//! Block-major, exactly as `feature_v2`'s emit sites document it:
-//!
-//! ```text
-//!   [0, 156)    basic    scale-major, then channel:  scale*39 + ch*13 + local
-//!   [156, 228)  peaks    (scale*3 + ch)*6 + local, based at n_scales*39
-//!   [228, 300)  masked   same shape,               based at n_scales*57
-//!   [300, 372)  iw       same shape,               based at n_scales*75
-//!   [372, 720)  v2       scale*3*29 + ch*29 + local
-//!   [720, 924)  append   scale*3*17 + ch*17 + local
-//!   [924, 944)  append2  scale*5 + local     (Y-only: one cell per scale)
-//!   [944, 956)  csfw     scale*3 + local     (Y-only)
-//!   [956, 986)  reserved; later IDs retain their original positions.
-//! ```
-//!
-//! ## Why the geometry constants are DERIVED here, not copied
-//!
-//! `feature_v2::FEATURES_PER_CHANNEL_APPEND` is `17` because there are 17
-//! append signals. This module knows that number by COUNTING its own append
-//! entries, which is a derivation rather than a second copy — and
-//! [`tests::geometry_matches_the_block_constants`] proves the two agree, so a
-//! new signal that forgets to bump the constant fails the build rather than
-//! silently shifting every slot above it.
-//!
-//! ## Append-only
-//!
-//! Ids are never renumbered (user directive 2026-07-19: *"new v2 features use
-//! indices after all v1 features; we deprecate not renumber"*). A retired
-//! signal keeps its `block_local` forever and gets [`SignalDef::deprecated`];
-//! a revision APPENDS to [`SignalDef::revisions`] and never edits history.
+//! The registered layout is block-major: basic [0, 156), peaks [156, 228),
+//! masked [228, 300), IW [300, 372), and v2 [372, 720) for four scales.
+//! Each block expands its signal table across scales and XYB channels.
 
 use crate::feature_set_id::{ComputeToken, SlotSet};
 
-/// Which colour plane a slot is pooled over.
-///
-/// [`Channel::Scalar`] is not "no channel" — it is the per-SCALE blocks
-/// (append2, csfw) whose signals exist once per scale rather than once per
-/// (scale, channel). They are computed on Y (`feature_v2::APPEND2_CHANNEL`)
-/// but occupy one slot, not three.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) enum Channel {
     /// XYB X (red-green chroma).
@@ -99,20 +46,6 @@ pub(crate) enum Statistic {
 
 impl Statistic {}
 
-/// Whether a slot is a difference between reference and distorted, and so
-/// whether an identity pair must drive it to zero.
-///
-/// Reference-only slots can remain nonzero on a perfect copy. For example,
-/// `append2::LUMA_MEAN_REF` reports the reference's luminance, and Rev5
-/// `PJND_FRAGILITY` reports reference structure. The historical 372 all-zero
-/// identity probe captured the product shortcut's placeholder features;
-/// it does not establish that canonical extracted identity features are zero.
-///
-/// [`Form::Undeclared`] is an HONEST state, not a default to fill in later: a
-/// signal whose identity behaviour has not been established (or, for the
-/// restored-cut slots, depends on the formula revision) reports that, rather
-/// than claiming a form nobody measured. The declared ones are pinned
-/// by [`tests::declared_difference_forms_are_zero_on_an_identity_pair`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Form {
     /// A difference/dissimilarity: exactly `0.0` on an identity pair.
@@ -185,66 +118,7 @@ pub enum FormulaRevision {
     /// table and every published verdict was read at.
     #[default]
     Rev1,
-    /// Revision 4's formulas under **local-window arithmetic** (the
-    /// `localwin` era, `benchmarks/rev5_spec_2026-10-04.md`), computed for
-    /// the `basic` (f0..227), `peaks` (f156..227) and `v2` (f372..719)
-    /// families only.
-    ///
-    /// Rev5 replaces the sliding-sum blur recurrences with a per-output
-    /// 11-tap f32 pair tree over the window's own inputs (production's
-    /// mirror padding), replaces the 8-lane pools with 16 fixed virtual
-    /// lanes and one fixed pairwise reduce, allows fused multiply-add
-    /// wherever the same fused expression is written, and carries the
-    /// stable central-moment finalizers. Bit-identity across tiers is a
-    /// property of the single fixed order, not a hope.
-    ///
-    /// The two-family scope is deliberate: a plan or bake whose read set
-    /// leaves `basic + peaks + v2` is refused at plan time
-    /// ([`crate::feature_plan::PlanError::UnsupportedAtRev5`]) rather than
-    /// computed at a lower revision behind the caller's back. The process
-    /// model is Rev4's: `ZENSIM_FORMULA_REV=5` pins it and
-    /// `ssim_form::refuse_rev4_mix` refuses every cross-boundary mix.
     Rev5,
-    /// Revision 5's measurements, raw ringing included, with revision 6's
-    /// `globaff` family and faster, cancellation-free pooled arithmetic (the
-    /// `rowlanes` era, `benchmarks/byconstruction_2026-10-22.md`, "Speed pass
-    /// before revision 7"). Revision 6's high-pass ringing form is not part
-    /// of it (owner, 2026-10-25: for the monotone models the raw form scores
-    /// better on codec uniformity and robustness; "Before the revision-7
-    /// cut" in the record):
-    ///
-    /// * **f32 row lanes.** The dense, fused-SSIM and gradient pools add
-    ///   the columns of each row's complete 8-column chunks to sixteen f32
-    ///   lanes (`x & 15`) and fold every lane into its f64 lane at the end
-    ///   of the chunks and after every 4,096th column, instead of adding
-    ///   every column in f64; the remaining columns add in f64 as before.
-    ///   The f64 lanes live for a band of 32 rows (dense) or for the call
-    ///   (fused SSIM, gradient: a 128-row strip) and are finished once there
-    ///   instead of once per row. Pools whose features difference or ratio
-    ///   two large sums (v1
-    ///   variance, texture and contrast terms, the edge-width change, the
-    ///   band-lifetime raw moments) keep f64 lanes.
-    /// * **Blockiness lattice lanes.** The vertical lattice step at column
-    ///   `8j` adds to f64 lane `(j − 1) & 7` instead of lane 0, so the eight
-    ///   lanes take eight steps at once; each 128-row kernel strip sums into
-    ///   its own lanes, added to the running lanes in strip order (strips run
-    ///   in parallel, with the same bits at any thread count).
-    /// * **Central moments per row.** The SSIM deviation moments are
-    ///   two-pass per row (a sixteen-lane f64 mean, then the centred sums)
-    ///   with one Chan/Pébay merge per row instead of one per 16 columns.
-    /// * **Cancellation-free forms.** The v2 SSIM luminance term is
-    ///   `(m1 − m2)²`, the bounded dissimilarities `(a − b)²/(a² + b² + c)`
-    ///   and the v1 edge ratio `(x − y)/(1 + y)`: the exact values the old
-    ///   forms computed by subtracting nearly equal numbers.
-    /// * **Opsin cube root with one division**
-    ///   ([`crate::det_math::cbrt_newton_f32`]): within 3 ulp like
-    ///   `cbrt_midp`, correctly rounded more often (72.7% against 56%), with
-    ///   one division instead of two.
-    ///
-    /// Any live slot may move (an arithmetic era); scope and process model
-    /// are Rev6's (`ZENSIM_FORMULA_REV=7`, or a bake declaring revision 7).
-    /// `ZENSIM_RING_FORM=hpm` still selects the high-pass ringing form as a
-    /// per-process research arm.
     Rev7,
 }
 
@@ -271,7 +145,6 @@ impl FormulaRevision {
     }
 }
 
-/// Internal dispatch family. Palette has no supported public token.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Family {
     Supported(ComputeToken),
@@ -393,10 +266,6 @@ const fn v2sig(name: &'static str, form: Form) -> SignalDef {
         family: Family::Supported(ComputeToken::V2),
         name,
         form,
-        // F18 reaches the v2 block too: `ssim_dev4` is `(M4/n)^(1/4)`, the
-        // same `powf(0.25)` in three finalizers (`OnlineMoments::finish`, the
-        // dense kernel, the append kernel). The caller's explicit `defect`
-        // wins when it has one — a v2 slot with a named defect keeps it.
     }
 }
 
@@ -522,8 +391,6 @@ pub(crate) static V2: [SignalDef; 29] = {
         v2sig_rev(2, "ssim_dev4", L4, Difference, HigherIsWorse, V2Dense, None),
         v2sig("art", Difference),
         v2sig("det", Difference),
-        // Class C: harvestable from the fused kernel's saturating-MSE sum,
-        // despite living in the most expensive block in the layout.
         v2sig("mse", Difference),
         v2sig("hf_gain", Difference),
         v2sig("hf_loss", Difference),
@@ -595,18 +462,6 @@ pub(crate) static V2: [SignalDef; 29] = {
 };
 
 // ============================================================================
-// Rev4 candidate feature bank (f986..1321 at 4 scales)
-// ============================================================================
-//
-// Spec: `docs/REV4_FEATURE_BANK_PLAN_2026-09-23.md` §1.1 / §2.4–2.5; pinned
-// geometry: `benchmarks/rev4_featbank_impl_2026-09-23.md`. All four families
-// are difference-form by construction (identity pair → 0.0), carry no
-// tranche (a v1-only walk cannot harvest any of them — they live on the
-// v2-era passes), and declare `Placement::AllCells`: gridblk's `(Y, scale 3)`
-// cell is registered-with-stated-zero (period 1 has no phase contrast), not
-// skipped, so the slot exists and emits 0.0 deliberately.
-
-// ============================================================================
 // Layout arithmetic — THE owner
 // ============================================================================
 
@@ -624,9 +479,6 @@ pub(crate) struct BlockDef {
     pub replication: Replication,
 }
 
-/// Every block, in LAYOUT order. The base offset of each is the sum of the
-/// widths of the ones before it, so inserting a block anywhere but the end
-/// would renumber — which the append-only directive forbids.
 pub(crate) static BLOCKS: &[BlockDef] = &[
     BlockDef {
         family: Family::Supported(ComputeToken::Basic),
@@ -791,12 +643,6 @@ mod tests {
     }
 }
 
-/// Cross-checks against the `feature_v2` owners — the gates that make the
-/// registry's independent derivations provably equal to the code that
-/// actually emits the rows, rather than a plausible second opinion.
-///
-/// Gated on `feature-regime-v2` because the owners are: the registry itself
-/// is pure data and builds without it.
 #[cfg(test)]
 mod owner_gates {
     use super::*;
