@@ -940,29 +940,6 @@ pub struct Zensim {
     /// Optional cooperative-cancellation token, checked at row-band and
     /// scale boundaries inside the streaming walk. See [`Zensim::with_stop`].
     stop: Option<StopHandle>,
-    /// Route the scoring entries through the streaming fold instead of the
-    /// buffered walk (fold-engine lane, 2026-08-30). `false` for every
-    /// profile except [`crate::profile::ZensimProfile::D`], which
-    /// `Zensim::new` sets it `true` for by construction (see `fast_by_default`
-    /// there) — or wherever something explicitly asks via
-    /// `Zensim::with_engine(ScoringEngine::Fold)`. Both routes only exist
-    /// under `feature-regime-v2` (default-on since 2026-09-01;
-    /// `--no-default-features` removes the field's only readers, so it stays
-    /// permanently `false`-equivalent there). Requests the fold cannot serve
-    /// bit-identically (`fold_engine::is_fold_backable`) fall back to
-    /// buffered even when set.
-    pub(crate) fold_engine: bool,
-    /// Let a fold-backed SCORE skip computing the v1 pool families the loaded
-    /// profile structurally never reads (fold_engine::score_pool_mode).
-    /// **Default `false`** for every profile except `D` (same
-    /// `fast_by_default` wiring as `fold_engine` above) — opt-in elsewhere via
-    /// [`Zensim::with_unread_feature_skipping`], because it leaves the
-    /// skipped slots at `0.0` in [`ZensimResult::features`]. The SCORE and
-    /// `raw_distance` are bit-identical either way, by construction: a slot
-    /// is only skipped when every consumer's weight on it is exactly zero.
-    /// Read only by the `feature-regime-v2`-gated fold engine (default-on
-    /// since 2026-09-01; inert dead field under `--no-default-features`).
-    pub(crate) skip_unread_pools: bool,
 }
 
 /// Shared cancellation token stored on [`Zensim`]. Wraps the caller's
@@ -1010,8 +987,6 @@ impl Zensim {
             parallel: true,
             max_pixels: Some(120_000_000),
             stop: None,
-            fold_engine: false,
-            skip_unread_pools: false,
         }
     }
 
@@ -1033,8 +1008,7 @@ impl Zensim {
         crate::fold_engine::score_plan(
             params,
             config,
-            self.skip_unread_pools
-                || config.revision() >= crate::feature_defs::FormulaRevision::Rev5,
+            config.revision() >= crate::feature_defs::FormulaRevision::Rev5,
         )
     }
 
@@ -1182,7 +1156,6 @@ impl Zensim {
             &config,
             params.weights,
             self.stop_ref(),
-            self.fold_engine,
             self.scoring_plan(params, &config).as_ref(),
         );
         self.check_stop()?;
@@ -1248,8 +1221,7 @@ impl Zensim {
         scratch: Option<&mut crate::streaming::ZensimScratch>,
     ) -> ZensimResult {
         let mut scratch = scratch;
-        if (config.revision() >= crate::feature_defs::FormulaRevision::Rev5
-            || (self.fold_engine && self.stop.is_none()))
+        if config.revision() >= crate::feature_defs::FormulaRevision::Rev5
             && crate::fold_engine::is_fold_backable(config)
         {
             let mut owned;
@@ -1391,8 +1363,7 @@ impl Zensim {
         // per-compare `V2Scratch` is reused exactly like buffered's
         // `dst_planes`. Out-of-domain requests still degrade to the buffered
         // walk below, byte-for-byte.
-        if (config.revision() >= crate::feature_defs::FormulaRevision::Rev5
-            || (self.fold_engine && self.stop.is_none()))
+        if config.revision() >= crate::feature_defs::FormulaRevision::Rev5
             && crate::fold_engine::is_fold_backable(&config)
         {
             // Same shared reflect-pad `compute_with_ref` applies, so the two
@@ -1529,7 +1500,6 @@ impl Zensim {
             &config,
             params.weights,
             self.stop_ref(),
-            self.fold_engine,
             // Research extraction requests every supported slot, independently
             // of the profile's serving read set.
             extraction_plan.as_ref(),
@@ -1600,7 +1570,6 @@ impl Zensim {
             &config,
             params.weights,
             None,
-            false,
             serving_plan.as_ref(),
         );
         Ok(result)
@@ -2078,19 +2047,15 @@ pub(crate) fn reflect_pad_to_size(src: &impl ImageSource, min_dim: usize) -> Own
     }
 }
 
-/// **The shared front of every SDR scoring entry**, with the engine selector
-/// (fold-engine lane, 2026-08-30). The reflect-pad and the byte-identical
-/// short-circuit run BEFORE either walk, so both engines see exactly the same
-/// pixels and the same identical-pair payload. Only the walk differs.
-///
-/// `use_fold == false` is the pre-2026-08-30 path, byte-for-byte.
+/// **The shared front of every SDR scoring entry.** The reflect-pad and the
+/// byte-identical short-circuit run BEFORE either walk, so both walks see
+/// exactly the same pixels and the same identical-pair payload.
 fn compute_with_config_inner(
     source: &impl ImageSource,
     distorted: &impl ImageSource,
     config: &ZensimConfig,
     weights: &[f64],
     stop: Option<&dyn enough::Stop>,
-    use_fold: bool,
     // The serving plan, resolved by the CALLER (only `Zensim` knows the
     // profile's bakes). `None` = today's unconditional behaviour.
     // Deliberately a resolved plan rather than a flag: the decision belongs
@@ -2105,9 +2070,9 @@ fn compute_with_config_inner(
     if needs_pyramid_pad(w, h, config.num_scales) {
         let s = reflect_pad_for_scales(source, config.num_scales);
         let d = reflect_pad_for_scales(distorted, config.num_scales);
-        return compute_with_config_core(&s, &d, config, weights, stop, use_fold, plan);
+        return compute_with_config_core(&s, &d, config, weights, stop, plan);
     }
-    compute_with_config_core(source, distorted, config, weights, stop, use_fold, plan)
+    compute_with_config_core(source, distorted, config, weights, stop, plan)
 }
 
 fn compute_with_config_core(
@@ -2116,7 +2081,6 @@ fn compute_with_config_core(
     config: &ZensimConfig,
     weights: &[f64],
     stop: Option<&dyn enough::Stop>,
-    use_fold: bool,
     plan: Option<&crate::feature_plan::Plan>,
 ) -> ZensimResult {
     // Rev5 identity features are computed by the same canonical walk as
@@ -2156,45 +2120,27 @@ fn compute_with_config_core(
         }
     }
 
-    // A live cancellation token keeps the request on buffered: issue #48's
-    // contract is cooperative cancellation INSIDE the walk (row-band and
-    // scale boundaries) and the fold has no stop hook, so routing a
-    // stoppable request to it would silently downgrade cancellation to the
-    // caller's before/after `check_stop`. Named in `is_fold_backable`'s
-    // caller rather than hidden.
-    {
-        // A plan whose layout is wider than the buffered walk can emit MUST
-        // take the fold: falling back to buffered there is not a safe default,
-        // it is a refusal. `use_fold` still governs the narrow case, where both
-        // walks can serve and buffered is the default for every profile
-        // except `D`.
-        //
-        // The whole decision is one `cfg` BLOCK rather than an attribute on
-        // the `if`: an attribute placed before a `let` binds to the `let`,
-        // which silently leaves the `if` unconditional on a
-        // `--no-default-features` build (caught by zensim-experimental, which
-        // builds zensim without this feature).
-        let plan_needs_fold =
-            plan.is_some_and(|p| p.walk_width() > crate::fold_engine::v1_feature_width(config));
-        if (use_fold || plan_needs_fold)
-            && stop.is_none()
-            && crate::fold_engine::is_fold_backable(config)
-        {
-            let mut scratch = crate::feature_v2::V2Scratch::new();
-            // The fold's only failure modes here are the dimension/HDR checks
-            // the caller already made; a surprise falls back rather than
-            // erroring out of a path whose signature is infallible.
-            if let Ok(r) = crate::fold_engine::compute_fold_backed_stoppable(
-                source,
-                distorted,
-                config,
-                weights,
-                &mut scratch,
-                plan,
-                stop,
-            ) {
-                return r;
-            }
+    // A plan whose layout is wider than the buffered walk can emit must take
+    // the fold: falling back to buffered there would be a refusal. A live
+    // cancellation token keeps the request on buffered, which checks it at
+    // row-band and scale boundaries; this fold has no stop hook.
+    let plan_needs_fold =
+        plan.is_some_and(|p| p.walk_width() > crate::fold_engine::v1_feature_width(config));
+    if plan_needs_fold && stop.is_none() && crate::fold_engine::is_fold_backable(config) {
+        let mut scratch = crate::feature_v2::V2Scratch::new();
+        // The fold's only failure modes here are the dimension/HDR checks
+        // the caller already made; a surprise falls back rather than
+        // erroring out of a path whose signature is infallible.
+        if let Ok(r) = crate::fold_engine::compute_fold_backed_stoppable(
+            source,
+            distorted,
+            config,
+            weights,
+            &mut scratch,
+            plan,
+            stop,
+        ) {
+            return r;
         }
     }
 
