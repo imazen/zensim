@@ -90,7 +90,7 @@ impl Mode {
 /// builds are unaffected (`mode() == Off` below Rev4).
 #[inline]
 pub(crate) fn mode(revision: FormulaRevision) -> Mode {
-    if revision >= FormulaRevision::Rev4 {
+    if revision >= FormulaRevision::Rev5 {
         Mode::Canon64
     } else {
         Mode::Off
@@ -602,27 +602,4 @@ impl WelfordVar {
 mod tests {
     use super::*;
 
-    /// featcanon D1/D6: the mode is a function of the computation's revision
-    /// alone — the process revision does not enter it — and a product build
-    /// (no `oracle`) knows exactly two arithmetics.
-    #[test]
-    fn mode_is_a_function_of_the_computation_revision() {
-        for rev in [
-            FormulaRevision::Rev1,
-            FormulaRevision::Rev2,
-            FormulaRevision::Rev3,
-        ] {
-            assert_eq!(mode(rev), Mode::Off, "{rev:?}");
-        }
-        assert_eq!(mode(FormulaRevision::Rev4), Mode::Canon64);
-        // Same answers whatever ZENSIM_FORMULA_REV this process runs at.
-        let _ = crate::ssim_form::active_revision();
-        {
-            // Exhaustive in a product build: adding a third arithmetic
-            // without the `oracle` gate fails to compile here.
-            let _: fn(Mode) = |m| match m {
-                Mode::Off | Mode::Canon64 => {}
-            };
-        }
-    }
 }

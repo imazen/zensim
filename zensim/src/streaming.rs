@@ -1721,7 +1721,7 @@ fn process_strip_channel(
         config
             .formula_revision
             .unwrap_or_else(crate::ssim_form::active_revision),
-    ) >= crate::feature_defs::FormulaRevision::Rev3;
+    ) >= crate::feature_defs::FormulaRevision::Rev5;
     // Revision 3 fuses the masked/IW extension into the SSIM V sweep
     // (`fused::ExtPoolsWork`): the activity is H-blurred from the H-only
     // `mu1` plane the H pass already wrote, V-blurred inside the same sweep
@@ -4681,128 +4681,6 @@ mod tests {
                 convert(&padded, false),
                 convert(&src, true),
                 "{w}x{h} padded stride={stride}"
-            );
-        }
-    }
-
-    /// **`chunk_rows` is SEMANTICS, not a tuning knob — MEASURED, fold-MT
-    /// lane.** This test exists because the lane tried to raise the streaming
-    /// producer's conversion chunk height (its front end is capped at degree 2
-    /// by the 64-row default over `ADVANCE_ROWS` rows) and the byte-identity
-    /// gate caught it: at 97×51 into a 104-wide destination, chunk height 1
-    /// moves plane 0 index 200 from `0.7426108` to `0.7426113` — one ULP.
-    ///
-    /// The mechanism is the per-chunk `srgb_to_positive_xyb_planar_into` call:
-    /// it converts `rows * width` elements, and which of those elements lands
-    /// in the SIMD body versus the scalar tail depends on the buffer length.
-    /// The two disagree in the last bit, so a pixel's converted value depends
-    /// on the chunk it was in.
-    ///
-    /// What the shipped paths rely on, and why they are safe: every producer
-    /// chunk boundary falls at a global multiple of 64 rows (`ADVANCE_ROWS` is
-    /// a multiple of 64 and `hi0` advances by it), which is exactly where the
-    /// whole-image conversion cuts — so the streaming and materialised
-    /// conversions see identical buffers.
-    /// `producer_windows_byte_equal_materialized` is that end of it. The
-    /// producer may therefore only be given a chunk height that keeps that
-    /// alignment, and `ADVANCE_ROWS` may only be a multiple of 64.
-    ///
-    /// The assertion is deliberately two-sided: chunk 64 must reproduce the
-    /// default EXACTLY, and at least one other height must NOT — if the second
-    /// half ever fails, the per-pixel kernels became length-invariant and this
-    /// whole constraint can be lifted. The scalar tier is the exception: it is
-    /// length-invariant since 2026-09-25, and there no height may move a byte.
-    #[test]
-    fn convert_chunk_rows_is_semantics_not_a_knob() {
-        // Compares results across code paths: hold the token lock so a forced-tier permutation test in this binary
-        // cannot switch the SIMD tier between the two sides.
-        let _tokens = archmage::testing::lock_token_testing();
-        // This gate is about PRODUCTION arithmetic (Rev1–3; the converter is
-        // identical across them): the process revision, capped at Rev3, so a
-        // Rev4 process still tests production. The canonical (Rev4) converter
-        // gets its own, stronger assertion below.
-        let production =
-            crate::ssim_form::active_revision().min(crate::feature_defs::FormulaRevision::Rev3);
-        let mut diverged = 0usize;
-        let mut canon_diverged = 0usize;
-        for &(w, h, padded_w) in &[(64usize, 64usize, 64usize), (97, 51, 104), (7, 130, 7)] {
-            let img: Vec<[u8; 3]> = (0..w * h)
-                .map(|i| {
-                    [
-                        (i * 37 % 256) as u8,
-                        (i * 101 % 256) as u8,
-                        (i * 197 % 256) as u8,
-                    ]
-                })
-                .collect();
-            let src = RgbSlice::new(&img, w, h);
-            let n = padded_w * h;
-            let convert_at = |chunk: usize,
-                              parallel: bool,
-                              revision: crate::feature_defs::FormulaRevision|
-             -> [Vec<f32>; 3] {
-                let mut out = [vec![0.0f32; n], vec![0.0; n], vec![0.0; n]];
-                let (a, rest) = out.split_at_mut(1);
-                let (b, c) = rest.split_at_mut(1);
-                convert_source_to_xyb_into_slices_chunked(
-                    &src, &mut a[0], &mut b[0], &mut c[0], padded_w, parallel, 0, chunk, revision,
-                );
-                out
-            };
-            let convert = |chunk: usize, parallel: bool| convert_at(chunk, parallel, production);
-            let want = convert(DEFAULT_CONVERT_CHUNK_ROWS, false);
-            let bits = |v: &[Vec<f32>; 3]| -> Vec<u32> {
-                v.iter()
-                    .flat_map(|p| p.iter().map(|x| x.to_bits()))
-                    .collect()
-            };
-            let want_bits = bits(&want);
-            for &parallel in &[false, true] {
-                // The default height, on both arms, is the identity.
-                assert_eq!(
-                    bits(&convert(DEFAULT_CONVERT_CHUNK_ROWS, parallel)),
-                    want_bits,
-                    "{w}x{h} pad={padded_w} par={parallel}: the parallel arm must \
-                     match the serial one at the default chunk height"
-                );
-                for &chunk in &[1usize, 3, 8, 16, 17, 32, 128, 4096] {
-                    if bits(&convert(chunk, parallel)) != want_bits {
-                        diverged += 1;
-                    }
-                }
-            }
-            // featcanon: the canonical converter pads nothing and splits
-            // nothing by tier — every pixel runs the same per-pixel body — so
-            // no chunk height may move a byte on any tier.
-            let rev4 = crate::feature_defs::FormulaRevision::Rev4;
-            let canon_want = bits(&convert_at(DEFAULT_CONVERT_CHUNK_ROWS, false, rev4));
-            for &parallel in &[false, true] {
-                for &chunk in &[1usize, 3, 8, 16, 17, 32, 128, 4096] {
-                    if bits(&convert_at(chunk, parallel, rev4)) != canon_want {
-                        canon_diverged += 1;
-                    }
-                }
-            }
-        }
-        assert_eq!(
-            canon_diverged, 0,
-            "the canonical (Rev4) conversion must give a pixel the same bits at any chunk height"
-        );
-        if crate::color::dispatches_scalar() {
-            // The scalar tier zero-pads its remainder through a full chunk
-            // (2026-09-25), so its conversion IS length-invariant: no chunk height
-            // may move a byte. The second half of the assertion above cannot hold
-            // here by construction; this is its stronger scalar-tier form.
-            assert_eq!(
-                diverged, 0,
-                "the scalar-tier conversion must give a pixel the same bits at any chunk height"
-            );
-        } else {
-            assert!(
-                diverged > 0,
-                "no swept chunk height moved a byte — if the per-pixel conversion \
-                 kernels became length-invariant, the producer's CONVERT_CHUNK_ROWS \
-                 constraint (and this test's doc comment) can be lifted"
             );
         }
     }

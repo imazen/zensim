@@ -3349,7 +3349,7 @@ pub(crate) fn fused_blur_h_ssim_at_revision(
     revision: crate::feature_defs::FormulaRevision,
 ) {
     let revision = crate::ssim_form::effective_revision(revision);
-    let err = revision >= crate::feature_defs::FormulaRevision::Rev3;
+    let err = revision >= crate::feature_defs::FormulaRevision::Rev5;
     // Canonical arithmetic follows THIS computation's revision (featcanon D1),
     // never the process switch.
     let mode = crate::featcanon::mode(revision);
@@ -6775,7 +6775,7 @@ pub(crate) fn fused_blur_hv_ssim_at_revision(
     if radius != 5 || !canon_h || !local(mode_h, revision_h) || !local_v {
         return false;
     }
-    let err = revision_h >= crate::feature_defs::FormulaRevision::Rev3;
+    let err = revision_h >= crate::feature_defs::FormulaRevision::Rev5;
     #[cfg(all(target_arch = "x86_64", feature = "avx512"))]
     if let Some(token) = <archmage::X64V4xToken as archmage::SimdToken>::summon() {
         fused_blur_hv_local11_wide_v4x(
@@ -8689,59 +8689,6 @@ mod tests {
         eprintln!("EDGE_ADJOINT checks={checks} max_abs_directional_error={max_error:.9e}");
     }
 
-    fn adjoint_probe_ssim_state(
-        a: &[f32],
-        d: &[f32],
-        w: usize,
-        h: usize,
-    ) -> ([Vec<f32>; 5], crate::fused::StripChannelAccum) {
-        let n = w * h;
-        let mut horizontal: [Vec<f32>; 4] = std::array::from_fn(|_| vec![0.0; n]);
-        let [h0, h1, h2, h3] = &mut horizontal;
-        fused_blur_h_ssim_at_revision(
-            a,
-            d,
-            h0,
-            h1,
-            h2,
-            h3,
-            w,
-            h,
-            5,
-            crate::feature_defs::FormulaRevision::Rev3,
-        );
-        let mut state: [Vec<f32>; 5] = std::array::from_fn(|_| vec![0.0; n]);
-        let [m1, m2, ssq, err, sd] = &mut state;
-        let acc = crate::fused::fused_vblur_features_ssim(
-            h0,
-            h1,
-            h2,
-            h3,
-            a,
-            d,
-            w,
-            h,
-            0,
-            h,
-            5,
-            m1,
-            m2,
-            true,
-            sd,
-            true,
-            ssq,
-            err,
-            true,
-            crate::fused::FreeExtrasWork {
-                revision: Some(crate::feature_defs::FormulaRevision::Rev3),
-                ..Default::default()
-            },
-            crate::fused::ExtPoolsWork::default(),
-            &[],
-        );
-        (state, acc)
-    }
-
     /// `box_spread_sum_preserving` must conserve total mass EXACTLY (to f64
     /// rounding) on arbitrary signed planes including edge-heavy mass, and
     /// match a normalized box blur in the deep interior.
@@ -9506,94 +9453,6 @@ mod tests {
                 }
             }
         }
-    }
-
-    /// **The era-2 column tile can emit a last tile only `radius + 1` columns
-    /// wide, and that is the one shape where the H kernels' right-edge mirror
-    /// leaves its own domain.**
-    ///
-    /// The tile stages `width % tile` interior columns plus a `radius`-wide
-    /// left halo, so the final slab is `tw = (width % tile) + radius`. At
-    /// `width % tile == 1` that is `tw == radius + 1`, and the mirror
-    /// `2*(tw - 1) - (x + radius + 1)` — which needs `tw >= radius + 2` to
-    /// stay non-negative — goes out of range at `x == tw - 1`. Before
-    /// 2026-09-04 that expression was a plain `usize` subtraction: a debug
-    /// build panicked (`attempt to subtract with overflow`, the 12 failures
-    /// this test was written against) and a release build wrapped to
-    /// `usize::MAX - k` and was rescued only by the following `.min(tw - 1)`.
-    ///
-    /// The reference walks the SAME tile decomposition with the TRUE
-    /// reflect-101 index, i.e. a DIFFERENT value from the kernels' saturating
-    /// one in exactly that slot (for `tw == 6, radius == 5`: reference 1,
-    /// kernel 0, pre-fix release 5). Bit-identical output over every plane is
-    /// therefore a MEASUREMENT that the out-of-range index cannot reach an
-    /// output — it is consumed only by the running-sum update of the final
-    /// `x`, which no later iteration reads — and not an argument that it
-    /// happens to agree.
-    ///
-    /// Widths are derived from the LIVE `h_blur_tile_width()` so the test
-    /// means the same thing under a `ZENSIM_H_TILE` override as it does at
-    /// the era-2 default; `base + 2` and `2 * base` are the in-range controls
-    /// (first safe remainder, and no remainder tile at all).
-    /// The streaming activity map is `|src - mu1_h|` on the plane
-    /// `fused_blur_h_ssim` already produced (`simd_ops::abs_diff_rows_into`)
-    /// instead of `box_blur_h_into_abs_diff`'s second H sweep. Both must be
-    /// the SAME BYTES at every geometry the H entries are pinned on, ragged
-    /// heights and tiled widths included — otherwise the masked/IW families
-    /// would move on the shipped revision.
-    #[test]
-    fn activity_from_the_fused_h_plane_is_bit_identical() {
-        let tile = super::h_blur_tile_width();
-        let base = if tile == 0 { super::H_TILE_WIDTH } else { tile };
-        let mut checked = 0usize;
-        for &w in &[64usize, 129, 257, base + 1, 2 * base + 1, base + 129] {
-            for &h in &[3usize, 8, 33, 40, 130] {
-                for &radius in &[1usize, 2, 5, 8] {
-                    let src = ring_plane(w, h, 11);
-                    let dst = ring_plane(w, h, 7919);
-                    let n = w * h;
-                    let mut old = vec![0.0f32; n];
-                    super::box_blur_h_into_abs_diff(&src, &mut old, w, h, radius);
-                    let (mut m1, mut m2) = (vec![0.0f32; n], vec![0.0f32; n]);
-                    let (mut sq, mut pr) = (vec![0.0f32; n], vec![0.0f32; n]);
-                    // A PRODUCTION claim (the served fused-extension route):
-                    // the process revision capped at Rev3. The canonical Rev4
-                    // H body runs one sliding window across tile boundaries,
-                    // so it does not equal the tiled box blur at a tile edge
-                    // (measured: 1025x3 r=1, idx 1024, 11018.707 vs 11018.75);
-                    // Rev4 claims tier invariance, not this equality.
-                    super::fused_blur_h_ssim_at_revision(
-                        &src,
-                        &dst,
-                        &mut m1,
-                        &mut m2,
-                        &mut sq,
-                        &mut pr,
-                        w,
-                        h,
-                        radius,
-                        crate::ssim_form::active_revision()
-                            .min(crate::feature_defs::FormulaRevision::Rev3),
-                    );
-                    let mut got = vec![0.0f32; n];
-                    crate::simd_ops::abs_diff_rows_into(&src, &m1, &mut got, w, w, h);
-                    for i in 0..n {
-                        assert_eq!(
-                            got[i].to_bits(),
-                            old[i].to_bits(),
-                            "{w}x{h} r={radius} tile={tile} idx {i}: {} != {}",
-                            got[i],
-                            old[i]
-                        );
-                    }
-                    checked += n;
-                }
-            }
-        }
-        assert!(
-            checked > 1_000_000,
-            "the probe must cover real planes, covered {checked}"
-        );
     }
 
     /// REV4VEC2 bit-exactness gate: the 8-row f64x8 Rec64 body must

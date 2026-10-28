@@ -931,7 +931,7 @@ impl Default for TailAccum {
         Self {
             hist: [[0; TAILHIST_BINS]; 4],
             max: [0.0; 4],
-            fold: crate::ssim_form::active_revision() >= FormulaRevision::Rev4,
+            fold: crate::ssim_form::active_revision() >= FormulaRevision::Rev5,
             diag: rev4_diag_enabled().then(|| Box::new([[0; DIAG_BINS]; 4])),
         }
     }
@@ -2435,7 +2435,7 @@ fn fold_v1_one_band(
             }
         });
         let full = work == BandPoolWork::Full;
-        let stable = free.revision() >= crate::feature_defs::FormulaRevision::Rev3;
+        let stable = free.revision() >= crate::feature_defs::FormulaRevision::Rev5;
         if stable && full {
             ps.stable_sd.resize(band_cap_n, 0.0);
         }

@@ -888,7 +888,7 @@ pub(crate) fn fused_vblur_features_ssim(
     // replaced measured at 22% of the whole walk (perf, fold944_full@2048^2)
     // and is kept in `ssim_form` as the reference the bounded-error tests
     // measure against.
-    let direct = free.revision() >= crate::feature_defs::FormulaRevision::Rev3;
+    let direct = free.revision() >= crate::feature_defs::FormulaRevision::Rev5;
     // Canonical arithmetic follows THIS computation's revision (featcanon D1).
     let mode = crate::featcanon::mode(free.revision());
     match mode {

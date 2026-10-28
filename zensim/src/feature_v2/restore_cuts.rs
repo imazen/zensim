@@ -780,56 +780,6 @@ mod tests {
         assert_eq!(acc.std(), 0.0);
     }
 
-    /// The streaming block-max pooler equals a naive whole-plane block-max
-    /// pooling over the same maps, bit for bit, for sizes with partial border
-    /// blocks in both axes and for a plane smaller than one block.
-    #[test]
-    fn streaming_block_max_matches_naive_lattice() {
-        for (w, h) in [(23usize, 17usize), (40, 40), (4, 9), (11, 5)] {
-            let mut seed = 99u64 ^ (w * 1000 + h) as u64;
-            let maps: Vec<Vec<f32>> = (0..8)
-                .map(|_| (0..w * h).map(|_| lcg(&mut seed)).collect())
-                .collect();
-            let mut z = Z1Acc::new(w, h);
-            let mut rows: [Vec<f64>; 8] = std::array::from_fn(|_| vec![0.0; w]);
-            for y in 0..h {
-                for (k, r) in rows.iter_mut().enumerate() {
-                    for (d, &v) in r.iter_mut().zip(&maps[k][y * w..(y + 1) * w]) {
-                        *d = f64::from(v);
-                    }
-                }
-                z.push_row(y, &rows);
-            }
-            let (nbx, nby) = (w / 5, h / 5);
-            let mut want = V1BasicSums::meas_f32();
-            for by in 0..nby {
-                for bx in 0..nbx {
-                    let m: [f64; 8] = std::array::from_fn(|k| {
-                        let mut v = 0.0f64;
-                        for r in by * 5..by * 5 + 5 {
-                            for c in bx * 5..bx * 5 + 5 {
-                                v = v.max(f64::from(maps[k][r * w + c]));
-                            }
-                        }
-                        v
-                    });
-                    accumulate_block(&mut want, m, bx & 7, false);
-                }
-            }
-            let (mut a, mut b) = ([0.0f64; Z1MAX_PER_CELL], [0.0f64; Z1MAX_PER_CELL]);
-            z.finalize(FormulaRevision::Rev3, &mut a);
-            if nbx * nby > 0 {
-                want.finalize_into(nbx * nby, &mut b[0..13], FormulaRevision::Rev3);
-                let (mut p, mut m, mut i) = ([0.0; 6], [0.0; 6], [0.0; 6]);
-                want.finalize_pools_into(nbx * nby, &mut p, &mut m, &mut i, FormulaRevision::Rev3);
-                b[13..19].copy_from_slice(&p);
-            }
-            for k in 0..Z1MAX_PER_CELL {
-                assert_eq!(a[k].to_bits(), b[k].to_bits(), "{w}x{h} slot {k}");
-            }
-        }
-    }
-
     /// The registry's per-cell widths are the ones the walk allocates.
     #[test]
     fn registry_widths_match_the_walk_constants() {

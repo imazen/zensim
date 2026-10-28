@@ -2087,7 +2087,7 @@ fn dense_block_kernel_generic<T: F32x8Backend + Copy, const POOL_SIMD: bool>(
     // Revision 3 (issue #61): the `s12` plane is the direct error moment, so
     // the v2 SSIM signal must read it as such. Hoisted once per call;
     // loop-invariant, so every call site below unswitches on it.
-    let direct = crate::ssim_form::active_revision() >= crate::feature_defs::FormulaRevision::Rev3;
+    let direct = crate::ssim_form::active_revision() >= crate::feature_defs::FormulaRevision::Rev5;
     // Revision 7's cancellation-free forms, by the same process revision.
     let stable = crate::ssim_form::active_revision().stable_forms();
     let zero = V8::<T>::zero_t(token);

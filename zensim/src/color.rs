@@ -2687,69 +2687,6 @@ mod tests {
     use super::*;
     use crate::source::ColorPrimaries;
 
-    /// featcanon D1: the opsin leaf follows the revision it is GIVEN, in any
-    /// process. Rev4 is the canonical body; Rev1–3 is the production dispatch.
-    /// Run in a Rev3 and a Rev4 process, so the process switch provably does
-    /// not reach the leaf.
-    fn opsin_leaf_follows_the_passed_revision() {
-        use crate::feature_defs::FormulaRevision;
-        // 7 pixels: all remainder, where production (x86: `cbrtf_fast`) and
-        // canonical (`cbrt_midp_f32`) differ for most colours.
-        let px: Vec<[u8; 3]> = (0..7u8)
-            .map(|i| [i.wrapping_mul(37), 255 - i * 29, i * 11 + 3])
-            .collect();
-        let n = px.len();
-        let conv = |rev: Option<FormulaRevision>| {
-            let (mut x, mut y, mut b) = (vec![0f32; n], vec![0f32; n], vec![0f32; n]);
-            match rev {
-                Some(r) => {
-                    srgb_to_positive_xyb_planar_into_at_revision(&px, &mut x, &mut y, &mut b, r)
-                }
-                None => srgb_to_positive_xyb_planar_into(&px, &mut x, &mut y, &mut b),
-            }
-            [x, y, b].map(|p| p.iter().map(|v| v.to_bits()).collect::<Vec<_>>())
-        };
-        let canon = {
-            let (mut x, mut y, mut b) = (vec![0f32; n], vec![0f32; n], vec![0f32; n]);
-            srgb_xyb_canon(
-                &px,
-                &mut x,
-                &mut y,
-                &mut b,
-                crate::featcanon::Mode::Canon64,
-                false,
-            );
-            [x, y, b].map(|p| p.iter().map(|v| v.to_bits()).collect::<Vec<_>>())
-        };
-        let production = conv(None);
-        for rev in [
-            FormulaRevision::Rev1,
-            FormulaRevision::Rev2,
-            FormulaRevision::Rev3,
-        ] {
-            assert_eq!(
-                conv(Some(rev)),
-                production,
-                "{rev:?} must run the production kernel"
-            );
-        }
-        assert_eq!(
-            conv(Some(FormulaRevision::Rev4)),
-            canon,
-            "Rev4 must run the canonical body"
-        );
-        assert_eq!(
-            conv(Some(FormulaRevision::Rev5)),
-            canon,
-            "Rev5 must run the canonical body"
-        );
-        println!(
-            "OPSIN-LEAF-RAN process={:?} production_differs_from_canonical={}",
-            crate::ssim_form::active_revision(),
-            production != canon
-        );
-    }
-
     /// Scalar tier: a pixel gets the same bits in a full 8-pixel chunk and in the
     /// remainder (2026-09-25 fix). Calls the scalar variants directly, so it runs on
     /// every host, not only where dispatch lands on scalar. `mul_add` is unfused on

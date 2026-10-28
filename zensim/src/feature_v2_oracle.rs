@@ -279,7 +279,7 @@ pub(crate) mod oracle {
                     s12[i] as f64,
                     ssq[i] as f64,
                     crate::ssim_form::active_revision()
-                        >= crate::feature_defs::FormulaRevision::Rev3, false);
+                        >= crate::feature_defs::FormulaRevision::Rev5, false);
                 push(&mut s, &mut sum_abs, 0, d);
                 push(&mut s, &mut sum_abs, 1, d * d);
                 push(&mut s, &mut sum_abs, 2, d * d * d);
@@ -608,7 +608,7 @@ fn dense_block_kernel_era2_generic<T: F32x8Backend + Copy, const FUSED: bool>(
     // the v2 SSIM signal must read it as such. Hoisted once per call;
     // loop-invariant, so every call site below unswitches on it.
     let stable = crate::ssim_form::active_revision().stable_forms();
-    let direct = crate::ssim_form::active_revision() >= crate::feature_defs::FormulaRevision::Rev3;
+    let direct = crate::ssim_form::active_revision() >= crate::feature_defs::FormulaRevision::Rev5;
     let _ = FUSED; // the split is chosen by tier; see the entries above
     let zero = V8::<T>::zero_t(token);
     let one = V8::<T>::splat_t(token, 1.0);
@@ -1052,7 +1052,7 @@ fn dense_block_kernel_canon<P: crate::featcanon::Pool>(
     revision: FormulaRevision,
 ) -> DenseAccum {
     use crate::featcanon::{Lanes16F32, ROW_LANES_FOLD};
-    let direct = revision >= FormulaRevision::Rev3;
+    let direct = revision >= FormulaRevision::Rev5;
     let stable_moments = revision >= FormulaRevision::Rev5;
     let forms7 = revision.stable_forms();
     // Revision 7's row lanes (`crate::featcanon::Lanes16F32`): the columns of
@@ -1461,7 +1461,7 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64, const R7: bool>(
     revision: FormulaRevision,
 ) -> DenseAccum {
     let mut r4 = r4;
-    let direct = revision >= FormulaRevision::Rev3;
+    let direct = revision >= FormulaRevision::Rev5;
     let stable_moments = P::LANES == 16;
     let forms7 = revision.stable_forms();
     let mut acc = DenseAccum::default();

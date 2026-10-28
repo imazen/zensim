@@ -153,11 +153,7 @@ impl HfGainForm {
     pub(crate) const fn for_revision(rev: FormulaRevision) -> Self {
         match rev {
             FormulaRevision::Rev1 => Self::RatioExcess,
-            FormulaRevision::Rev2
-            | FormulaRevision::Rev3
-            | FormulaRevision::Rev4
-            | FormulaRevision::Rev5
-            | FormulaRevision::Rev6
+            FormulaRevision::Rev5
             | FormulaRevision::Rev7 => Self::REV2_HFGAIN,
         }
     }
@@ -758,20 +754,6 @@ mod tests {
         assert_eq!(
             seen.iter().copied().collect::<Vec<_>>(),
             ["bexcess", "cap", "log1p", "ratio", "satexcess"]
-        );
-    }
-
-    /// Revision 1 is the shipped form, and revision 2 resolves through the one
-    /// named constant.
-    #[test]
-    fn revision_selection_goes_through_the_named_arm() {
-        assert_eq!(
-            HfGainForm::for_revision(FormulaRevision::Rev1),
-            HfGainForm::RatioExcess
-        );
-        assert_eq!(
-            HfGainForm::for_revision(FormulaRevision::Rev2),
-            HfGainForm::REV2_HFGAIN
         );
     }
 

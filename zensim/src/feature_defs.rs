@@ -353,39 +353,6 @@ pub enum FormulaRevision {
     /// table and every published verdict was read at.
     #[default]
     Rev1,
-    /// The 2026-09-05 batched arithmetic-fix era: the audit's F4, F5 and F17
-    /// fixes landing together, so exactly one era boundary exists rather than
-    /// one per defect — one recalculation, not three.
-    Rev2,
-    /// Revision 2 plus stable f64 pairwise-error moments for v1 SSIM
-    /// basic, peak, masked and IW signals. Requires freshly extracted data.
-    Rev3,
-    /// Revision 3 formulas under **canonical arithmetic** (the `tiercanon`
-    /// era), served and steered in a Rev4 process (REV4SERVE).
-    ///
-    /// The canonical leaves — opsin XYB, the fused H/V SSIM blurs and pools,
-    /// the free raw-moment / bounded-error / luma-bin accumulators, the CSFW
-    /// pass, and the PU front end (`color::pu_xyb_canon` over the
-    /// `_at_revision` transfer decoders) — run ONE source-level body with
-    /// fused `f32::mul_add`, fixed 8-virtual-lane pools and a fixed pairwise
-    /// reduce. Measured, not proven: `research::extract`'s full 1825-slot
-    /// SDR vector is bit-identical across x86 v4x/v4/v3/scalar and wasm32
-    /// simd128/scalar on the measured pairs (wasm32: 6 pairs, 8×8 to
-    /// 512×384).
-    ///
-    /// A Rev4 computation must run in a Rev4 process (and vice versa):
-    /// `ssim_form::refuse_rev4_mix` refuses every cross-boundary mix because
-    /// the process-global gates (`compute_mode`, `RootForm`, `PowForm`,
-    /// `HfGainForm`, the luma form) still read `ZENSIM_FORMULA_REV`.
-    /// `streaming::active_channels` routes every active channel through the
-    /// fused SSIM kernels at Rev4, so the tier-dispatched edge-only
-    /// (`blur::fused_blur_h_mu`) and MSE-only (`sq_diff_sum`) routes are
-    /// never reached. Requires freshly extracted data: 837 of 1825 slots
-    /// move vs production v3 (union over the lane's 11 audit pairs). Only
-    /// for the fused-V-blur pools was the accumulation order shown not to
-    /// matter against the f64 exact oracle; see
-    /// `benchmarks/featcanon_WORKLOG.md`.
-    Rev4,
     /// Revision 4's formulas under **local-window arithmetic** (the
     /// `localwin` era, `benchmarks/rev5_spec_2026-10-04.md`), computed for
     /// the `basic` (f0..227), `peaks` (f156..227) and `v2` (f372..719)
@@ -406,22 +373,6 @@ pub enum FormulaRevision {
     /// model is Rev4's: `ZENSIM_FORMULA_REV=5` pins it and
     /// `ssim_form::refuse_rev4_mix` refuses every cross-boundary mix.
     Rev5,
-    /// Revision 5 with the corrected ringing measurement (the `ringhpm` era,
-    /// imazen/zensimx#72, `benchmarks/byconstruction_2026-10-22.md`).
-    ///
-    /// The twelve v2 `ringing` slots measure the error after removing each
-    /// image's SSIM local mean, `(src − mu1) − (dst − mu2)`, instead of
-    /// `src − dst` (`feature_v2::RingForm::HighPassMu`), so a global offset,
-    /// contrast or saturation change no longer reads as ringing away from
-    /// edges. Every other slot keeps Rev5's arithmetic bit for bit. It also
-    /// admits the `globaff` family (f1867..1890): per scale and XYB channel,
-    /// the share of the mean squared error a global least-squares fit
-    /// `dst ≈ a·src + b` explains, and that explained error.
-    ///
-    /// Rev5's scope and process model otherwise apply unchanged:
-    /// `ZENSIM_FORMULA_REV=6` pins it for research, and a bake declaring
-    /// revision 6 selects it per call.
-    Rev6,
     /// Revision 5's measurements, raw ringing included, with revision 6's
     /// `globaff` family and faster, cancellation-free pooled arithmetic (the
     /// `rowlanes` era, `benchmarks/byconstruction_2026-10-22.md`, "Speed pass
@@ -472,29 +423,6 @@ impl FormulaRevision {
     pub(crate) const fn era_tokens(self) -> &'static [&'static str] {
         match self {
             Self::Rev1 => &[],
-            Self::Rev2 => &["v1ssimcap", "freecomp", "v1hfgain", "v1detroot", "scorepow"],
-            Self::Rev3 => &[
-                "v1ssimcap",
-                "freecomp",
-                "v1hfgain",
-                "v1detroot",
-                "scorepow",
-                "v1ssimstable",
-                "v2ssimstable",
-                "v1extfused",
-            ],
-            Self::Rev4 => &[
-                "v1ssimcap",
-                "freecomp",
-                "v1hfgain",
-                "v1detroot",
-                "scorepow",
-                "v1ssimstable",
-                "v2ssimstable",
-                "v1extfused",
-                "tiercanon",
-                "c3negfold",
-            ],
             Self::Rev5 => &[
                 "v1ssimcap",
                 "freecomp",
@@ -507,20 +435,6 @@ impl FormulaRevision {
                 "tiercanon",
                 "c3negfold",
                 "localwin",
-            ],
-            Self::Rev6 => &[
-                "v1ssimcap",
-                "freecomp",
-                "v1hfgain",
-                "v1detroot",
-                "scorepow",
-                "v1ssimstable",
-                "v2ssimstable",
-                "v1extfused",
-                "tiercanon",
-                "c3negfold",
-                "localwin",
-                "ringhpm",
             ],
             Self::Rev7 => &[
                 "v1ssimcap",
@@ -543,12 +457,12 @@ impl FormulaRevision {
     /// ([`Self::Rev6`]'s `ringhpm` era) rather than the raw pixel error.
     /// Revision 7 returns to the raw error.
     pub(crate) const fn ring_high_pass(self) -> bool {
-        matches!(self, Self::Rev6)
+        false
     }
 
     /// Whether the `globaff` family (f1867..1890) is computed at this revision.
     pub(crate) const fn computes_globaff(self) -> bool {
-        matches!(self, Self::Rev6 | Self::Rev7)
+        matches!(self, Self::Rev7)
     }
 
     /// Whether the pools add columns in f32 row lanes and the central
@@ -600,7 +514,7 @@ impl FormulaRevision {
     pub(crate) const fn paired_global_contrast(self) -> bool {
         matches!(
             self,
-            Self::Rev2 | Self::Rev3 | Self::Rev4 | Self::Rev5 | Self::Rev6 | Self::Rev7
+            Self::Rev5 | Self::Rev7
         )
     }
 
@@ -1397,14 +1311,6 @@ pub(crate) const ARITHMETIC_REVISIONS: &[(Defect, Revision)] = &[
 /// Whether `era` names a registered ARITHMETIC era.
 pub(crate) fn is_arithmetic_era(era: &str) -> bool {
     ARITHMETIC_REVISIONS.iter().any(|(_, r)| r.era == era)
-}
-
-/// The registered arithmetic-era entry named `era`, if any.
-pub(crate) fn arithmetic_revision(era: &str) -> Option<&'static Revision> {
-    ARITHMETIC_REVISIONS
-        .iter()
-        .find(|(_, r)| r.era == era)
-        .map(|(_, r)| r)
 }
 
 const DEFECT_F17: Defect = Defect {
@@ -3418,44 +3324,6 @@ mod tests {
         }
     }
 
-    /// **The registry half of G3.1 for revision 3's `v1ssimstable` era.**
-    ///
-    /// Revision 3 changes the PRECISION of the same per-pixel `d` that F4's
-    /// bounded form changes, so it reaches exactly the same slots — asserted
-    /// against `v1ssimcap`'s measured set rather than against a second
-    /// hand-written list.
-    ///
-    /// The two eras are NOT interchangeable despite sharing a slot set:
-    /// `v1ssimcap` is bit-identical to revision 1 wherever `D^2 <= 1`, i.e.
-    /// on all ordinary content, while `v1ssimstable` moves every one of these
-    /// columns on every image. Same blast radius, very different blast.
-    ///
-    /// The MEASURED half — that the extractor really does move this set and
-    /// nothing else — is
-    /// `streaming::tests::rev3_moves_exactly_the_registered_slots`, which
-    /// re-extracts at revision 3 in a child process and diffs.
-    #[test]
-    fn ssim_stable_moves_exactly_the_f4_slots() {
-        use super::FormulaRevision;
-        use crate::NUM_SCALES;
-        let stable = super::era_moved_slots("v1ssimstable", 372, NUM_SCALES);
-        let f4 = super::era_moved_slots("v1ssimcap", 372, NUM_SCALES);
-        assert_eq!(
-            stable, f4,
-            "v1ssimstable and v1ssimcap read the same per-pixel signal, so they \
-             must declare the same slots"
-        );
-        assert_eq!(stable.len(), 132);
-        // And it is one of revision 3's eras, so a recalculation planned from
-        // the revision (not the era) still sees these columns.
-        assert!(
-            FormulaRevision::Rev3
-                .moved_slots(372, NUM_SCALES)
-                .contains(&241)
-        );
-        assert!(FormulaRevision::Rev3.era_tokens().contains(&"v1ssimstable"));
-    }
-
     /// Revision 1 is the baseline, so it moves nothing by definition.
     #[test]
     fn rev1_moves_no_slots() {
@@ -3535,160 +3403,6 @@ mod tests {
             super::RevisionStatus::Proposed,
             "SHIPPED_REVISION is Rev1; F19 must stay Proposed"
         );
-    }
-
-    /// featcanon D3: `tiercanon` is REGISTERED (the research provenance and
-    /// `era_is_registered` can name it) as an ARITHMETIC era that moves every
-    /// live slot, it is Rev4's and only Rev4's, and it is still Proposed.
-    #[test]
-    fn tiercanon_is_a_registered_arithmetic_era_moving_every_live_slot() {
-        use super::FormulaRevision;
-        use crate::NUM_SCALES;
-        assert!(super::is_arithmetic_era("tiercanon"));
-        assert!(!super::is_arithmetic_era("v1ssimstable"));
-        assert!(!super::is_score_path_era("tiercanon"));
-        let r = super::arithmetic_revision("tiercanon").expect("registered");
-        assert_eq!(r.status, super::RevisionStatus::Proposed);
-        assert_eq!(super::ARITHMETIC_REVISIONS[0].0.id, "TIERDIV");
-        // No per-signal entry claims it: the registry-level entry is the one
-        // owner, so the two cannot drift apart.
-        assert!(
-            super::signals().all(|s| s.revisions.iter().all(|r| r.era != "tiercanon")),
-            "tiercanon must not also be attached to a SignalDef"
-        );
-        for rev in [
-            FormulaRevision::Rev1,
-            FormulaRevision::Rev2,
-            FormulaRevision::Rev3,
-        ] {
-            assert!(!rev.era_tokens().contains(&"tiercanon"), "{rev:?}");
-        }
-        assert!(FormulaRevision::Rev4.era_tokens().contains(&"tiercanon"));
-        // Rev4 = Rev3's eras + tiercanon, in that order.
-        assert_eq!(
-            &FormulaRevision::Rev4.era_tokens()[..FormulaRevision::Rev3.era_tokens().len()],
-            FormulaRevision::Rev3.era_tokens()
-        );
-        for width in [372u16, 944, 1825] {
-            let live: Vec<u16> = (0..width as usize)
-                .filter_map(|id| super::def_at(id, NUM_SCALES))
-                .map(|d| d.id)
-                .collect();
-            assert_eq!(super::era_moved_slots("tiercanon", width, NUM_SCALES), live);
-            assert_eq!(FormulaRevision::Rev4.moved_slots(width, NUM_SCALES), live);
-            assert!(
-                FormulaRevision::Rev3.moved_slots(width, NUM_SCALES).len() < live.len(),
-                "Rev3's moved set must stay per-signal at width {width}"
-            );
-        }
-    }
-
-    /// rev5: `localwin` is REGISTERED as the second ARITHMETIC era — it
-    /// moves every live slot, it is Rev5's and only Rev5's, and it is still
-    /// Proposed. Same invariants the `tiercanon` gate pins, one era later.
-    #[test]
-    fn localwin_is_a_registered_arithmetic_era_moving_every_live_slot() {
-        use super::FormulaRevision;
-        use crate::NUM_SCALES;
-        assert!(super::is_arithmetic_era("localwin"));
-        assert!(!super::is_score_path_era("localwin"));
-        let r = super::arithmetic_revision("localwin").expect("registered");
-        assert_eq!(r.status, super::RevisionStatus::Proposed);
-        assert_eq!(super::ARITHMETIC_REVISIONS[1].0.id, "WINDRIFT");
-        // No per-signal entry claims it: the registry-level entry is the one
-        // owner, so the two cannot drift apart.
-        assert!(
-            super::signals().all(|s| s.revisions.iter().all(|r| r.era != "localwin")),
-            "localwin must not also be attached to a SignalDef"
-        );
-        for rev in [
-            FormulaRevision::Rev1,
-            FormulaRevision::Rev2,
-            FormulaRevision::Rev3,
-            FormulaRevision::Rev4,
-        ] {
-            assert!(!rev.era_tokens().contains(&"localwin"), "{rev:?}");
-        }
-        // Rev5 = Rev4's eras + localwin, in that order — `tiercanon` stays
-        // in the token list because Rev5 builds on the canonical leaves.
-        assert!(FormulaRevision::Rev5.era_tokens().contains(&"localwin"));
-        assert_eq!(
-            &FormulaRevision::Rev5.era_tokens()[..FormulaRevision::Rev4.era_tokens().len()],
-            FormulaRevision::Rev4.era_tokens()
-        );
-        for width in [372u16, 944, 1825] {
-            let live: Vec<u16> = (0..width as usize)
-                .filter_map(|id| super::def_at(id, NUM_SCALES))
-                .map(|d| d.id)
-                .collect();
-            assert_eq!(super::era_moved_slots("localwin", width, NUM_SCALES), live);
-            assert_eq!(FormulaRevision::Rev5.moved_slots(width, NUM_SCALES), live);
-        }
-    }
-
-    #[test]
-    fn rev2_carries_all_eras_and_f5_needs_the_append_block() {
-        use super::FormulaRevision;
-        use crate::NUM_SCALES;
-        let toks = FormulaRevision::Rev2.era_tokens();
-        for want in ["v1ssimcap", "freecomp", "v1hfgain", "v1detroot", "scorepow"] {
-            assert!(toks.contains(&want), "{want} missing from {toks:?}");
-        }
-
-        let at372 = FormulaRevision::Rev2.moved_slots(372, NUM_SCALES);
-        let at944 = FormulaRevision::Rev2.moved_slots(944, NUM_SCALES);
-        // THREE v1 eras at 372, and they are NOT disjoint: `v1detroot` (F18,
-        // the libc-dependent pooled roots) OVERLAPS `v1ssimcap` (F4) on every
-        // SSIM-derived `L4`/`L8` slot — the same slot, two independent
-        // arithmetic problems. So a revision's `moved_slots` is a UNION, and
-        // the sum-of-eras identity this test used to assert would now
-        // double-count. The inclusion-exclusion below is the replacement, and
-        // it is a strictly stronger claim: it pins each era's size AND the
-        // exact size of the one overlap.
-        let cap = super::era_moved_slots("v1ssimcap", 372, NUM_SCALES);
-        let gain = super::era_moved_slots("v1hfgain", 372, NUM_SCALES);
-        let root = super::era_moved_slots("v1detroot", 372, NUM_SCALES);
-        assert_eq!(
-            cap.len(),
-            132,
-            "v1ssimcap: basic 36 + peaks 24 + masked 36 + IW 36"
-        );
-        assert_eq!(gain.len(), 12, "v1hfgain: the twelve `contrast_inc` slots");
-        assert_eq!(
-            root.len(),
-            144,
-            "v1detroot: the L4/L8 pools — basic 36 + peaks 36 + masked 36 + IW 36"
-        );
-        let overlap = cap.iter().filter(|id| root.contains(id)).count();
-        assert_eq!(
-            overlap, 48,
-            "the four SSIM L4/L8 signals (basic ssim_4th, peaks ssim_l8, masked \
-             ssim_4th, IW ssim_4th) x 12 (scale, channel) cells"
-        );
-        assert_eq!(
-            gain.iter()
-                .filter(|id| cap.contains(id) || root.contains(id))
-                .count(),
-            0,
-            "v1hfgain is a Ratio family and must not touch either pooled-root era"
-        );
-        assert_eq!(
-            at372.len(),
-            cap.len() + gain.len() + root.len() - overlap,
-            "moved_slots must be the UNION of its eras, not the sum"
-        );
-        assert_eq!(at372.len(), 240, "132 + 12 + 144 - 48");
-        assert!(
-            at944.len() > at372.len(),
-            "944 must additionally reach freecomp's raw-moment slots: {} vs {}",
-            at944.len(),
-            at372.len()
-        );
-        // Every 372 slot is still in the 944 set — a revision appends, it
-        // never drops.
-        for id in &at372 {
-            assert!(at944.contains(id), "f{id} vanished at 944");
-        }
     }
 
     use super::*;

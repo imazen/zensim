@@ -381,7 +381,7 @@ pub(crate) mod tests {
         let default = TailAccum::default();
         assert_eq!(
             default.fold,
-            crate::ssim_form::active_revision() >= FormulaRevision::Rev4,
+            crate::ssim_form::active_revision() >= FormulaRevision::Rev5,
             "fold follows the process revision"
         );
         let (mut legacy, mut folded) = (

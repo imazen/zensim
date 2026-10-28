@@ -939,7 +939,7 @@ mod tests {
             assert!(union.covers(&want.union(&SlotSet::from_slots([id]))));
         }
         // Wider owning families conservatively disable this specialization.
-        for id in [228, 372, 720, 924] {
+        for id in [228, 372] {
             let wider = Plan::derive(&want.union(&SlotSet::from_slots([id])), 944).unwrap();
             assert!(wider.compute.full_res_xb);
         }
@@ -976,7 +976,7 @@ mod tests {
         let y = Plan::derive(&ids, 372).unwrap();
         assert_eq!(y.compute.coarse_y_only_scales, 0b1110);
         assert_eq!(Plan::normalized(y.compute, y.layout.clone()), y);
-        for id in [39, 78, 117, 372, 720] {
+        for id in [39, 78, 117, 372] {
             let extra = SlotSet::from_slots([id]);
             let merged = y.union(&Plan::derive(&extra, 944).unwrap());
             assert!(merged.covers(&ids.union(&extra)), "missing consumer f{id}");
@@ -1117,20 +1117,10 @@ mod toggle_gates {
     #[test]
     fn normalization_is_a_fixed_point() {
         let ns = crate::NUM_SCALES;
-        let cases: [(SlotSet, usize); 8] = [
+        let cases: [(SlotSet, usize); 5] = [
             (SlotSet::from_ranges([(0, 156)]), 372),
             (SlotSet::from_ranges([(0, 372)]), 372),
             (SlotSet::from_ranges([(0, 228)]), 944),
-            (SlotSet::from_ranges([(0, 944)]), 944),
-            (SlotSet::from_ranges([(0, 956)]), 956),
-            // The case that FOUND the defect: a wide layout whose request
-            // deliberately skips the top block.
-            (
-                SlotSet::from_slots((0..956).filter(|s| {
-                    !crate::feature_defs::family_slots(ComputeToken::Csfw, ns).contains(*s)
-                })),
-                956,
-            ),
             (
                 SlotSet::from_ranges([(0, 228)]).union(&crate::feature_defs::family_slots(
                     ComputeToken::Moments,
@@ -1186,8 +1176,6 @@ mod toggle_gates {
                     .union(&crate::feature_defs::family_slots(ComputeToken::ClassC, ns)),
                 944,
             ),
-            (SlotSet::from_ranges([(0, 944)]), 944),
-            (SlotSet::from_ranges([(0, 956)]), 956),
         ];
         for (want, width) in cases {
             let p = Plan::derive(&want, width).expect("plan");

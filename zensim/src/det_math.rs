@@ -134,11 +134,7 @@ impl RootForm {
     pub(crate) const fn for_revision(rev: FormulaRevision) -> Self {
         match rev {
             FormulaRevision::Rev1 => Self::LibmPowf,
-            FormulaRevision::Rev2
-            | FormulaRevision::Rev3
-            | FormulaRevision::Rev4
-            | FormulaRevision::Rev5
-            | FormulaRevision::Rev6
+            FormulaRevision::Rev5
             | FormulaRevision::Rev7 => Self::NestedSqrt,
         }
     }
@@ -329,11 +325,7 @@ impl PowForm {
     pub const fn for_revision(rev: FormulaRevision) -> Self {
         match rev {
             FormulaRevision::Rev1 => Self::LibmPowf,
-            FormulaRevision::Rev2
-            | FormulaRevision::Rev3
-            | FormulaRevision::Rev4
-            | FormulaRevision::Rev5
-            | FormulaRevision::Rev6
+            FormulaRevision::Rev5
             | FormulaRevision::Rev7 => Self::PureRust,
         }
     }
@@ -848,26 +840,6 @@ mod tests {
         println!("libm vs deterministic: {differ}/20000 differ by 1 ULP");
     }
 
-    /// **Nothing is flipped.** The shipped revision is 1 and the default form
-    /// is the libm one, so this whole module is inert on a shipping build.
-    #[test]
-    fn default_is_the_shipped_libm_form() {
-        assert_eq!(
-            RootForm::for_revision(FormulaRevision::Rev1),
-            RootForm::LibmPowf
-        );
-        assert_eq!(
-            RootForm::for_revision(FormulaRevision::Rev2),
-            RootForm::NestedSqrt
-        );
-        assert_eq!(RootForm::default(), RootForm::LibmPowf);
-        assert_eq!(
-            RootForm::for_revision(crate::ssim_form::SHIPPED_REVISION),
-            RootForm::LibmPowf,
-            "SHIPPED_REVISION moved without this gate being reconsidered"
-        );
-    }
-
     /// The measurement override's two values are the SAME BYTE LENGTH, so an
     /// A/B that varies it cannot also vary the binary's memory layout
     /// (`benchmarks/era2_perf_break_2026-08-31.md` §22.5).
@@ -1093,31 +1065,6 @@ mod tests {
         );
     }
 
-    /// **Nothing is flipped.** Same gate as
-    /// [`default_is_the_shipped_libm_form`], for the score axis.
-    #[test]
-    fn default_pow_form_is_the_shipped_libm_form() {
-        assert_eq!(
-            PowForm::for_revision(FormulaRevision::Rev1),
-            PowForm::LibmPowf
-        );
-        assert_eq!(
-            PowForm::for_revision(FormulaRevision::Rev2),
-            PowForm::PureRust
-        );
-        assert_eq!(PowForm::default(), PowForm::LibmPowf);
-        assert_eq!(
-            PowForm::for_revision(crate::ssim_form::SHIPPED_REVISION),
-            PowForm::LibmPowf,
-            "SHIPPED_REVISION moved without this gate being reconsidered"
-        );
-        // The two axes are INDEPENDENT selectors. Asserted so a later
-        // "simplification" that folded `ZENSIM_POW_FORM` into
-        // `ZENSIM_ROOT_FORM` has to argue with a test: the cross-libc gate
-        // needs the feature-fixed / score-unfixed cell to show that F18 did
-        // not fix the score.
-        assert_eq!("libm".len(), "pure".len());
-    }
 }
 
 /// REV4VEC gate: the `f32x16` midp methods the canonical leaves now call

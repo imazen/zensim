@@ -61,11 +61,6 @@ pub(crate) fn formula_revision(
         .map(str::trim)
     {
         Some("1" | "rev1" | "Rev1") => Ok(FormulaRevision::Rev1),
-        Some("2" | "rev2" | "Rev2") => Ok(FormulaRevision::Rev2),
-        Some("3" | "rev3" | "Rev3") => Ok(FormulaRevision::Rev3),
-        Some("4" | "rev4" | "Rev4") => Ok(FormulaRevision::Rev4),
-        Some("5" | "rev5" | "Rev5") => Ok(FormulaRevision::Rev5),
-        Some("6" | "rev6" | "Rev6") => Ok(FormulaRevision::Rev6),
         Some("7" | "rev7" | "Rev7") => Ok(FormulaRevision::Rev7),
         _ => Err(crate::ZensimError::ModelLoadFailed {
             reason: "unknown zentrain.formula_revision",
