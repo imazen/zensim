@@ -85,6 +85,11 @@ measurement.
 | 8, 4096² | 63.5 ms | 59.6 ms | 1,370 ms | 900 ms |
 
 Peak memory at 4096², one thread: `E` 158 MiB, fast-ssim2 2,468 MiB, butteraugli 2,646 MiB.
+
+This crate runs the same code at the same speed. A paired timing on an Intel Core Ultra 7 265K
+(2026-10-28; 1024×768, one pinned thread, the two crates' `split_timing` examples alternating
+for 12 rounds of 10 calls) gave median ratios of slim to research of 1.003 (`E`), 1.006
+(`ECodec`), 0.998 (`A`) and 1.008 (`PreviewV0_2`); `E` took 12.75 ms per call there.
 Reusing a reference with `precompute_reference` saves 8–11% per call at one thread; at eight
 threads the uncached path is faster from 1024² up.
 
