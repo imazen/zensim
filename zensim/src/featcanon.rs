@@ -511,31 +511,7 @@ pub(crate) struct WelfordCell {
 }
 
 impl WelfordCell {
-    /// One sample. `recip_n1` is `1.0 / (n + 1)` — precomputed by callers
-    /// that fold a whole row (the mapdev idiom); `0` here means "compute".
-    #[inline(always)]
-    pub(crate) fn push(&mut self, x: f64) {
-        self.n += 1;
-        let change = x - self.mean;
-        self.mean += change / self.n as f64;
-        self.m2 += change * (x - self.mean);
-    }
 
-    /// Chan's parallel merge.
-    pub(crate) fn merge(&mut self, o: &Self) {
-        if o.n == 0 {
-            return;
-        }
-        if self.n == 0 {
-            *self = *o;
-            return;
-        }
-        let total = self.n + o.n;
-        let shift = o.mean - self.mean;
-        self.m2 += o.m2 + shift * shift * (self.n as f64 * o.n as f64 / total as f64);
-        self.mean += shift * (o.n as f64 / total as f64);
-        self.n = total;
-    }
 }
 
 impl WelfordVar {
@@ -546,50 +522,6 @@ impl WelfordVar {
         }
     }
 
-    /// One sample into canonical lane `lane` (`x` position mod 8).
-    #[allow(unused_variables)]
-    #[inline]
-    pub(crate) fn push(&mut self, lane: usize, x: f64) {
-        match self {
-            Self::Seq(c) => c.push(x),
-            Self::Lanes(lanes) => lanes[lane & 7].push(x),
-        }
-    }
-
-    /// `(n, mean, m2)` — merging the lanes pairwise first.
-    #[inline]
-    pub(crate) fn stats(&self) -> WelfordCell {
-        match self {
-            Self::Seq(c) => *c,
-            Self::Lanes(lanes) => {
-                // The same adjacent-pairwise tree as `era2_reduce8`.
-                let m = |a: WelfordCell, b: WelfordCell| {
-                    let mut a = a;
-                    a.merge(&b);
-                    a
-                };
-                m(
-                    m(m(lanes[0], lanes[1]), m(lanes[2], lanes[3])),
-                    m(m(lanes[4], lanes[5]), m(lanes[6], lanes[7])),
-                )
-            }
-        }
-    }
-
-    /// Fold a same-mode sibling's whole state into `self` — lane-aligned
-    /// for `Lanes`, sequential for `Seq`/`Neum` (the per-row → strip cell
-    /// merge in the var-typed kernels).
-    pub(crate) fn merge_var(&mut self, o: &Self) {
-        match (self, o) {
-            (Self::Seq(a), Self::Seq(b)) => a.merge(b),
-            (Self::Lanes(a), Self::Lanes(b)) => {
-                for j in 0..CANON_LANES {
-                    a[j].merge(&b[j]);
-                }
-            }
-            _ => panic!("WelfordVar::merge_var across modes"),
-        }
-    }
 }
 
 #[cfg(test)]

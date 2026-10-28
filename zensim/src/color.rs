@@ -283,10 +283,10 @@ fn srgb_xyb_canon_body(
     }
 }
 
-/// Canonical linear-f32 → XYB driver; `CLAMP` is the display-gamut clamp.
+/// Canonical linear-f32 → XYB driver; inputs are clamped to the display gamut.
 /// `mode` as for [`srgb_xyb_canon`]. REV4VEC as for [`srgb_xyb_canon`].
 #[allow(clippy::manual_clamp)]
-pub(crate) fn linear_xyb_canon<const CLAMP: bool>(
+pub(crate) fn linear_xyb_canon(
     pixels: &[[f32; 3]],
     x_out: &mut [f32],
     y_out: &mut [f32],
@@ -296,7 +296,7 @@ pub(crate) fn linear_xyb_canon<const CLAMP: bool>(
 ) {
     let _ = mode;
     incant!(
-        linear_xyb_canon_vec::<CLAMP>(pixels, x_out, y_out, b_out, cbrt7),
+        linear_xyb_canon_vec(pixels, x_out, y_out, b_out, cbrt7),
         [v4x, v4, v3, neon, wasm128, scalar]
     );
 }
@@ -306,22 +306,20 @@ pub(crate) fn linear_xyb_canon<const CLAMP: bool>(
 /// the scalar/wasm128 stubs (REV4VEC).
 #[inline(always)]
 #[allow(clippy::manual_clamp)]
-fn linear_px_canon<const CLAMP: bool>(ab: f32, p: [f32; 3], cbrt7: bool) -> (f32, f32, f32) {
-    let (r, g, b) = if CLAMP {
+fn linear_px_canon(ab: f32, p: [f32; 3], cbrt7: bool) -> (f32, f32, f32) {
+    let (r, g, b) = {
         (
             p[0].max(0.0).min(1.0),
             p[1].max(0.0).min(1.0),
             p[2].max(0.0).min(1.0),
         )
-    } else {
-        (p[0], p[1], p[2])
     };
     opsin_px_canon(ab, r, g, b, cbrt7)
 }
 
 /// The per-element scalar canonical linear→XYB body — as
 /// [`srgb_xyb_canon_body`], but through [`linear_px_canon`].
-fn linear_xyb_canon_body<const CLAMP: bool>(
+fn linear_xyb_canon_body(
     pixels: &[[f32; 3]],
     x_out: &mut [f32],
     y_out: &mut [f32],
@@ -330,7 +328,7 @@ fn linear_xyb_canon_body<const CLAMP: bool>(
 ) {
     let ab = absorbance_bias_f32();
     for (i, &p) in pixels.iter().enumerate() {
-        let (x, y, bb) = linear_px_canon::<CLAMP>(ab, p, cbrt7);
+        let (x, y, bb) = linear_px_canon(ab, p, cbrt7);
         x_out[i] = x;
         y_out[i] = y;
         b_out[i] = bb;
@@ -428,11 +426,11 @@ impl<T: F32x16Convert> CanonChunk<T> {
         )
     }
 
-    /// Gather 16 linear pixels to channel vectors, applying the `CLAMP`
-    /// display-gamut clamp exactly as [`linear_px_canon`]
+    /// Gather 16 linear pixels to channel vectors, applying the display-gamut
+    /// clamp exactly as [`linear_px_canon`]
     /// (`.max(0).min(1)`).
     #[inline(always)]
-    fn linear_lanes<const CLAMP: bool>(
+    fn linear_lanes(
         &self,
         px: &[[f32; 3]; 16],
     ) -> (GenericF32x16<T>, GenericF32x16<T>, GenericF32x16<T>) {
@@ -448,14 +446,12 @@ impl<T: F32x16Convert> CanonChunk<T> {
         let r = GenericF32x16::from_array_t(self.token, r_arr);
         let g = GenericF32x16::from_array_t(self.token, g_arr);
         let b = GenericF32x16::from_array_t(self.token, b_arr);
-        if CLAMP {
+        {
             (
                 r.max(self.zero).min(self.one),
                 g.max(self.zero).min(self.one),
                 b.max(self.zero).min(self.one),
             )
-        } else {
-            (r, g, b)
         }
     }
 
@@ -836,7 +832,7 @@ fn srgb_xyb_canon_vec_neon(
 /// [`linear_xyb_canon`] lane-parallel — as [`srgb_xyb_canon_vec`], with
 /// [`CanonChunk::linear_lanes`] for the input side.
 #[magetypes(define(f32x16), v4x, v4, v3, -scalar)]
-fn linear_xyb_canon_vec<const CLAMP: bool>(
+fn linear_xyb_canon_vec(
     token: Token,
     pixels: &[[f32; 3]],
     x_out: &mut [f32],
@@ -852,7 +848,7 @@ fn linear_xyb_canon_vec<const CLAMP: bool>(
         let px: &[[f32; 3]; 16] = pixels[base..base + 16]
             .try_into()
             .expect("16 pixels per chunk");
-        let (r, g, b) = k.linear_lanes::<CLAMP>(px);
+        let (r, g, b) = k.linear_lanes(px);
         let (x, y, bb) = k.opsin_positive(r, g, b);
         x_out[base..base + 16].copy_from_slice(&x.to_array());
         y_out[base..base + 16].copy_from_slice(&y.to_array());
@@ -860,14 +856,14 @@ fn linear_xyb_canon_vec<const CLAMP: bool>(
     }
     let ab = absorbance_bias_f32();
     for i in (chunks * 16)..n {
-        let (x, y, bb) = linear_px_canon::<CLAMP>(ab, pixels[i], cbrt7);
+        let (x, y, bb) = linear_px_canon(ab, pixels[i], cbrt7);
         x_out[i] = x;
         y_out[i] = y;
         b_out[i] = bb;
     }
 }
 
-fn linear_xyb_canon_vec_scalar<const CLAMP: bool>(
+fn linear_xyb_canon_vec_scalar(
     _token: archmage::ScalarToken,
     pixels: &[[f32; 3]],
     x_out: &mut [f32],
@@ -875,11 +871,11 @@ fn linear_xyb_canon_vec_scalar<const CLAMP: bool>(
     b_out: &mut [f32],
     cbrt7: bool,
 ) {
-    linear_xyb_canon_body::<CLAMP>(pixels, x_out, y_out, b_out, cbrt7);
+    linear_xyb_canon_body(pixels, x_out, y_out, b_out, cbrt7);
 }
 
 #[cfg(target_arch = "wasm32")]
-fn linear_xyb_canon_vec_wasm128<const CLAMP: bool>(
+fn linear_xyb_canon_vec_wasm128(
     _token: archmage::Wasm128Token,
     pixels: &[[f32; 3]],
     x_out: &mut [f32],
@@ -887,13 +883,13 @@ fn linear_xyb_canon_vec_wasm128<const CLAMP: bool>(
     b_out: &mut [f32],
     cbrt7: bool,
 ) {
-    linear_xyb_canon_body::<CLAMP>(pixels, x_out, y_out, b_out, cbrt7);
+    linear_xyb_canon_body(pixels, x_out, y_out, b_out, cbrt7);
 }
 
 /// NEON runs the scalar canonical body (2026-10-03): its vector `max`/`min` propagate NaN, while the canon clamps with
 /// `f32::max`/`min`, which drop it, so a lane-parallel NEON chunk differed from the scalar canon on NaN inputs (CI aarch64).
 #[cfg(target_arch = "aarch64")]
-fn linear_xyb_canon_vec_neon<const CLAMP: bool>(
+fn linear_xyb_canon_vec_neon(
     _token: archmage::NeonToken,
     pixels: &[[f32; 3]],
     x_out: &mut [f32],
@@ -901,7 +897,7 @@ fn linear_xyb_canon_vec_neon<const CLAMP: bool>(
     b_out: &mut [f32],
     cbrt7: bool,
 ) {
-    linear_xyb_canon_body::<CLAMP>(pixels, x_out, y_out, b_out, cbrt7);
+    linear_xyb_canon_body(pixels, x_out, y_out, b_out, cbrt7);
 }
 
 // --- SIMD implementations ---
@@ -1769,7 +1765,7 @@ pub fn linear_to_positive_xyb_planar_into(
 ) {
     let mode = crate::featcanon::mode(revision);
     if mode.active() {
-        linear_xyb_canon::<true>(pixels, x_out, y_out, b_out, mode, revision.cbrt_newton());
+        linear_xyb_canon(pixels, x_out, y_out, b_out, mode, revision.cbrt_newton());
         return;
     }
     incant!(
@@ -2280,23 +2276,21 @@ fn linear_to_positive_xyb_planar_inner_v3(
 }
 
 /// Linear f32 → positive XYB, shared body of the generic tiers. One 8-pixel chunk goes
-/// through [`OpsinChunk`]; see [`PaddedTail`] for the remainder. `CLAMP` is the display-gamut
-/// clamp of the input to `[0, 1]`: on for [`linear_to_positive_xyb_planar_into`], off for the
-/// scalar tier of the unclamped `GamutMapping::Preserve` converter. One arithmetic definition
-/// either way.
+/// through [`OpsinChunk`]; see [`PaddedTail`] for the remainder. The input is clamped to the
+/// display gamut `[0, 1]`.
 #[inline(always)]
-fn linear_positive_xyb_generic<T: F32x8Convert + PaddedTail, const CLAMP: bool>(
+fn linear_positive_xyb_generic<T: F32x8Convert + PaddedTail>(
     token: T,
     pixels: &[[f32; 3]],
     x_out: &mut [f32],
     y_out: &mut [f32],
     b_out: &mut [f32],
 ) {
-    /// One 8-pixel chunk. Clamp to display gamut (`CLAMP`): out-of-range values from lossy
+    /// One 8-pixel chunk. Clamp to display gamut: out-of-range values from lossy
     /// reconstruction aren't visible on a real display, so measuring them would
     /// overcount error.
     #[inline(always)]
-    fn chunk<T: F32x8Convert, const CLAMP: bool>(
+    fn chunk<T: F32x8Convert>(
         k: &OpsinChunk<T>,
         px: &[[f32; 3]; 8],
     ) -> ([f32; 8], [f32; 8], [f32; 8]) {
@@ -2311,7 +2305,7 @@ fn linear_positive_xyb_generic<T: F32x8Convert + PaddedTail, const CLAMP: bool>(
         }
         let load = |arr: [f32; 8]| {
             let v = GenericF32x8::from_array_t(k.token, arr);
-            if CLAMP { v.max(k.zero).min(k.one) } else { v }
+            v.max(k.zero).min(k.one)
         };
         let (r, g, b) = (load(r_arr), load(g_arr), load(b_arr));
         let (x_pos, y_pos, b_pos) = k.positive(k.cube_roots(r, g, b));
@@ -2329,7 +2323,7 @@ fn linear_positive_xyb_generic<T: F32x8Convert + PaddedTail, const CLAMP: bool>(
         let px: &[[f32; 3]; 8] = pixels[base..base + 8]
             .try_into()
             .expect("8 pixels per chunk");
-        let (xs, ys, bs) = chunk::<T, CLAMP>(&k, px);
+        let (xs, ys, bs) = chunk::<T>(&k, px);
         x_out[base..base + 8].copy_from_slice(&xs);
         y_out[base..base + 8].copy_from_slice(&ys);
         b_out[base..base + 8].copy_from_slice(&bs);
@@ -2341,7 +2335,7 @@ fn linear_positive_xyb_generic<T: F32x8Convert + PaddedTail, const CLAMP: bool>(
         if rem != 0 {
             let mut padded = [[0.0f32; 3]; 8];
             padded[..rem].copy_from_slice(&pixels[done..]);
-            let (xs, ys, bs) = chunk::<T, CLAMP>(&k, &padded);
+            let (xs, ys, bs) = chunk::<T>(&k, &padded);
             x_out[done..n].copy_from_slice(&xs[..rem]);
             y_out[done..n].copy_from_slice(&ys[..rem]);
             b_out[done..n].copy_from_slice(&bs[..rem]);
@@ -2351,14 +2345,12 @@ fn linear_positive_xyb_generic<T: F32x8Convert + PaddedTail, const CLAMP: bool>(
         // Scalar remainder
         for i in done..n {
             let p = pixels[i];
-            let [r, g, b] = if CLAMP {
+            let [r, g, b] = {
                 [
                     p[0].clamp(0.0, 1.0),
                     p[1].clamp(0.0, 1.0),
                     p[2].clamp(0.0, 1.0),
                 ]
-            } else {
-                p
             };
 
             let mixed0 = K_M00
@@ -2394,7 +2386,7 @@ fn linear_to_positive_xyb_planar_inner(
     y_out: &mut [f32],
     b_out: &mut [f32],
 ) {
-    linear_positive_xyb_generic::<_, true>(token, pixels, x_out, y_out, b_out);
+    linear_positive_xyb_generic::<_>(token, pixels, x_out, y_out, b_out);
 }
 
 // ---------------------------------------------------------------------------

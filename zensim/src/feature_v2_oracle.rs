@@ -118,7 +118,7 @@ fn dense_block_kernel_era2_entry(
     height: usize,
     transducer_bank: bool,
 ) -> DenseAccum {
-    dense_block_kernel_era2_generic::<_, false>(
+    dense_block_kernel_era2_generic::<_>(
         token,
         src,
         dst,
@@ -148,7 +148,7 @@ fn dense_block_kernel_era2_entry(
     height: usize,
     transducer_bank: bool,
 ) -> DenseAccum {
-    dense_block_kernel_era2_generic::<_, false>(
+    dense_block_kernel_era2_generic::<_>(
         token,
         src,
         dst,
@@ -196,7 +196,7 @@ fn v8_add_first<T: F32x8Backend + Copy>(token: T, acc: V8<T>, t: &[f32; 8], n: u
 /// SIMD path uses**, so the per-pixel math is era-1's exactly.
 #[inline(always)]
 #[allow(clippy::too_many_arguments)]
-fn dense_block_kernel_era2_generic<T: F32x8Backend + Copy, const FUSED: bool>(
+fn dense_block_kernel_era2_generic<T: F32x8Backend + Copy>(
     token: T,
     src: &[f32],
     dst: &[f32],
@@ -214,7 +214,7 @@ fn dense_block_kernel_era2_generic<T: F32x8Backend + Copy, const FUSED: bool>(
     // loop-invariant, so every call site below unswitches on it.
     let stable = crate::ssim_form::active_revision().stable_forms();
     let direct = crate::ssim_form::active_revision() >= crate::feature_defs::FormulaRevision::Rev5;
-    let _ = FUSED; // the split is chosen by tier; see the entries above
+ // the split is chosen by tier; see the entries above
     let zero = V8::<T>::zero_t(token);
     let one = V8::<T>::splat_t(token, 1.0);
     let c1 = V8::<T>::splat_t(token, C1_V2 as f32);

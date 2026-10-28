@@ -107,21 +107,6 @@ pub(crate) mod tests {
         out
     }
 
-    #[test]
-    fn gmsbank_strict_contrast_reduction_routes_only_to_loss() {
-        let mut cells = [GmsBankCell::default(); 5];
-        for i in 1..=257 {
-            let mr = i as f64 / 257.0;
-            let md = mr * 0.5;
-            assert!(md < mr);
-            gmsbank_pixel(&mut cells, mr, md, &GMSBANK_C);
-        }
-        for cell in cells {
-            assert!(cell.loss > 0.0);
-            assert_eq!(cell.gain.to_bits(), 0.0f64.to_bits());
-        }
-    }
-
     /// ERA-2 STRUCTURAL GATE: the properties the break actually rests on.
     ///
     /// **A correction the first version of this test earned.** It originally
