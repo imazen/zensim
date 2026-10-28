@@ -335,7 +335,6 @@ pub(crate) fn declared_feature_ids(model: &crate::mlp::Model) -> Option<Vec<u16>
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    
 
     /// The gather moves values to their declared positions and fills the rest
     /// with the structural zero — never a stale or shifted value.
@@ -437,5 +436,4 @@ pub(crate) mod tests {
         );
         zenpredict_bake::bake_from_json_str(&json).expect("synthetic bake must build")
     }
-
 }

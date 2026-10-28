@@ -3951,7 +3951,7 @@ fn fused_blur_h_ssim3_inner_v4x(
 #[cfg(target_arch = "x86_64")]
 #[inline(always)]
 #[allow(clippy::too_many_arguments)]
- // callers live in the ssim3 v4x chain (v2-walk); the arcane-registered siblings mask their own liveness
+// callers live in the ssim3 v4x chain (v2-walk); the arcane-registered siblings mask their own liveness
 fn fused_blur_h_ssim_v4x_body<const MU1: bool>(
     token: archmage::X64V4xToken,
     src: &[f32],

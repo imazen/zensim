@@ -284,7 +284,4 @@ pub(super) fn rev5_retained_single_channel<S: ImageSource, D: ImageSource>(
 }
 
 #[cfg(test)]
-mod retained_core_tests {
-    
-
-}
+mod retained_core_tests {}

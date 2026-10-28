@@ -1414,4 +1414,3 @@ mod toggle_gates {
         assert_eq!(t.free_extras, V1FreeExtras::RawMoments);
     }
 }
-

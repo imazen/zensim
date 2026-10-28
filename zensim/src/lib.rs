@@ -206,43 +206,43 @@
 
 #![forbid(unsafe_code)]
 
+pub(crate) mod bake_metadata;
 mod blur;
 mod color;
-pub(crate) mod featcanon;
+pub(crate) mod derived_inputs;
 pub(crate) mod det_math;
 mod diffmap;
 mod error;
+pub(crate) mod featcanon;
+#[allow(dead_code)]
+pub(crate) mod feature_defs;
+pub(crate) mod feature_layout;
+#[allow(dead_code)]
+pub(crate) mod feature_plan;
+pub(crate) mod feature_set_id;
+pub(crate) mod feature_v2;
+#[cfg(feature = "threads")]
+pub(crate) mod feature_v2_blocks;
+pub(crate) mod feature_v2_stream;
+pub(crate) mod fold_engine;
+pub(crate) mod fold_timing;
 mod fused;
-pub(crate) mod hf_gain_form;
 pub(crate) mod globaff;
+mod gmsbank_constants;
+pub(crate) mod hf_gain_form;
 mod iw_pool;
 pub mod mapping;
 mod metric;
 pub(crate) mod mlp;
 mod pool;
 pub mod profile;
-mod simd_ops;
-pub mod source;
-pub(crate) mod bake_metadata;
 mod sampling;
 pub(crate) mod score_math;
+mod simd_ops;
+pub mod source;
 pub(crate) mod ssim_form;
 mod streaming;
 mod transfer;
-pub(crate) mod feature_set_id;
-#[allow(dead_code)]
-pub(crate) mod feature_defs;
-mod gmsbank_constants;
-pub(crate) mod feature_v2;
-pub(crate) mod feature_v2_stream;
-#[cfg(feature = "threads")]
-pub(crate) mod feature_v2_blocks;
-pub(crate) mod feature_layout;
-pub(crate) mod derived_inputs;
-#[allow(dead_code)]
-pub(crate) mod feature_plan;
-pub(crate) mod fold_timing;
-pub(crate) mod fold_engine;
 
 // --- Primary API ---
 /// Cooperative-cancellation vocabulary, re-exported from the

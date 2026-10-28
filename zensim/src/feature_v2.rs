@@ -232,8 +232,7 @@ pub(crate) enum RingForm {
     HighPassMu,
 }
 
-impl RingForm {
-}
+impl RingForm {}
 
 /// **The ring form for this process**, read once.
 ///
@@ -3511,8 +3510,7 @@ struct V2RefMoments {
     activity: Vec<f32>,
 }
 
-impl V2PreparedReference {
-}
+impl V2PreparedReference {}
 
 /// Build a [`V2PreparedReference`]: validate, reflect-pad if sub-64px
 /// (identity-skip otherwise — the pad is a pure copy at ≥64px and is NOT
@@ -6338,7 +6336,6 @@ pub(crate) struct MeanOffsetRows {
 }
 
 impl MeanOffsetRows {
-
     fn at_revision(width: usize, height: usize, revision: FormulaRevision) -> Self {
         // Rev5 exposes no global XYB offset: the supported model inputs do
         // not consume it. Keep a zero metadata value without an image pass.
@@ -8088,27 +8085,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
             features_z1max,
         );
     }
-    ZensimV2Result {
-        features,
-        n_scales,
-        v1_pools: if fold_v1 {
-            toggles.v1_pools
-        } else {
-            V1PoolsMode::Off
-        },
-        regime: match (
-            layout_append,
-            layout_append2,
-            layout_csfw,
-            layout_gridblk && layout_ringbasis && layout_tailhist && layout_arttype,
-        ) {
-            (true, true, true, true) => FeatureRegime::Folded720Rev4,
-            (true, true, true, false) => FeatureRegime::Folded720Csfw,
-            (true, true, false, _) => FeatureRegime::Folded720Append2,
-            (true, false, _, _) => FeatureRegime::Folded720Append,
-            (false, _, _, _) => FeatureRegime::Folded720,
-        },
-    }
+    ZensimV2Result { features }
 }
 
 // ============================================================================

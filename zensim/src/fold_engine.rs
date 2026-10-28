@@ -491,9 +491,8 @@ pub(crate) fn score_plan(
 
 #[cfg(test)]
 mod skip_policy_tests {
-    
+
     use crate::feature_v2::V1PoolsMode;
-    
 
     /// **The `Off` is never served policy applies to the ID-SPACE branch too.**
     ///
@@ -523,5 +522,4 @@ mod skip_policy_tests {
         let served = crate::feature_plan::Plan::for_bake(&m).expect("serving plan");
         assert_eq!(served.compute.v1_pools, V1PoolsMode::Peaks);
     }
-
 }

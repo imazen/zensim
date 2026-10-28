@@ -1151,7 +1151,7 @@ pub(crate) fn check_route(config: &crate::metric::ZensimConfig) -> Result<(), cr
 }
 
 /// The reason [`refuse_rev4_mix`] gives.
- // the v2 walk's guard
+// the v2 walk's guard
 pub(crate) const REV4_MIX: &str = "formula revisions 4 and 5 cannot be mixed with another revision in one process: other formula gates follow ZENSIM_FORMULA_REV, so the request and the process must carry the same revision when either is revision 4 or later";
 
 /// **Refuse a computation whose revision disagrees with the process revision
@@ -1165,7 +1165,7 @@ pub(crate) const REV4_MIX: &str = "formula revisions 4 and 5 cannot be mixed wit
 /// would mix Rev4 gates into it. Both are refused rather than labelled with a
 /// revision they did not compute. Mixing among Rev1–Rev3 is governed by the
 /// pre-existing per-route checks and is unchanged.
- // the v2 walk's guard
+// the v2 walk's guard
 pub(crate) fn refuse_rev4_mix(requested: FormulaRevision) -> Result<(), crate::ZensimError> {
     let process = active_revision();
     if requested != process

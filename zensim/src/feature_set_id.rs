@@ -418,7 +418,6 @@ impl SlotSet {
     pub fn hash8(&self) -> u32 {
         slots_hash8(self.iter_slots())
     }
-
 }
 
 impl fmt::Display for SlotSet {
@@ -622,4 +621,3 @@ impl fmt::Display for FeatureSetId {
         }
     }
 }
-

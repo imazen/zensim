@@ -24,7 +24,10 @@ fn pair(id: &str) -> SplitPair {
 fn score(profile: ZensimProfile, p: &SplitPair) -> f64 {
     let src = RgbSlice::new(bytemuck::cast_slice(&p.src), p.width, p.height);
     let dst = RgbSlice::new(bytemuck::cast_slice(&p.dst), p.width, p.height);
-    Zensim::new(profile).compute(&src, &dst).expect("compute").score()
+    Zensim::new(profile)
+        .compute(&src, &dst)
+        .expect("compute")
+        .score()
 }
 
 fn by_name(name: &str) -> ZensimProfile {
@@ -116,13 +119,22 @@ fn golden_scores_match_the_research_reference() {
             failures.push(format!("{name} {id}: got {got:.17} want {want:.17}"));
         }
     }
-    assert!(failures.is_empty(), "{} golden mismatches:\n{}", failures.len(), failures.join("\n"));
+    assert!(
+        failures.is_empty(),
+        "{} golden mismatches:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
 }
 
 #[test]
 fn identical_images_score_100() {
     for name in ["E", "ECodec", "A", "PreviewV0_2"] {
-        for id in ["8x8-photo-identity", "65x63-edges-identity", "256x256-text-identity"] {
+        for id in [
+            "8x8-photo-identity",
+            "65x63-edges-identity",
+            "256x256-text-identity",
+        ] {
             assert_eq!(score(by_name(name), &pair(id)), 100.0, "{name} {id}");
         }
     }
@@ -151,9 +163,18 @@ fn more_noise_never_scores_higher() {
                 .zip(&noise)
                 .map(|(&v, &n)| (v as i32 + amp * n).clamp(0, 255) as u8)
                 .collect();
-            let p = SplitPair { id: String::new(), width: base.width, height: base.height, src: base.src.clone(), dst };
+            let p = SplitPair {
+                id: String::new(),
+                width: base.width,
+                height: base.height,
+                src: base.src.clone(),
+                dst,
+            };
             let s = score(profile, &p);
-            assert!(s <= last, "{profile}: amplitude {amp} scored {s} above {last}");
+            assert!(
+                s <= last,
+                "{profile}: amplitude {amp} scored {s} above {last}"
+            );
             last = s;
         }
     }
@@ -169,7 +190,11 @@ fn rev7_scores_are_identical_across_simd_tiers() {
         });
         let first = scores[0].1;
         for (label, s) in &scores {
-            assert_eq!(s.to_bits(), first.to_bits(), "{profile}: tier {label} scored {s}, first tier {first}");
+            assert_eq!(
+                s.to_bits(),
+                first.to_bits(),
+                "{profile}: tier {label} scored {s}, first tier {first}"
+            );
         }
     }
 }
@@ -180,8 +205,16 @@ fn rev7_scores_are_identical_across_thread_settings() {
     let src = RgbSlice::new(bytemuck::cast_slice(&p.src), p.width, p.height);
     let dst = RgbSlice::new(bytemuck::cast_slice(&p.dst), p.width, p.height);
     for profile in [ZensimProfile::E, ZensimProfile::ECodec] {
-        let parallel = Zensim::new(profile).with_parallel(true).compute(&src, &dst).unwrap().score();
-        let serial = Zensim::new(profile).with_parallel(false).compute(&src, &dst).unwrap().score();
+        let parallel = Zensim::new(profile)
+            .with_parallel(true)
+            .compute(&src, &dst)
+            .unwrap()
+            .score();
+        let serial = Zensim::new(profile)
+            .with_parallel(false)
+            .compute(&src, &dst)
+            .unwrap()
+            .score();
         assert_eq!(parallel.to_bits(), serial.to_bits(), "{profile}");
     }
 }

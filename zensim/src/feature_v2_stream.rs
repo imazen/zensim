@@ -374,8 +374,6 @@ pub(crate) struct StripPlaneProducer<'a, S: ImageSource, D: ImageSource> {
     scales: Vec<ScaleState>,
     parallel: bool,
     front_end: FrontEnd,
-    /// Row scratch for the HDR front-end (decode + PU conversion input).
-    hdr_row: Vec<[f32; 3]>,
     /// Peak `hi − lo` observed per scale (capacity-budget telemetry for
     /// the C1 tests; also what G-RAM's O(width) claim rests on).
     max_held_rows: Vec<usize>,
@@ -724,7 +722,6 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
                 scales,
                 parallel,
                 front_end,
-                hdr_row: Vec::new(),
                 max_held_rows: vec![0; crate::NUM_SCALES],
                 ref_planes: None,
                 advance_rows: 0,
@@ -862,9 +859,6 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
             scales,
             parallel,
             front_end,
-            hdr_row: match front_end {
-                FrontEnd::Sdr => Vec::new(),
-            },
             max_held_rows: vec![0; crate::NUM_SCALES],
             ref_planes,
             advance_rows,

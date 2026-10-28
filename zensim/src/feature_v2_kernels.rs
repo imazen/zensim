@@ -500,65 +500,10 @@ impl WeightedSum {
 // FeatureRegime + result + explicit-regime view
 // ============================================================================
 
-/// Explicit feature-extraction regime tag. See
-/// `docs/FEATURE_V2_SPEC_2026-07-18.md` §(d): disambiguation is primarily
-/// by distinct Rust type ([`ZensimV2Result`]/[`FeatureViewV2`] vs v1's
-/// `ZensimResult`/`FeatureView`), this enum is the belt-and-suspenders
-/// runtime tag for generic/dynamic call sites.
-#[non_exhaustive]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FeatureRegime {
-    /// The frozen, byte-stable v1 372-feature extraction (`metric.rs`).
-    V1,
-    /// The v2 "bounded" extraction this module implements.
-    V2Bounded,
-    /// The folded 720-layout extraction (2026-07-24): ONE v2-walk pass
-    /// emitting `[f0..156) = v1 basic` (computed inside the v2 strip walk
-    /// via the same `fused_blur_h_ssim` H-planes + v1's own
-    /// `fused_vblur_features_ssim` kernel — parity-gated against the v1
-    /// path, NOT byte-frozen), `[156..372) = 0.0` (v1's peak/masked/IW
-    /// pool blocks, deprecated: no current model reads them — see
-    /// `benchmarks/corruption_head_2026-07-24.md` "the f156..371 block can
-    /// be dropped entirely"), `[372..720) = v2-348`. Index-stable
-    /// emit-0, per the append-only feature-numbering rule.
-    Folded720,
-    /// [`Folded720`](Self::Folded720) plus the f720+ append block
-    /// (gap-audit additions, 2026-07-26): `[720..924) = append-204`
-    /// (17/ch/scale, see [`idx_append`]). The first 720 slots are
-    /// bit-identical to a [`Folded720`](Self::Folded720) extraction of
-    /// the same pair (`append_first720_bit_stable` gates this).
-    Folded720Append,
-    /// [`Folded720Append`](Self::Folded720Append) plus the f924+ append2
-    /// block ([`idx_append2`]; 924 + 4×[`APPEND2_PER_SCALE`] = 944 slots).
-    /// Additive-only and default-OFF — new-regime rows only (the HDR
-    /// backfill wave); never mixed into 924-regime tables.
-    Folded720Append2,
-    /// [`Folded720Append2`](Self::Folded720Append2) plus the f944+ CSFW
-    /// block ([`idx_csfw`]; 944 + 4×[`CSFW_PER_SCALE`] = 956 slots —
-    /// chunk-3 tier-1, Y-only luminance-CSF-weighted GLOBAL_* twins).
-    /// Additive-only and default-OFF — new-regime rows only (the HDR
-    /// backfill wave); never mixed into 944- or 924-regime tables. The
-    /// chroma tiers' old f956..f979 claim was released (CSF design doc);
-    Folded720Csfw,
-    /// feature-bank families (f986..f1321: `gridblk` 96, `ringbasis` 72,
-    /// `tailhist` 144, `arttype` 24 — see `docs/REV4_FEATURE_BANK_PLAN_*
-    /// .md`). Assigned only when ALL FOUR rev4 layout flags are on
-    /// (the full 1322 row, also used by the additive C8 1502 row); a rev4-subset request keeps the regime of
-    /// its widest fully-registered block — the slot provenance still
-    /// disambiguates exactly which tail cells are populated.
-    Folded720Rev4,
-}
-
 /// Result of [`compute_v2_features_impl`]/[`crate::Zensim::compute_v2_features`].
 #[derive(Debug, Clone)]
 pub struct ZensimV2Result {
     features: Vec<f64>,
-    n_scales: usize,
-    regime: FeatureRegime,
-    /// `V2NewFeatureToggles::v1_pools`: which of `f156..372` carry v1's
-    /// live pool values (a distinct extraction regime per mode at the SAME
-    /// layout width — see the toggle's doc).
-    v1_pools: V1PoolsMode,
 }
 
 impl ZensimV2Result {

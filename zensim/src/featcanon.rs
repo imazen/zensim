@@ -464,7 +464,6 @@ pub(crate) enum SumVar {
 }
 
 impl SumVar {
-
     /// Variant for kernels whose summed terms are f64-native — `c32` keeps
     /// `Seq` (production) so the f32-lane column never masks element error
     /// as accumulation error; `c64` takes the f64 lanes (the Rev4 canon).

@@ -4980,8 +4980,7 @@ macro_rules! vwin_slide64x8 {
     }};
 }
 
-impl VWin {
-}
+impl VWin {}
 
 /// One column's contribution to the V-blur row/band pools — the canonical
 /// per-element sequence shared by the `Pool`-generic scalar body

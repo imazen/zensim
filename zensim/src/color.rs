@@ -413,11 +413,6 @@ struct CanonChunk<T: F32x16Convert> {
 
 #[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))]
 impl<T: F32x16Convert> CanonChunk<T> {
-    #[inline(always)]
-    fn new(token: T) -> Self {
-        Self::new_at(token, false)
-    }
-
     /// `cbrt7` selects revision 7's cube root in [`Self::opsin_positive`].
     #[inline(always)]
     fn new_at(token: T, cbrt7: bool) -> Self {
@@ -549,7 +544,6 @@ impl<T: F32x16Convert> CanonChunk<T> {
             (t2 - y) + self.b_bias,
         )
     }
-
 }
 
 /// Lane-parallel canonical sRGB8 → positive-XYB: [`srgb_xyb_canon_body`]'s
@@ -2711,7 +2705,11 @@ pub(crate) fn dispatches_scalar() -> bool {
     archmage::Wasm128Token::summon().is_none()
 }
 #[cfg(test)]
-#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64", target_arch = "wasm32")))]
+#[cfg(not(any(
+    target_arch = "x86_64",
+    target_arch = "aarch64",
+    target_arch = "wasm32"
+)))]
 pub(crate) fn dispatches_scalar() -> bool {
     true
 }
@@ -2971,12 +2969,6 @@ mod tests {
 }
 
 #[cfg(test)]
-mod pu_simd_parity_tests {
-    use super::*;
-
-}
-
-#[cfg(test)]
 mod rev4vec_tests {
     //! REV4VEC bit-exactness gate: each compiled `*_canon_vec` tier variant
     //! must reproduce the scalar canonical body **bit for bit** — the
@@ -2996,11 +2988,6 @@ mod rev4vec_tests {
             x ^= x >> 27;
             self.0 = x;
             x.wrapping_mul(0x2545_F491_4F6C_DD1D)
-        }
-        /// A raw f32 bit pattern — hits ±0, denormals, ±inf, NaN, and every
-        /// finite range as a side effect.
-        fn f32_bits(&mut self) -> f32 {
-            f32::from_bits(self.next() as u32)
         }
     }
 
@@ -3115,5 +3102,4 @@ mod rev4vec_tests {
             }
         }
     }
-
 }

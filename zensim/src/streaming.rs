@@ -392,7 +392,6 @@ impl CoarseUpsample {
         };
         (kernel != CoarseKernel::Nearest || !mass).then_some(Self { kernel, mass })
     }
-
 }
 
 impl CoarseKernel {
@@ -1551,7 +1550,7 @@ pub(crate) fn convert_source_to_xyb_into_slices_chunked(
                         native_sdr_linear_row(source, y, abs_row_offset + y, &mut linear_row);
                         let row_offset = (y - row_start) * width;
                         xyb_row_convert(
-                                &linear_row,
+                            &linear_row,
                             &mut c0[row_offset..row_offset + width],
                             &mut c1[row_offset..row_offset + width],
                             &mut c2[row_offset..row_offset + width],
@@ -1573,7 +1572,7 @@ pub(crate) fn convert_source_to_xyb_into_slices_chunked(
                             }
                         }
                         xyb_row_convert(
-                                &rgb_buf,
+                            &rgb_buf,
                             &mut c0[..raw_elems],
                             &mut c1[..raw_elems],
                             &mut c2[..raw_elems],
@@ -3277,7 +3276,6 @@ impl PrecomputedReference {
         )
         .with_ref_dims(width, height)
     }
-
 }
 
 /// Trait the strip kernel uses to access an arbitrary multi-scale
@@ -5707,7 +5705,7 @@ mod tests {
     /// window is unchanged — the registered "out-of-support movement" of
     /// `benchmarks/nonmax_diagnosis_2026-09-08.md`, computed here on the
     /// integrated retention route rather than on isolated planes.
-     // read only by the v2-walk locality controls
+    // read only by the v2-walk locality controls
     fn out_of_support_movement(
         base: &RetainedPlanes,
         changed: &RetainedPlanes,

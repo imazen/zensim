@@ -327,4 +327,3 @@ fn m4_try_score_from_features_matched_lengths_ok() {
     assert!(score.is_finite());
     assert!(raw.is_finite());
 }
-

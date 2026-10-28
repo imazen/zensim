@@ -4603,5 +4603,4 @@ mod owner_gates {
         }
         out
     }
-
 }

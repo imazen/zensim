@@ -609,4 +609,3 @@ mod imgref_impls {
         }
     }
 }
-

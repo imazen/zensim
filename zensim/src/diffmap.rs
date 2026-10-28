@@ -59,7 +59,6 @@ pub enum DiffmapWeighting {
     /// Custom weights `[X, Y, B]`. Automatically normalized to sum to 1.0.
     /// All values must be non-negative.
     Custom([f32; 3]),
-
 }
 
 impl Default for DiffmapWeighting {
@@ -130,7 +129,6 @@ pub struct DiffmapOptions {
     ///
     /// Default: `false`.
     pub include_hf: bool,
-
 }
 
 impl From<DiffmapWeighting> for DiffmapOptions {
@@ -1057,8 +1055,4 @@ impl crate::metric::Zensim {
 }
 
 #[cfg(test)]
-mod tests {
-    
-    
-
-}
+mod tests {}
