@@ -39,7 +39,8 @@ This distinction remains explicit at the entry points.
 Before any production refactor, profile A produced different score bits between
 interleaved and planar linear diffmaps on a 65×63 checkerboard with strided planes:
 `4635359462469191635` versus `4635359462376882550`. The new cross-path test exposed
-this. Changing either result conflicts with preserving every existing score.
+this; PreviewV0_2 also showed score mismatches, and legacy maps showed rounding
+differences at 65×63 and 257×193. Changing either result conflicts with preserving every existing score.
 The audit records this limitation rather than silently changing the score contract.
 
 ## Validation design
@@ -94,7 +95,15 @@ compile configurations, clippy and the unchanged public API delta passed.
 The combined exploratory timing report has 180 comparisons: 166 meet the 2%
 upper confidence bound and 14 remain inconclusive. None has a lower confidence
 bound above 2%. This does not establish universal performance parity. A separate
-fixed-block confirmation with A/A controls evaluates those 14 comparisons.
+fixed-block confirmation completed all 896 blocks and 2,688 invocations for those
+14 comparisons, with 64 blocks per case and A/A controls. Every correctness check
+passed, but all 14 comparisons were invalidated by the strict resource gate:
+522 unclean observations (332 during execution, 190 at boundaries). Of these,
+272 exceeded 5% CPU load and 401 reported heavy processes; these counts overlap.
+RAM and temperature remained within limits. The run exited 2 and does not resolve
+any of the 14 timing uncertainties. Its estimates are retained as invalid evidence,
+not used to claim non-regression. A quieter run is required; changing the threshold
+or discarding contaminated samples would change the experiment's contract.
 
 Fresh-process RSS is not byte-identical. The largest median ratio against the slim
 baseline is 1.053097 on PreviewV0_2's 65×63 scratch route (5,712 versus 5,424 KiB).
@@ -106,10 +115,14 @@ not allocation counts, and the research bake-loading adapter affects that compar
 Resource-wrapper observations: initial matrix `rc=0 1999s | peak-RSS 0.13GiB |
 min-avail 23845MiB | peak-load 2.53`; follow-up `rc=0 2551s | peak-RSS 0.10GiB |
 min-avail 23842MiB | peak-load 2.89`; large-memory matrix `rc=0 78s | peak-RSS
-0.31GiB | min-avail 23607MiB | peak-load 2.61`. Per-process RSS above comes from
+0.31GiB | min-avail 23607MiB | peak-load 2.61`. Confirmation: `rc=2 4538s | peak-RSS 0.09GiB | min-avail 23461MiB | peak-load 2.60`.
+Per-process RSS above comes from
 `/usr/bin/time -v`; wrapper peaks describe the supervised runs.
 
 The confirmation launcher registers verified ancestor task IDs using zenbench's
 existing launcher environment. Version 0.1.11 excludes ancestor process leaders
 but can mistake their threads for rival benchmarks. An initial invalid probe is
 retained; no resource gate or timing acceptance criterion was disabled.
+
+Full provenance, commands and artifact locations are in the
+[measurement record](../benchmarks/cross_path_2026-10-28.md).
