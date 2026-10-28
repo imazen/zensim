@@ -103,147 +103,6 @@ pub(crate) mod tests {
     // `benchmarks/free_features_classC_2026-09-04.md`
     // =====================================================================
 
-    /// The kernel's f32 copies of the two saturation constants must equal
-    /// the f64 definitions the 944 walk uses. `fused.rs` is unconditional
-    /// while this module is behind `feature-regime-v2`, so the constants
-    /// cannot be imported; this is the gate that keeps the duplication
-    /// honest (the same contract `fused::C_MSE_F32`'s doc states).
-    #[test]
-    fn class_c_kernel_constants_match() {
-        // Stated in f32, which is the comparison that means something: the
-        // 944 walk's own SIMD path splats `C_MSE as f32` / `C_LUM_T as f32`
-        // (`append_block_kernel_generic`), so THAT is the value the class-C
-        // kernel has to reproduce. Neither constant is representable in
-        // f32, so an `as f64` round-trip equality would be false for a
-        // correct implementation — it was, and this is the corrected claim.
-        assert_eq!(crate::fused::C_MSE_F32, C_MSE as f32);
-        assert_eq!(crate::fused::C_LUM_T_F32, C_LUM_T as f32);
-    }
-
-    /// **CLASS-C GATE 0 — the INTEGRAND, against an f64 scalar oracle.**
-    ///
-    /// The per-slot end-to-end oracle is gate 2 below (an independent
-    /// kernel's value for the same slot). This one gates the arithmetic
-    /// underneath it: the kernel's f32 per-pixel integrands
-    /// (`sat((s−d)², C_MSE)` and the Bernstein weights of
-    /// `t = sat(ref_Y, C_LUM_T)`) against the SAME f64 `saturate` the
-    /// append kernel's own scalar tail calls, over a value range that
-    /// spans the XYB planes' actual span including negatives (where the
-    /// `max(0)` clamp is load-bearing) and the near-zero regime the
-    /// saturation amplifies ~1/C.
-    ///
-    /// The bar is RELATIVE (1e-5) with a 1e-7 absolute floor: f32 carries
-    /// ~1.2e-7 relative, and `sat` is contractive in relative error
-    /// (`dsat/sat = (1−sat)·dx/x`), so a correct f32 evaluation lands two
-    /// orders inside it. An algebra error does not.
-    #[test]
-    fn class_c_integrands_match_the_f64_scalar_oracle() {
-        let vals: Vec<f32> = vec![
-            -3.0, -1.0, -0.35, -1e-4, 0.0, 1e-7, 1e-4, 0.001, 0.01, 0.05, 0.1, 0.35, 0.5, 1.0, 2.0,
-            7.5,
-        ];
-        let mut worst_m = 0.0f64;
-        let mut worst_w = 0.0f64;
-        for &s in &vals {
-            for &d in &vals {
-                let mut acc_m = 0.0f32;
-                let m = crate::fused::test_only_bounded_err_scalar(&mut acc_m, s - d);
-                assert_eq!(
-                    acc_m, m,
-                    "the accumulator must hold exactly what it returned"
-                );
-                let want_m = saturate(((s - d) as f64) * ((s - d) as f64), C_MSE);
-                let dm = (m as f64 - want_m).abs();
-                worst_m = worst_m.max(dm / want_m.max(1e-7));
-                assert!(
-                    dm <= 1e-5 * want_m.abs().max(1e-2) + 1e-7,
-                    "mse_i({s},{d}) = {m:e}, f64 oracle {want_m:e}"
-                );
-
-                let (mut wdn, mut wdd, mut wbn, mut wbd) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
-                crate::fused::test_only_lum_bins_scalar(
-                    &mut wdn, &mut wdd, &mut wbn, &mut wbd, s, m,
-                );
-                let t_ref = saturate(s as f64, C_LUM_T);
-                let (wd_ref, wb_ref) = ((1.0 - t_ref) * (1.0 - t_ref), t_ref * t_ref);
-                for (got, want, name) in [
-                    (wdd as f64, wd_ref, "w_dark"),
-                    (wbd as f64, wb_ref, "w_bright"),
-                    (wdn as f64, wd_ref * want_m, "w_dark*mse"),
-                    (wbn as f64, wb_ref * want_m, "w_bright*mse"),
-                ] {
-                    let dw = (got - want).abs();
-                    worst_w = worst_w.max(dw / want.abs().max(1e-7));
-                    assert!(
-                        dw <= 1e-5 * want.abs().max(1e-2) + 1e-7,
-                        "{name}({s},{d}) = {got:e}, f64 oracle {want:e}"
-                    );
-                }
-                // The partition of unity the mid bin is DERIVED from must
-                // hold at every point, or `lum_bins_from_weighted_sums`'s
-                // subtraction is not a mid-bin weight.
-                let w_mid = 1.0 - wd_ref - wb_ref;
-                assert!(
-                    (w_mid - 2.0 * t_ref * (1.0 - t_ref)).abs() <= 1e-12,
-                    "Bernstein partition of unity broken at s={s}"
-                );
-                assert!(w_mid >= -1e-12, "derived mid weight negative at s={s}");
-            }
-        }
-        eprintln!(
-            "class-C integrand vs f64 oracle: worst rel |Δ| mse {worst_m:e}, weights {worst_w:e}"
-        );
-    }
-
-    /// **CLASS-C GATE 5 — append-only bookkeeping.**
-    ///
-    /// The class-C tranche adds NO new slot numbers: every one of its 24
-    /// positions is an existing 944-layout slot, it is disjoint from the
-    /// raw-moments free set, and the layout width is unchanged. A future
-    /// lane that wants genuinely new features must EXTEND the layout past
-    /// 944, never renumber — this test is what fails if someone forgets.
-    #[test]
-    fn class_c_slot_set_is_append_only_and_disjoint() {
-        for n_scales in 1..=4 {
-            let cc = class_c_slot_indices(n_scales);
-            let rm = free_slot_indices(n_scales);
-            let width = n_scales * 3 * (31 + FEATURES_PER_CHANNEL_V2_TOTAL)
-                + n_scales * 3 * FEATURES_PER_CHANNEL_APPEND
-                + n_scales * APPEND2_PER_SCALE;
-            let set: std::collections::HashSet<usize> = cc.iter().copied().collect();
-            assert_eq!(set.len(), cc.len(), "class-C slot list has duplicates");
-            for &i in &cc {
-                assert!(
-                    i < width,
-                    "class-C slot {i} is outside the {width}-wide layout"
-                );
-                assert!(
-                    !rm.contains(&i),
-                    "class-C slot {i} overlaps the raw-moments free set"
-                );
-            }
-            // 3 MSE cells per scale (one per channel) + the Y luminance
-            // trio per scale where the 944 walk computes that append cell.
-            let want = n_scales * 3
-                + (0..n_scales)
-                    .filter(|&s| append_cell_active(true, APPEND2_CHANNEL, s))
-                    .count()
-                    * 3;
-            assert_eq!(cc.len(), want, "class-C slot count at {n_scales} scales");
-        }
-        // The 4-scale set, spelled out, so a renumbering shows up as a diff
-        // in review rather than as a silently different table.
-        assert_eq!(
-            class_c_slot_indices(4),
-            vec![
-                377, 406, 435, 739, 740, 741, // scale 0
-                464, 493, 522, 790, 791, 792, // scale 1
-                551, 580, 609, 841, 842, 843, // scale 2
-                638, 667, 696, 892, 893, 894, // scale 3
-            ]
-        );
-    }
-
     // ------------------------------------------------------------------
     // f720+ append block
     // ------------------------------------------------------------------
@@ -326,6 +185,90 @@ pub(crate) mod tests {
     /// the one below). A declared plan that reads it for a chroma channel
     /// computes that channel at both scales and emits the full plan's bits on
     /// every slot of its emit set, and the structural 0 everywhere else.
+    /// A declared plan for any one basic, peak or v2 slot emits the full plan's
+    /// bits on every slot of its emit set and the structural 0 everywhere else.
+    /// Edge-width change pairs two adjacent scales (the last scale's slot copies
+    /// the one below), so reading it for a channel computes that channel at both.
+    #[test]
+    fn single_slot_plans_emit_the_full_plans_bits_and_zero_elsewhere() {
+        use crate::feature_defs::FormulaRevision;
+        use crate::feature_layout::Layout;
+        use crate::feature_plan::Plan;
+        use crate::feature_set_id::SlotSet;
+        let (w, h) = (160, 128);
+        let src: Vec<[u8; 3]> = (0..w * h)
+            .map(|i| {
+                let (x, y) = (i % w, i / w);
+                [((x * 7 + y * 3) % 256) as u8, ((x * x + y) % 256) as u8, ((y * 5 + x / 3) % 256) as u8]
+            })
+            .collect();
+        let dst: Vec<[u8; 3]> = src
+            .iter()
+            .enumerate()
+            .map(|(i, p)| p.map(|v| v.saturating_add((i * 2654435761 % 7) as u8)))
+            .collect();
+        let (sref, dref) = (RgbSlice::new(&src, w, h), RgbSlice::new(&dst, w, h));
+        let run = |plan: &Plan| {
+            foldapp_streaming_walk(
+                &sref,
+                &dref,
+                false,
+                plan.toggles(),
+                crate::feature_v2_stream::FrontEnd::Sdr,
+                &mut V2Scratch::new(),
+                FoldWalkExtras {
+                    compute: Some(plan.compute),
+                    ..FoldWalkExtras::default()
+                },
+            )
+            .into_features()
+        };
+        let ns = crate::NUM_SCALES;
+        let ewc = |scale: usize, ch: usize| {
+            372 + (scale * 3 + ch) * FEATURES_PER_CHANNEL_V2_TOTAL + idx::EDGE_WIDTH_CHANGE
+        };
+        let all: Vec<usize> = (0..228).chain(372..720).collect();
+        for revision in [FormulaRevision::Rev1, FormulaRevision::Rev7] {
+            let plan_for = |ids: &[usize]| {
+                Plan::derive_with_layout_at(
+                    &SlotSet::from_slots(ids.iter().copied()),
+                    Layout::identity(720),
+                    revision,
+                )
+                .unwrap()
+            };
+            let f_full = run(&plan_for(&all));
+            for ch in [0, 2] {
+                for scale in 0..ns {
+                    let plan = plan_for(&[ewc(scale, ch)]);
+                    let s = scale.min(ns - 2);
+                    for at in [s, s + 1] {
+                        assert!(
+                            plan.compute.channel_active(at, ch),
+                            "{revision:?} f{}: channel {ch} off at scale {at}",
+                            ewc(scale, ch)
+                        );
+                    }
+                }
+            }
+            // Every single-slot plan: its emitted slots carry the full plan's
+            // bits, every other slot the structural 0.
+            for &id in &all {
+                let plan = plan_for(&[id]);
+                let f = run(&plan);
+                let emit = plan.compute.populated_slots(ns, 720);
+                assert!(emit.contains(id), "{revision:?} f{id} not emitted by its own plan");
+                for (i, &v) in f.iter().enumerate() {
+                    if emit.contains(i) {
+                        assert_eq!(v.to_bits(), f_full[i].to_bits(), "{revision:?} plan f{id}: f{i} {v} vs {}", f_full[i]);
+                    } else {
+                        assert_eq!(v, 0.0, "{revision:?} plan f{id}: f{i} = {v} outside the emit set");
+                    }
+                }
+            }
+        }
+    }
+
     #[test]
     fn edge_width_change_plans_emit_the_full_plans_bits_and_zero_elsewhere() {
         use crate::feature_defs::FormulaRevision;

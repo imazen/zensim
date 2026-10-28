@@ -233,170 +233,6 @@ fn ext_accumulate_scalar(
     }
 }
 
-#[inline(always)]
-fn raw_moments_accumulate8<T: F32x8Backend + Copy>(
-    fm_s: &mut GenericF32x8<T>,
-    fm_d: &mut GenericF32x8<T>,
-    fm_s2: &mut GenericF32x8<T>,
-    fm_d2: &mut GenericF32x8<T>,
-    fm_dd: &mut GenericF32x8<T>,
-    fm_ds: &mut GenericF32x8<T>,
-    s: GenericF32x8<T>,
-    d: GenericF32x8<T>,
-) {
-    *fm_s = *fm_s + s;
-    *fm_d = *fm_d + d;
-    // Revision 1's two raw second moments, spelled so they stay BIT-identical:
-    // `s * s` is still rounded before the add, and the add is still plain.
-    *fm_s2 = *fm_s2 + s * s;
-    *fm_d2 = *fm_d2 + d * d;
-    // Revision 2's PAIRED second moment, `Σ(d−s)(d+s) = Σ(d²−s²)`, formed per
-    // pixel so the cancellation happens on ONE pixel's small difference
-    // instead of between two large totals. Accumulated unconditionally: it is
-    // four cheap ops on registers already live, and an extra accumulator
-    // cannot move revision 1's outputs, which is what keeps R1 byte-exact.
-    let df = d - s;
-    *fm_dd = *fm_dd + df * (d + s);
-    // …and revision 2's paired FIRST difference. Both terms of
-    // `gvar2 - gvar1` have to come from per-pixel differences, not from
-    // differencing two large totals: MEASURED, fixing only the second moment
-    // moved the paired disagreement 9.12 % -> 8.32 % and left `GLOBAL_CGAIN`
-    // flat (68 -> 69 cells past the bar), because `(md - ms)` was still
-    // `(sum_d - sum_s)/n` and carried the same `mean^2/gvar` amplification.
-    *fm_ds = *fm_ds + df;
-}
-
-/// Reduce the four lane accumulators to scalars and add them into `acc`'s
-/// running f64 sums — the band's-last-inner-row finish step. Bit-identical
-/// to the hand-inlined `acc.sum_s += fm_s.reduce_add() as f64; …` it
-/// replaces.
-#[inline(always)]
-fn raw_moments_finish8<T: F32x8Backend + Copy>(
-    acc: &mut StripChannelAccum,
-    fm_s: GenericF32x8<T>,
-    fm_d: GenericF32x8<T>,
-    fm_s2: GenericF32x8<T>,
-    fm_d2: GenericF32x8<T>,
-    fm_dd: GenericF32x8<T>,
-    fm_ds: GenericF32x8<T>,
-) {
-    acc.sum_s += fm_s.reduce_add() as f64;
-    acc.sum_d += fm_d.reduce_add() as f64;
-    acc.sum_s2 += fm_s2.reduce_add() as f64;
-    acc.sum_d2 += fm_d2.reduce_add() as f64;
-    acc.sum_dd += fm_dd.reduce_add() as f64;
-    acc.sum_ds += fm_ds.reduce_add() as f64;
-}
-
-/// 16-lane sibling of [`raw_moments_accumulate8`] — `_v4`'s and `_v4x`'s
-/// native f32x16 main loops (x86-64 only, hence the arch gate matching
-/// `f32x16`'s own import).
-#[cfg(target_arch = "x86_64")]
-// Reachable only through `incant!`'s AVX-512 tiers, which a build
-// without the default `avx512` feature never dispatches — rustc then
-// reports the 16-lane helpers as dead even though `_v4`/`_v4x` still
-// compile and call them. Annotated rather than `cfg`-gated: gating
-// them off breaks those bodies (measured — `cannot find function`).
-#[inline(always)]
-fn raw_moments_accumulate16<T: F32x16Backend + Copy>(
-    fm_s: &mut f32x16<T>,
-    fm_d: &mut f32x16<T>,
-    fm_s2: &mut f32x16<T>,
-    fm_d2: &mut f32x16<T>,
-    fm_dd: &mut f32x16<T>,
-    fm_ds: &mut f32x16<T>,
-    s: f32x16<T>,
-    d: f32x16<T>,
-) {
-    *fm_s = *fm_s + s;
-    *fm_d = *fm_d + d;
-    // Revision 1's two raw second moments, spelled so they stay BIT-identical:
-    // `s * s` is still rounded before the add, and the add is still plain.
-    *fm_s2 = *fm_s2 + s * s;
-    *fm_d2 = *fm_d2 + d * d;
-    // Revision 2's PAIRED second moment, `Σ(d−s)(d+s) = Σ(d²−s²)`, formed per
-    // pixel so the cancellation happens on ONE pixel's small difference
-    // instead of between two large totals. Accumulated unconditionally: it is
-    // four cheap ops on registers already live, and an extra accumulator
-    // cannot move revision 1's outputs, which is what keeps R1 byte-exact.
-    let df = d - s;
-    *fm_dd = *fm_dd + df * (d + s);
-    // …and revision 2's paired FIRST difference. Both terms of
-    // `gvar2 - gvar1` have to come from per-pixel differences, not from
-    // differencing two large totals: MEASURED, fixing only the second moment
-    // moved the paired disagreement 9.12 % -> 8.32 % and left `GLOBAL_CGAIN`
-    // flat (68 -> 69 cells past the bar), because `(md - ms)` was still
-    // `(sum_d - sum_s)/n` and carried the same `mean^2/gvar` amplification.
-    *fm_ds = *fm_ds + df;
-}
-
-/// 16-lane sibling of [`raw_moments_finish8`].
-#[cfg(target_arch = "x86_64")]
-// Reachable only through `incant!`'s AVX-512 tiers, which a build
-// without the default `avx512` feature never dispatches — rustc then
-// reports the 16-lane helpers as dead even though `_v4`/`_v4x` still
-// compile and call them. Annotated rather than `cfg`-gated: gating
-// them off breaks those bodies (measured — `cannot find function`).
-#[inline(always)]
-fn raw_moments_finish16<T: F32x16Backend + Copy>(
-    acc: &mut StripChannelAccum,
-    fm_s: f32x16<T>,
-    fm_d: f32x16<T>,
-    fm_s2: f32x16<T>,
-    fm_d2: f32x16<T>,
-    fm_dd: f32x16<T>,
-    fm_ds: f32x16<T>,
-) {
-    acc.sum_s += fm_s.reduce_add() as f64;
-    acc.sum_d += fm_d.reduce_add() as f64;
-    acc.sum_s2 += fm_s2.reduce_add() as f64;
-    acc.sum_d2 += fm_d2.reduce_add() as f64;
-    acc.sum_dd += fm_dd.reduce_add() as f64;
-    acc.sum_ds += fm_ds.reduce_add() as f64;
-}
-
-/// Scalar sibling of [`raw_moments_accumulate8`] / [`raw_moments_accumulate16`]
-/// — every tier's remainder-columns tail (width not a multiple of its
-/// vector width) falls back to plain `f32`.
-#[inline(always)]
-fn raw_moments_accumulate_scalar(
-    fm_s: &mut f32,
-    fm_d: &mut f32,
-    fm_s2: &mut f32,
-    fm_d2: &mut f32,
-    fm_dd: &mut f32,
-    fm_ds: &mut f32,
-    s: f32,
-    d: f32,
-) {
-    *fm_s += s;
-    *fm_d += d;
-    *fm_s2 += s * s;
-    *fm_d2 += d * d;
-    let df = d - s;
-    *fm_dd += df * (d + s);
-    *fm_ds += df;
-}
-
-/// Scalar sibling of [`raw_moments_finish8`] / [`raw_moments_finish16`].
-#[inline(always)]
-fn raw_moments_finish_scalar(
-    acc: &mut StripChannelAccum,
-    fm_s: f32,
-    fm_d: f32,
-    fm_s2: f32,
-    fm_d2: f32,
-    fm_dd: f32,
-    fm_ds: f32,
-) {
-    acc.sum_s += fm_s as f64;
-    acc.sum_d += fm_d as f64;
-    acc.sum_s2 += fm_s2 as f64;
-    acc.sum_d2 += fm_d2 as f64;
-    acc.sum_dd += fm_dd as f64;
-    acc.sum_ds += fm_ds as f64;
-}
-
 // ============================================================
 // Free BOUNDED-ERROR accumulation (class C) — shared across every SIMD tier
 // (`benchmarks/free_features_classC_2026-09-04.md`)
@@ -457,15 +293,6 @@ pub(crate) struct FreeExtrasWork {
     pub omit_peaks: bool,
     /// SSIM and MSE subset: omit artifact/detail reductions as well.
     pub omit_edges: bool,
-    /// Σs, Σd, Σs², Σd² — the `V1FreeExtras::RawMoments` set.
-    pub raw_moments: bool,
-    /// Σ `mse_i` — the bounded per-pixel error. Every channel.
-    pub bounded_err: bool,
-    /// The dark/bright luminance-binned weighted sums of the SAME `mse_i`.
-    /// Y channel only (`feature_v2::APPEND2_CHANNEL`), because that is the
-    /// only channel whose `src` plane IS the reference luma the weight
-    /// reads. Requires `bounded_err` (the weights multiply its `mse_i`).
-    pub lum_bins: bool,
 }
 
 impl FreeExtrasWork {
@@ -483,229 +310,6 @@ impl FreeExtrasWork {
             crate::ssim_form::SsimLumaForm::for_revision(revision)
         }
     }
-}
-
-/// Accumulate one row's bounded per-pixel error into the lane sum and return
-/// it, so the luminance bins can weight the SAME value rather than
-/// recomputing it. `sat(x, c) = max(x,0)/(max(x,0)+c)` — the vector form of
-/// `feature_v2::saturate`, written out here for the same
-/// module-independence reason as [`C_MSE_F32`]. The `max(0)` is a no-op for
-/// a real square and is kept only so a NaN input maps the same way the f64
-/// definition maps it.
-#[inline(always)]
-fn bounded_err_accumulate8<T: F32x8Backend + Copy>(
-    token: T,
-    be_m: &mut GenericF32x8<T>,
-    pd: GenericF32x8<T>,
-) -> GenericF32x8<T> {
-    let sq = (pd * pd).max(GenericF32x8::<T>::zero_t(token));
-    let m = sq / (sq + GenericF32x8::<T>::splat_t(token, C_MSE_F32));
-    *be_m = *be_m + m;
-    m
-}
-
-/// Accumulate the dark/bright Bernstein-weighted numerator + denominator
-/// lane sums for one row. `s` is the Y channel's source row (= the reference
-/// luma); `m` is [`bounded_err_accumulate8`]'s per-pixel value.
-#[inline(always)]
-#[allow(clippy::too_many_arguments)]
-fn lum_bins_accumulate8<T: F32x8Backend + Copy>(
-    token: T,
-    wd_num: &mut GenericF32x8<T>,
-    wd_den: &mut GenericF32x8<T>,
-    wb_num: &mut GenericF32x8<T>,
-    wb_den: &mut GenericF32x8<T>,
-    s: GenericF32x8<T>,
-    m: GenericF32x8<T>,
-) {
-    let ry = s.max(GenericF32x8::<T>::zero_t(token));
-    let t = ry / (ry + GenericF32x8::<T>::splat_t(token, C_LUM_T_F32));
-    let one_mt = GenericF32x8::<T>::splat_t(token, 1.0) - t;
-    let wd = one_mt * one_mt;
-    let wb = t * t;
-    *wd_num = *wd_num + wd * m;
-    *wd_den = *wd_den + wd;
-    *wb_num = *wb_num + wb * m;
-    *wb_den = *wb_den + wb;
-}
-
-/// Band's-last-inner-row finish for [`bounded_err_accumulate8`].
-#[inline(always)]
-fn bounded_err_finish8<T: F32x8Backend + Copy>(acc: &mut StripChannelAccum, be_m: GenericF32x8<T>) {
-    acc.sum_msat += be_m.reduce_add() as f64;
-}
-
-/// Band's-last-inner-row finish for [`lum_bins_accumulate8`].
-#[inline(always)]
-fn lum_bins_finish8<T: F32x8Backend + Copy>(
-    acc: &mut StripChannelAccum,
-    wd_num: GenericF32x8<T>,
-    wd_den: GenericF32x8<T>,
-    wb_num: GenericF32x8<T>,
-    wb_den: GenericF32x8<T>,
-) {
-    acc.lum_wd_num += wd_num.reduce_add() as f64;
-    acc.lum_wd_den += wd_den.reduce_add() as f64;
-    acc.lum_wb_num += wb_num.reduce_add() as f64;
-    acc.lum_wb_den += wb_den.reduce_add() as f64;
-}
-
-/// 16-lane sibling of [`bounded_err_accumulate8`].
-#[cfg(target_arch = "x86_64")]
-// Reachable only through `incant!`'s AVX-512 tiers, which a build
-// without the default `avx512` feature never dispatches — rustc then
-// reports the 16-lane helpers as dead even though `_v4`/`_v4x` still
-// compile and call them. Annotated rather than `cfg`-gated: gating
-// them off breaks those bodies (measured — `cannot find function`).
-#[inline(always)]
-fn bounded_err_accumulate16<T: F32x16Backend + Copy>(
-    token: T,
-    be_m: &mut f32x16<T>,
-    pd: f32x16<T>,
-) -> f32x16<T> {
-    let sq = (pd * pd).max(f32x16::<T>::zero_t(token));
-    let m = sq / (sq + f32x16::<T>::splat_t(token, C_MSE_F32));
-    *be_m = *be_m + m;
-    m
-}
-
-/// 16-lane sibling of [`lum_bins_accumulate8`].
-#[cfg(target_arch = "x86_64")]
-// Reachable only through `incant!`'s AVX-512 tiers, which a build
-// without the default `avx512` feature never dispatches — rustc then
-// reports the 16-lane helpers as dead even though `_v4`/`_v4x` still
-// compile and call them. Annotated rather than `cfg`-gated: gating
-// them off breaks those bodies (measured — `cannot find function`).
-#[inline(always)]
-#[allow(clippy::too_many_arguments)]
-fn lum_bins_accumulate16<T: F32x16Backend + Copy>(
-    token: T,
-    wd_num: &mut f32x16<T>,
-    wd_den: &mut f32x16<T>,
-    wb_num: &mut f32x16<T>,
-    wb_den: &mut f32x16<T>,
-    s: f32x16<T>,
-    m: f32x16<T>,
-) {
-    let ry = s.max(f32x16::<T>::zero_t(token));
-    let t = ry / (ry + f32x16::<T>::splat_t(token, C_LUM_T_F32));
-    let one_mt = f32x16::<T>::splat_t(token, 1.0) - t;
-    let wd = one_mt * one_mt;
-    let wb = t * t;
-    *wd_num = *wd_num + wd * m;
-    *wd_den = *wd_den + wd;
-    *wb_num = *wb_num + wb * m;
-    *wb_den = *wb_den + wb;
-}
-
-/// 16-lane sibling of [`bounded_err_finish8`].
-#[cfg(target_arch = "x86_64")]
-// Reachable only through `incant!`'s AVX-512 tiers, which a build
-// without the default `avx512` feature never dispatches — rustc then
-// reports the 16-lane helpers as dead even though `_v4`/`_v4x` still
-// compile and call them. Annotated rather than `cfg`-gated: gating
-// them off breaks those bodies (measured — `cannot find function`).
-#[inline(always)]
-fn bounded_err_finish16<T: F32x16Backend + Copy>(acc: &mut StripChannelAccum, be_m: f32x16<T>) {
-    acc.sum_msat += be_m.reduce_add() as f64;
-}
-
-/// 16-lane sibling of [`lum_bins_finish8`].
-#[cfg(target_arch = "x86_64")]
-// Reachable only through `incant!`'s AVX-512 tiers, which a build
-// without the default `avx512` feature never dispatches — rustc then
-// reports the 16-lane helpers as dead even though `_v4`/`_v4x` still
-// compile and call them. Annotated rather than `cfg`-gated: gating
-// them off breaks those bodies (measured — `cannot find function`).
-#[inline(always)]
-fn lum_bins_finish16<T: F32x16Backend + Copy>(
-    acc: &mut StripChannelAccum,
-    wd_num: f32x16<T>,
-    wd_den: f32x16<T>,
-    wb_num: f32x16<T>,
-    wb_den: f32x16<T>,
-) {
-    acc.lum_wd_num += wd_num.reduce_add() as f64;
-    acc.lum_wd_den += wd_den.reduce_add() as f64;
-    acc.lum_wb_num += wb_num.reduce_add() as f64;
-    acc.lum_wb_den += wb_den.reduce_add() as f64;
-}
-
-/// Scalar sibling of [`bounded_err_accumulate8`] — the remainder-columns tail.
-#[inline(always)]
-fn bounded_err_accumulate_scalar(be_m: &mut f32, pd: f32) -> f32 {
-    let sq = (pd * pd).max(0.0);
-    let m = sq / (sq + C_MSE_F32);
-    *be_m += m;
-    m
-}
-
-/// Scalar sibling of [`lum_bins_accumulate8`].
-#[inline(always)]
-fn lum_bins_accumulate_scalar(
-    wd_num: &mut f32,
-    wd_den: &mut f32,
-    wb_num: &mut f32,
-    wb_den: &mut f32,
-    s: f32,
-    m: f32,
-) {
-    let ry = s.max(0.0);
-    let t = ry / (ry + C_LUM_T_F32);
-    let one_mt = 1.0 - t;
-    let wd = one_mt * one_mt;
-    let wb = t * t;
-    *wd_num += wd * m;
-    *wd_den += wd;
-    *wb_num += wb * m;
-    *wb_den += wb;
-}
-
-/// Scalar sibling of [`bounded_err_finish8`].
-#[inline(always)]
-fn bounded_err_finish_scalar(acc: &mut StripChannelAccum, be_m: f32) {
-    acc.sum_msat += be_m as f64;
-}
-
-/// Scalar sibling of [`lum_bins_finish8`].
-#[inline(always)]
-fn lum_bins_finish_scalar(
-    acc: &mut StripChannelAccum,
-    wd_num: f32,
-    wd_den: f32,
-    wb_num: f32,
-    wb_den: f32,
-) {
-    acc.lum_wd_num += wd_num as f64;
-    acc.lum_wd_den += wd_den as f64;
-    acc.lum_wb_num += wb_num as f64;
-    acc.lum_wb_den += wb_den as f64;
-}
-
-/// Test-only handles on the class-C scalar integrands, so
-/// `feature_v2::tests::class_c_integrands_match_the_f64_scalar_oracle` can
-/// gate the arithmetic itself against the f64 `saturate` the append kernel
-/// calls — rather than only observing it end-to-end through a whole walk.
-/// The vector tiers are gated end-to-end instead (the geometry list in
-/// `class_c_extras_match_the_944_walk` covers every tier's main loop AND
-/// its 8-lane / scalar remainder).
-#[cfg(test)] // callers live in feature_v2's tests
-pub(crate) fn test_only_bounded_err_scalar(be_m: &mut f32, pd: f32) -> f32 {
-    bounded_err_accumulate_scalar(be_m, pd)
-}
-
-/// Test-only handle on [`lum_bins_accumulate_scalar`]. See
-/// [`test_only_bounded_err_scalar`].
-#[cfg(test)] // callers live in feature_v2's tests
-pub(crate) fn test_only_lum_bins_scalar(
-    wd_num: &mut f32,
-    wd_den: &mut f32,
-    wb_num: &mut f32,
-    wb_den: &mut f32,
-    s: f32,
-    m: f32,
-) {
-    lum_bins_accumulate_scalar(wd_num, wd_den, wb_num, wb_den, s, m)
 }
 
 /// Accumulated feature sums from a fused V-blur + feature extraction pass.
@@ -736,27 +340,8 @@ pub(crate) struct StripChannelAccum {
     // Σsrc, Σdst, Σsrc², Σdst² over the inner rows. Written ONLY when the
     // caller asks; every existing field's value and accumulation order is
     // unchanged whether it asks or not.
-    pub sum_s: f64,
-    pub sum_d: f64,
-    pub sum_s2: f64,
-    pub sum_d2: f64,
-    /// Revision 2's paired second moment `Σ(d−s)(d+s) = Σ(d²−s²)`, formed
-    /// per pixel. See [`raw_moments_accumulate16`] for why it exists.
-    pub sum_dd: f64,
-    /// Revision 2's paired first difference `Σ(d−s)`.
-    pub sum_ds: f64,
     // --- Free bounded error (`FreeExtrasWork::bounded_err` / `lum_bins`;
     //     zero and untouched otherwise) ---
-    /// Σ `sat((s−d)², C_MSE)` — the v2-348 `MSE` slot's numerator.
-    pub sum_msat: f64,
-    /// Σ `(1−t)²·mse_i` and Σ `(1−t)²` — `LUM_DARK_ERR`'s weighted mean.
-    pub lum_wd_num: f64,
-    pub lum_wd_den: f64,
-    /// Σ `t²·mse_i` and Σ `t²` — `LUM_BRIGHT_ERR`'s weighted mean.
-    /// (`LUM_MID_ERR` is DERIVED from these plus `sum_msat` and `n`, exactly
-    /// as `feature_v2::finish_append` derives it.)
-    pub lum_wb_num: f64,
-    pub lum_wb_den: f64,
     // Fused v1-extension pools (`ExtPoolsWork`), revision 3 only.
     pub masked_ssim_d: f64,
     pub masked_ssim_d4: f64,
@@ -797,17 +382,6 @@ impl StripChannelAccum {
             ssim_max: 0.0,
             edge_art_max: 0.0,
             edge_det_max: 0.0,
-            sum_s: 0.0,
-            sum_dd: 0.0,
-            sum_ds: 0.0,
-            sum_d: 0.0,
-            sum_s2: 0.0,
-            sum_d2: 0.0,
-            sum_msat: 0.0,
-            lum_wd_num: 0.0,
-            lum_wd_den: 0.0,
-            lum_wb_num: 0.0,
-            lum_wb_den: 0.0,
             masked_ssim_d: 0.0,
             masked_ssim_d4: 0.0,
             masked_ssim_d2: 0.0,
@@ -1214,20 +788,20 @@ fn fused_vblur_ssim_inner_v4(
         // Free raw moments: one lane accumulator per column group, reduced
         // at the band's last inner row (see `raw_moments`). Dead code when
         // the caller did not ask.
-        let (mut fm_s, mut fm_d, mut fm_s2, mut fm_d2) = (
+        let (mut _fm_s, mut _fm_d, mut _fm_s2, mut _fm_d2) = (
             f32x16::zero_t(token),
             f32x16::zero_t(token),
             f32x16::zero_t(token),
             f32x16::zero_t(token),
         );
         // Revision 2\'s paired second moment (see `raw_moments_accumulate16`).
-        let mut fm_dd = f32x16::zero_t(token);
-        let mut fm_ds = f32x16::zero_t(token);
-        // Free bounded-error lane accumulators (`free.bounded_err` /
-        // `free.lum_bins`) — same band-batched shape and rationale as
+        let mut _fm_dd = f32x16::zero_t(token);
+        let mut _fm_ds = f32x16::zero_t(token);
+        // Free bounded-error lane accumulators (`false` /
+        // `false`) — same band-batched shape and rationale as
         // `fm_*` above: vector-add every row, reduce ONCE at the band's
         // last inner row.
-        let (mut be_m, mut be_wdn, mut be_wdd, mut be_wbn, mut be_wbd) = (
+        let (mut _be_m, mut _be_wdn, mut _be_wdd, mut _be_wbn, mut _be_wbd) = (
             f32x16::zero_t(token),
             f32x16::zero_t(token),
             f32x16::zero_t(token),
@@ -1359,41 +933,13 @@ fn fused_vblur_ssim_inner_v4(
                 // the 944 append block is 5.35e-6 (was 4.62e-6 pre-batch),
                 // ~2 orders below the module's 5e-4 tolerance
                 // (`free_extras_match_the_944_append_block`).
-                if free.raw_moments {
-                    raw_moments_accumulate16(
-                        &mut fm_s, &mut fm_d, &mut fm_s2, &mut fm_d2, &mut fm_dd, &mut fm_ds, s, d,
-                    );
-                    if y + 1 == inner_end {
-                        raw_moments_finish16(&mut acc, fm_s, fm_d, fm_s2, fm_d2, fm_dd, fm_ds);
-                    }
-                }
 
-                // === Free BOUNDED ERROR (`free.bounded_err` / `lum_bins`) ===
+                // === Free BOUNDED ERROR (`false` / `lum_bins`) ===
                 // `pd` is the same register the `acc.mse` line above just
                 // used; `s` is this channel's source row, which for the Y
                 // channel IS the reference-luma plane the bins weight by.
                 // No new plane, no new load, no new pass (class C — see the
                 // helper block at the top of this module).
-                if free.bounded_err {
-                    let be_i = bounded_err_accumulate16(token, &mut be_m, pd);
-                    if free.lum_bins {
-                        lum_bins_accumulate16(
-                            token,
-                            &mut be_wdn,
-                            &mut be_wdd,
-                            &mut be_wbn,
-                            &mut be_wbd,
-                            s,
-                            be_i,
-                        );
-                    }
-                    if y + 1 == inner_end {
-                        bounded_err_finish16(&mut acc, be_m);
-                        if free.lum_bins {
-                            lum_bins_finish16(&mut acc, be_wdn, be_wdd, be_wbn, be_wbd);
-                        }
-                    }
-                }
             }
 
             // Slide V-blur window
@@ -1443,20 +989,20 @@ fn fused_vblur_ssim_inner_v4(
         // Free raw moments: one lane accumulator per column group, reduced
         // at the band's last inner row (see `raw_moments`). Dead code when
         // the caller did not ask.
-        let (mut fm_s, mut fm_d, mut fm_s2, mut fm_d2) = (
+        let (mut _fm_s, mut _fm_d, mut _fm_s2, mut _fm_d2) = (
             f32x8::zero_t(v3),
             f32x8::zero_t(v3),
             f32x8::zero_t(v3),
             f32x8::zero_t(v3),
         );
         // Revision 2\'s paired second moment (see `raw_moments_accumulate16`).
-        let mut fm_dd = f32x8::zero_t(v3);
-        let mut fm_ds = f32x8::zero_t(v3);
-        // Free bounded-error lane accumulators (`free.bounded_err` /
-        // `free.lum_bins`) — same band-batched shape and rationale as
+        let mut _fm_dd = f32x8::zero_t(v3);
+        let mut _fm_ds = f32x8::zero_t(v3);
+        // Free bounded-error lane accumulators (`false` /
+        // `false`) — same band-batched shape and rationale as
         // `fm_*` above: vector-add every row, reduce ONCE at the band's
         // last inner row.
-        let (mut be_m, mut be_wdn, mut be_wdd, mut be_wbn, mut be_wbd) = (
+        let (mut _be_m, mut _be_wdn, mut _be_wdd, mut _be_wbn, mut _be_wbd) = (
             f32x8::zero_t(v3),
             f32x8::zero_t(v3),
             f32x8::zero_t(v3),
@@ -1580,41 +1126,13 @@ fn fused_vblur_ssim_inner_v4(
                 // the 944 append block is 5.35e-6 (was 4.62e-6 pre-batch),
                 // ~2 orders below the module's 5e-4 tolerance
                 // (`free_extras_match_the_944_append_block`).
-                if free.raw_moments {
-                    raw_moments_accumulate8(
-                        &mut fm_s, &mut fm_d, &mut fm_s2, &mut fm_d2, &mut fm_dd, &mut fm_ds, s, d,
-                    );
-                    if y + 1 == inner_end {
-                        raw_moments_finish8(&mut acc, fm_s, fm_d, fm_s2, fm_d2, fm_dd, fm_ds);
-                    }
-                }
 
-                // === Free BOUNDED ERROR (`free.bounded_err` / `lum_bins`) ===
+                // === Free BOUNDED ERROR (`false` / `lum_bins`) ===
                 // `pd` is the same register the `acc.mse` line above just
                 // used; `s` is this channel's source row, which for the Y
                 // channel IS the reference-luma plane the bins weight by.
                 // No new plane, no new load, no new pass (class C — see the
                 // helper block at the top of this module).
-                if free.bounded_err {
-                    let be_i = bounded_err_accumulate8(v3, &mut be_m, pd);
-                    if free.lum_bins {
-                        lum_bins_accumulate8(
-                            v3,
-                            &mut be_wdn,
-                            &mut be_wdd,
-                            &mut be_wbn,
-                            &mut be_wbd,
-                            s,
-                            be_i,
-                        );
-                    }
-                    if y + 1 == inner_end {
-                        bounded_err_finish8(&mut acc, be_m);
-                        if free.lum_bins {
-                            lum_bins_finish8(&mut acc, be_wdn, be_wdd, be_wbn, be_wbd);
-                        }
-                    }
-                }
             }
 
             let add_idx = vblur_add_idx(y, r, height);
@@ -1651,16 +1169,14 @@ fn fused_vblur_ssim_inner_v4(
         // Free raw moments: one lane accumulator per column group, reduced
         // at the band's last inner row (see `raw_moments`). Dead code when
         // the caller did not ask.
-        let (mut fm_s, mut fm_d, mut fm_s2, mut fm_d2) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+        let (mut _fm_s, mut _fm_d, mut _fm_s2, mut _fm_d2) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
         // Revision 2's paired second moment and first difference (see
         // `raw_moments_accumulate16`).
-        let mut fm_dd = 0.0f32;
-        let mut fm_ds = 0.0f32;
-        // Free bounded-error lane accumulators (`free.bounded_err` /
-        // `free.lum_bins`) — same band-batched shape and rationale as
+        // Free bounded-error lane accumulators (`false` /
+        // `false`) — same band-batched shape and rationale as
         // `fm_*` above: vector-add every row, reduce ONCE at the band's
         // last inner row.
-        let (mut be_m, mut be_wdn, mut be_wdd, mut be_wbn, mut be_wbd) =
+        let (mut _be_m, mut _be_wdn, mut _be_wdd, mut _be_wbn, mut _be_wbd) =
             (0.0f32, 0.0f32, 0.0f32, 0.0f32, 0.0f32);
 
         for i in 0..diam {
@@ -1758,41 +1274,13 @@ fn fused_vblur_ssim_inner_v4(
                 }
 
                 // === Free raw moments (`raw_moments`) — scalar tail ===
-                if free.raw_moments {
-                    raw_moments_accumulate_scalar(
-                        &mut fm_s, &mut fm_d, &mut fm_s2, &mut fm_d2, &mut fm_dd, &mut fm_ds, sv,
-                        dv,
-                    );
-                    if y + 1 == inner_end {
-                        raw_moments_finish_scalar(&mut acc, fm_s, fm_d, fm_s2, fm_d2, fm_dd, fm_ds);
-                    }
-                }
 
-                // === Free BOUNDED ERROR (`free.bounded_err` / `lum_bins`) ===
+                // === Free BOUNDED ERROR (`false` / `lum_bins`) ===
                 // `pd` is the same register the `acc.mse` line above just
                 // used; `s` is this channel's source row, which for the Y
                 // channel IS the reference-luma plane the bins weight by.
                 // No new plane, no new load, no new pass (class C — see the
                 // helper block at the top of this module).
-                if free.bounded_err {
-                    let be_i = bounded_err_accumulate_scalar(&mut be_m, pd);
-                    if free.lum_bins {
-                        lum_bins_accumulate_scalar(
-                            &mut be_wdn,
-                            &mut be_wdd,
-                            &mut be_wbn,
-                            &mut be_wbd,
-                            sv,
-                            be_i,
-                        );
-                    }
-                    if y + 1 == inner_end {
-                        bounded_err_finish_scalar(&mut acc, be_m);
-                        if free.lum_bins {
-                            lum_bins_finish_scalar(&mut acc, be_wdn, be_wdd, be_wbn, be_wbd);
-                        }
-                    }
-                }
             }
 
             let add_idx = vblur_add_idx(y, r, height);
@@ -1928,20 +1416,20 @@ fn fused_vblur_ssim_inner_v4x(
         // Free raw moments: one lane accumulator per column group, reduced
         // at the band's last inner row (see `raw_moments`). Dead code when
         // the caller did not ask.
-        let (mut fm_s, mut fm_d, mut fm_s2, mut fm_d2) = (
+        let (mut _fm_s, mut _fm_d, mut _fm_s2, mut _fm_d2) = (
             f32x16::zero_t(token),
             f32x16::zero_t(token),
             f32x16::zero_t(token),
             f32x16::zero_t(token),
         );
         // Revision 2\'s paired second moment (see `raw_moments_accumulate16`).
-        let mut fm_dd = f32x16::zero_t(token);
-        let mut fm_ds = f32x16::zero_t(token);
-        // Free bounded-error lane accumulators (`free.bounded_err` /
-        // `free.lum_bins`) — same band-batched shape and rationale as
+        let mut _fm_dd = f32x16::zero_t(token);
+        let mut _fm_ds = f32x16::zero_t(token);
+        // Free bounded-error lane accumulators (`false` /
+        // `false`) — same band-batched shape and rationale as
         // `fm_*` above: vector-add every row, reduce ONCE at the band's
         // last inner row.
-        let (mut be_m, mut be_wdn, mut be_wdd, mut be_wbn, mut be_wbd) = (
+        let (mut _be_m, mut _be_wdn, mut _be_wdd, mut _be_wbn, mut _be_wbd) = (
             f32x16::zero_t(token),
             f32x16::zero_t(token),
             f32x16::zero_t(token),
@@ -2073,41 +1561,13 @@ fn fused_vblur_ssim_inner_v4x(
                 // the 944 append block is 5.35e-6 (was 4.62e-6 pre-batch),
                 // ~2 orders below the module's 5e-4 tolerance
                 // (`free_extras_match_the_944_append_block`).
-                if free.raw_moments {
-                    raw_moments_accumulate16(
-                        &mut fm_s, &mut fm_d, &mut fm_s2, &mut fm_d2, &mut fm_dd, &mut fm_ds, s, d,
-                    );
-                    if y + 1 == inner_end {
-                        raw_moments_finish16(&mut acc, fm_s, fm_d, fm_s2, fm_d2, fm_dd, fm_ds);
-                    }
-                }
 
-                // === Free BOUNDED ERROR (`free.bounded_err` / `lum_bins`) ===
+                // === Free BOUNDED ERROR (`false` / `lum_bins`) ===
                 // `pd` is the same register the `acc.mse` line above just
                 // used; `s` is this channel's source row, which for the Y
                 // channel IS the reference-luma plane the bins weight by.
                 // No new plane, no new load, no new pass (class C — see the
                 // helper block at the top of this module).
-                if free.bounded_err {
-                    let be_i = bounded_err_accumulate16(token, &mut be_m, pd);
-                    if free.lum_bins {
-                        lum_bins_accumulate16(
-                            token,
-                            &mut be_wdn,
-                            &mut be_wdd,
-                            &mut be_wbn,
-                            &mut be_wbd,
-                            s,
-                            be_i,
-                        );
-                    }
-                    if y + 1 == inner_end {
-                        bounded_err_finish16(&mut acc, be_m);
-                        if free.lum_bins {
-                            lum_bins_finish16(&mut acc, be_wdn, be_wdd, be_wbn, be_wbd);
-                        }
-                    }
-                }
             }
 
             // Slide V-blur window
@@ -2157,20 +1617,20 @@ fn fused_vblur_ssim_inner_v4x(
         // Free raw moments: one lane accumulator per column group, reduced
         // at the band's last inner row (see `raw_moments`). Dead code when
         // the caller did not ask.
-        let (mut fm_s, mut fm_d, mut fm_s2, mut fm_d2) = (
+        let (mut _fm_s, mut _fm_d, mut _fm_s2, mut _fm_d2) = (
             f32x8::zero_t(v3),
             f32x8::zero_t(v3),
             f32x8::zero_t(v3),
             f32x8::zero_t(v3),
         );
         // Revision 2\'s paired second moment (see `raw_moments_accumulate16`).
-        let mut fm_dd = f32x8::zero_t(v3);
-        let mut fm_ds = f32x8::zero_t(v3);
-        // Free bounded-error lane accumulators (`free.bounded_err` /
-        // `free.lum_bins`) — same band-batched shape and rationale as
+        let mut _fm_dd = f32x8::zero_t(v3);
+        let mut _fm_ds = f32x8::zero_t(v3);
+        // Free bounded-error lane accumulators (`false` /
+        // `false`) — same band-batched shape and rationale as
         // `fm_*` above: vector-add every row, reduce ONCE at the band's
         // last inner row.
-        let (mut be_m, mut be_wdn, mut be_wdd, mut be_wbn, mut be_wbd) = (
+        let (mut _be_m, mut _be_wdn, mut _be_wdd, mut _be_wbn, mut _be_wbd) = (
             f32x8::zero_t(v3),
             f32x8::zero_t(v3),
             f32x8::zero_t(v3),
@@ -2294,41 +1754,13 @@ fn fused_vblur_ssim_inner_v4x(
                 // the 944 append block is 5.35e-6 (was 4.62e-6 pre-batch),
                 // ~2 orders below the module's 5e-4 tolerance
                 // (`free_extras_match_the_944_append_block`).
-                if free.raw_moments {
-                    raw_moments_accumulate8(
-                        &mut fm_s, &mut fm_d, &mut fm_s2, &mut fm_d2, &mut fm_dd, &mut fm_ds, s, d,
-                    );
-                    if y + 1 == inner_end {
-                        raw_moments_finish8(&mut acc, fm_s, fm_d, fm_s2, fm_d2, fm_dd, fm_ds);
-                    }
-                }
 
-                // === Free BOUNDED ERROR (`free.bounded_err` / `lum_bins`) ===
+                // === Free BOUNDED ERROR (`false` / `lum_bins`) ===
                 // `pd` is the same register the `acc.mse` line above just
                 // used; `s` is this channel's source row, which for the Y
                 // channel IS the reference-luma plane the bins weight by.
                 // No new plane, no new load, no new pass (class C — see the
                 // helper block at the top of this module).
-                if free.bounded_err {
-                    let be_i = bounded_err_accumulate8(v3, &mut be_m, pd);
-                    if free.lum_bins {
-                        lum_bins_accumulate8(
-                            v3,
-                            &mut be_wdn,
-                            &mut be_wdd,
-                            &mut be_wbn,
-                            &mut be_wbd,
-                            s,
-                            be_i,
-                        );
-                    }
-                    if y + 1 == inner_end {
-                        bounded_err_finish8(&mut acc, be_m);
-                        if free.lum_bins {
-                            lum_bins_finish8(&mut acc, be_wdn, be_wdd, be_wbn, be_wbd);
-                        }
-                    }
-                }
             }
 
             let add_idx = vblur_add_idx(y, r, height);
@@ -2365,16 +1797,14 @@ fn fused_vblur_ssim_inner_v4x(
         // Free raw moments: one lane accumulator per column group, reduced
         // at the band's last inner row (see `raw_moments`). Dead code when
         // the caller did not ask.
-        let (mut fm_s, mut fm_d, mut fm_s2, mut fm_d2) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+        let (mut _fm_s, mut _fm_d, mut _fm_s2, mut _fm_d2) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
         // Revision 2's paired second moment and first difference (see
         // `raw_moments_accumulate16`).
-        let mut fm_dd = 0.0f32;
-        let mut fm_ds = 0.0f32;
-        // Free bounded-error lane accumulators (`free.bounded_err` /
-        // `free.lum_bins`) — same band-batched shape and rationale as
+        // Free bounded-error lane accumulators (`false` /
+        // `false`) — same band-batched shape and rationale as
         // `fm_*` above: vector-add every row, reduce ONCE at the band's
         // last inner row.
-        let (mut be_m, mut be_wdn, mut be_wdd, mut be_wbn, mut be_wbd) =
+        let (mut _be_m, mut _be_wdn, mut _be_wdd, mut _be_wbn, mut _be_wbd) =
             (0.0f32, 0.0f32, 0.0f32, 0.0f32, 0.0f32);
 
         for i in 0..diam {
@@ -2472,41 +1902,13 @@ fn fused_vblur_ssim_inner_v4x(
                 }
 
                 // === Free raw moments (`raw_moments`) — scalar tail ===
-                if free.raw_moments {
-                    raw_moments_accumulate_scalar(
-                        &mut fm_s, &mut fm_d, &mut fm_s2, &mut fm_d2, &mut fm_dd, &mut fm_ds, sv,
-                        dv,
-                    );
-                    if y + 1 == inner_end {
-                        raw_moments_finish_scalar(&mut acc, fm_s, fm_d, fm_s2, fm_d2, fm_dd, fm_ds);
-                    }
-                }
 
-                // === Free BOUNDED ERROR (`free.bounded_err` / `lum_bins`) ===
+                // === Free BOUNDED ERROR (`false` / `lum_bins`) ===
                 // `pd` is the same register the `acc.mse` line above just
                 // used; `s` is this channel's source row, which for the Y
                 // channel IS the reference-luma plane the bins weight by.
                 // No new plane, no new load, no new pass (class C — see the
                 // helper block at the top of this module).
-                if free.bounded_err {
-                    let be_i = bounded_err_accumulate_scalar(&mut be_m, pd);
-                    if free.lum_bins {
-                        lum_bins_accumulate_scalar(
-                            &mut be_wdn,
-                            &mut be_wdd,
-                            &mut be_wbn,
-                            &mut be_wbd,
-                            sv,
-                            be_i,
-                        );
-                    }
-                    if y + 1 == inner_end {
-                        bounded_err_finish_scalar(&mut acc, be_m);
-                        if free.lum_bins {
-                            lum_bins_finish_scalar(&mut acc, be_wdn, be_wdd, be_wbn, be_wbd);
-                        }
-                    }
-                }
             }
 
             let add_idx = vblur_add_idx(y, r, height);
@@ -2643,20 +2045,20 @@ fn fused_vblur_ssim_inner_v3(
         // Free raw moments: one lane accumulator per column group, reduced
         // at the band's last inner row (see `raw_moments`). Dead code when
         // the caller did not ask.
-        let (mut fm_s, mut fm_d, mut fm_s2, mut fm_d2) = (
+        let (mut _fm_s, mut _fm_d, mut _fm_s2, mut _fm_d2) = (
             f32x8::zero_t(token),
             f32x8::zero_t(token),
             f32x8::zero_t(token),
             f32x8::zero_t(token),
         );
         // Revision 2\'s paired second moment (see `raw_moments_accumulate16`).
-        let mut fm_dd = f32x8::zero_t(token);
-        let mut fm_ds = f32x8::zero_t(token);
-        // Free bounded-error lane accumulators (`free.bounded_err` /
-        // `free.lum_bins`) — same band-batched shape and rationale as
+        let mut _fm_dd = f32x8::zero_t(token);
+        let mut _fm_ds = f32x8::zero_t(token);
+        // Free bounded-error lane accumulators (`false` /
+        // `false`) — same band-batched shape and rationale as
         // `fm_*` above: vector-add every row, reduce ONCE at the band's
         // last inner row.
-        let (mut be_m, mut be_wdn, mut be_wdd, mut be_wbn, mut be_wbd) = (
+        let (mut _be_m, mut _be_wdn, mut _be_wdd, mut _be_wbn, mut _be_wbd) = (
             f32x8::zero_t(token),
             f32x8::zero_t(token),
             f32x8::zero_t(token),
@@ -2782,41 +2184,13 @@ fn fused_vblur_ssim_inner_v3(
                 // the 944 append block is 5.35e-6 (was 4.62e-6 pre-batch),
                 // ~2 orders below the module's 5e-4 tolerance
                 // (`free_extras_match_the_944_append_block`).
-                if free.raw_moments {
-                    raw_moments_accumulate8(
-                        &mut fm_s, &mut fm_d, &mut fm_s2, &mut fm_d2, &mut fm_dd, &mut fm_ds, s, d,
-                    );
-                    if y + 1 == inner_end {
-                        raw_moments_finish8(&mut acc, fm_s, fm_d, fm_s2, fm_d2, fm_dd, fm_ds);
-                    }
-                }
 
-                // === Free BOUNDED ERROR (`free.bounded_err` / `lum_bins`) ===
+                // === Free BOUNDED ERROR (`false` / `lum_bins`) ===
                 // `pd` is the same register the `acc.mse` line above just
                 // used; `s` is this channel's source row, which for the Y
                 // channel IS the reference-luma plane the bins weight by.
                 // No new plane, no new load, no new pass (class C — see the
                 // helper block at the top of this module).
-                if free.bounded_err {
-                    let be_i = bounded_err_accumulate8(token, &mut be_m, pd);
-                    if free.lum_bins {
-                        lum_bins_accumulate8(
-                            token,
-                            &mut be_wdn,
-                            &mut be_wdd,
-                            &mut be_wbn,
-                            &mut be_wbd,
-                            s,
-                            be_i,
-                        );
-                    }
-                    if y + 1 == inner_end {
-                        bounded_err_finish8(&mut acc, be_m);
-                        if free.lum_bins {
-                            lum_bins_finish8(&mut acc, be_wdn, be_wdd, be_wbn, be_wbd);
-                        }
-                    }
-                }
             }
 
             let add_idx = vblur_add_idx(y, r, height);
@@ -2856,16 +2230,14 @@ fn fused_vblur_ssim_inner_v3(
         // Free raw moments: one lane accumulator per column group, reduced
         // at the band's last inner row (see `raw_moments`). Dead code when
         // the caller did not ask.
-        let (mut fm_s, mut fm_d, mut fm_s2, mut fm_d2) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+        let (mut _fm_s, mut _fm_d, mut _fm_s2, mut _fm_d2) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
         // Revision 2's paired second moment and first difference (see
         // `raw_moments_accumulate16`).
-        let mut fm_dd = 0.0f32;
-        let mut fm_ds = 0.0f32;
-        // Free bounded-error lane accumulators (`free.bounded_err` /
-        // `free.lum_bins`) — same band-batched shape and rationale as
+        // Free bounded-error lane accumulators (`false` /
+        // `false`) — same band-batched shape and rationale as
         // `fm_*` above: vector-add every row, reduce ONCE at the band's
         // last inner row.
-        let (mut be_m, mut be_wdn, mut be_wdd, mut be_wbn, mut be_wbd) =
+        let (mut _be_m, mut _be_wdn, mut _be_wdd, mut _be_wbn, mut _be_wbd) =
             (0.0f32, 0.0f32, 0.0f32, 0.0f32, 0.0f32);
 
         for i in 0..diam {
@@ -2963,41 +2335,13 @@ fn fused_vblur_ssim_inner_v3(
                 }
 
                 // === Free raw moments (`raw_moments`) — scalar tail ===
-                if free.raw_moments {
-                    raw_moments_accumulate_scalar(
-                        &mut fm_s, &mut fm_d, &mut fm_s2, &mut fm_d2, &mut fm_dd, &mut fm_ds, sv,
-                        dv,
-                    );
-                    if y + 1 == inner_end {
-                        raw_moments_finish_scalar(&mut acc, fm_s, fm_d, fm_s2, fm_d2, fm_dd, fm_ds);
-                    }
-                }
 
-                // === Free BOUNDED ERROR (`free.bounded_err` / `lum_bins`) ===
+                // === Free BOUNDED ERROR (`false` / `lum_bins`) ===
                 // `pd` is the same register the `acc.mse` line above just
                 // used; `s` is this channel's source row, which for the Y
                 // channel IS the reference-luma plane the bins weight by.
                 // No new plane, no new load, no new pass (class C — see the
                 // helper block at the top of this module).
-                if free.bounded_err {
-                    let be_i = bounded_err_accumulate_scalar(&mut be_m, pd);
-                    if free.lum_bins {
-                        lum_bins_accumulate_scalar(
-                            &mut be_wdn,
-                            &mut be_wdd,
-                            &mut be_wbn,
-                            &mut be_wbd,
-                            sv,
-                            be_i,
-                        );
-                    }
-                    if y + 1 == inner_end {
-                        bounded_err_finish_scalar(&mut acc, be_m);
-                        if free.lum_bins {
-                            lum_bins_finish_scalar(&mut acc, be_wdn, be_wdd, be_wbn, be_wbd);
-                        }
-                    }
-                }
             }
 
             let add_idx = vblur_add_idx(y, r, height);
@@ -3077,20 +2421,20 @@ fn fused_vblur_ssim_inner(
         // Free raw moments: one lane accumulator per column group, reduced
         // at the band's last inner row (see `raw_moments`). Dead code when
         // the caller did not ask.
-        let (mut fm_s, mut fm_d, mut fm_s2, mut fm_d2) = (
+        let (mut _fm_s, mut _fm_d, mut _fm_s2, mut _fm_d2) = (
             f32x8::zero_t(token),
             f32x8::zero_t(token),
             f32x8::zero_t(token),
             f32x8::zero_t(token),
         );
         // Revision 2\'s paired second moment (see `raw_moments_accumulate16`).
-        let mut fm_dd = f32x8::zero_t(token);
-        let mut fm_ds = f32x8::zero_t(token);
-        // Free bounded-error lane accumulators (`free.bounded_err` /
-        // `free.lum_bins`) — same band-batched shape and rationale as
+        let mut _fm_dd = f32x8::zero_t(token);
+        let mut _fm_ds = f32x8::zero_t(token);
+        // Free bounded-error lane accumulators (`false` /
+        // `false`) — same band-batched shape and rationale as
         // `fm_*` above: vector-add every row, reduce ONCE at the band's
         // last inner row.
-        let (mut be_m, mut be_wdn, mut be_wdd, mut be_wbn, mut be_wbd) = (
+        let (mut _be_m, mut _be_wdn, mut _be_wdd, mut _be_wbn, mut _be_wbd) = (
             f32x8::zero_t(token),
             f32x8::zero_t(token),
             f32x8::zero_t(token),
@@ -3233,41 +2577,13 @@ fn fused_vblur_ssim_inner(
                 // the 944 append block is 5.35e-6 (was 4.62e-6 pre-batch),
                 // ~2 orders below the module's 5e-4 tolerance
                 // (`free_extras_match_the_944_append_block`).
-                if free.raw_moments {
-                    raw_moments_accumulate8(
-                        &mut fm_s, &mut fm_d, &mut fm_s2, &mut fm_d2, &mut fm_dd, &mut fm_ds, s, d,
-                    );
-                    if y + 1 == inner_end {
-                        raw_moments_finish8(&mut acc, fm_s, fm_d, fm_s2, fm_d2, fm_dd, fm_ds);
-                    }
-                }
 
-                // === Free BOUNDED ERROR (`free.bounded_err` / `lum_bins`) ===
+                // === Free BOUNDED ERROR (`false` / `lum_bins`) ===
                 // `pd` is the same register the `acc.mse` line above just
                 // used; `s` is this channel's source row, which for the Y
                 // channel IS the reference-luma plane the bins weight by.
                 // No new plane, no new load, no new pass (class C — see the
                 // helper block at the top of this module).
-                if free.bounded_err {
-                    let be_i = bounded_err_accumulate8(token, &mut be_m, pd);
-                    if free.lum_bins {
-                        lum_bins_accumulate8(
-                            token,
-                            &mut be_wdn,
-                            &mut be_wdd,
-                            &mut be_wbn,
-                            &mut be_wbd,
-                            s,
-                            be_i,
-                        );
-                    }
-                    if y + 1 == inner_end {
-                        bounded_err_finish8(&mut acc, be_m);
-                        if free.lum_bins {
-                            lum_bins_finish8(&mut acc, be_wdn, be_wdd, be_wbn, be_wbd);
-                        }
-                    }
-                }
             }
 
             // Slide V-blur window
@@ -3313,16 +2629,14 @@ fn fused_vblur_ssim_inner(
         // Free raw moments: one lane accumulator per column group, reduced
         // at the band's last inner row (see `raw_moments`). Dead code when
         // the caller did not ask.
-        let (mut fm_s, mut fm_d, mut fm_s2, mut fm_d2) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+        let (mut _fm_s, mut _fm_d, mut _fm_s2, mut _fm_d2) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
         // Revision 2's paired second moment and first difference (see
         // `raw_moments_accumulate16`).
-        let mut fm_dd = 0.0f32;
-        let mut fm_ds = 0.0f32;
-        // Free bounded-error lane accumulators (`free.bounded_err` /
-        // `free.lum_bins`) — same band-batched shape and rationale as
+        // Free bounded-error lane accumulators (`false` /
+        // `false`) — same band-batched shape and rationale as
         // `fm_*` above: vector-add every row, reduce ONCE at the band's
         // last inner row.
-        let (mut be_m, mut be_wdn, mut be_wdd, mut be_wbn, mut be_wbd) =
+        let (mut _be_m, mut _be_wdn, mut _be_wdd, mut _be_wbn, mut _be_wbd) =
             (0.0f32, 0.0f32, 0.0f32, 0.0f32, 0.0f32);
 
         for i in 0..diam {
@@ -3420,41 +2734,13 @@ fn fused_vblur_ssim_inner(
                 }
 
                 // === Free raw moments (`raw_moments`) — scalar tail ===
-                if free.raw_moments {
-                    raw_moments_accumulate_scalar(
-                        &mut fm_s, &mut fm_d, &mut fm_s2, &mut fm_d2, &mut fm_dd, &mut fm_ds, sv,
-                        dv,
-                    );
-                    if y + 1 == inner_end {
-                        raw_moments_finish_scalar(&mut acc, fm_s, fm_d, fm_s2, fm_d2, fm_dd, fm_ds);
-                    }
-                }
 
-                // === Free BOUNDED ERROR (`free.bounded_err` / `lum_bins`) ===
+                // === Free BOUNDED ERROR (`false` / `lum_bins`) ===
                 // `pd` is the same register the `acc.mse` line above just
                 // used; `s` is this channel's source row, which for the Y
                 // channel IS the reference-luma plane the bins weight by.
                 // No new plane, no new load, no new pass (class C — see the
                 // helper block at the top of this module).
-                if free.bounded_err {
-                    let be_i = bounded_err_accumulate_scalar(&mut be_m, pd);
-                    if free.lum_bins {
-                        lum_bins_accumulate_scalar(
-                            &mut be_wdn,
-                            &mut be_wdd,
-                            &mut be_wbn,
-                            &mut be_wbd,
-                            sv,
-                            be_i,
-                        );
-                    }
-                    if y + 1 == inner_end {
-                        bounded_err_finish_scalar(&mut acc, be_m);
-                        if free.lum_bins {
-                            lum_bins_finish_scalar(&mut acc, be_wdn, be_wdd, be_wbn, be_wbd);
-                        }
-                    }
-                }
             }
 
             let add_idx = vblur_add_idx(y, r, height);
@@ -4436,25 +3722,6 @@ impl<P: crate::featcanon::Pool> VblurPools<P> {
     }
 }
 
-/// The band-lifetime accumulators (raw moments + bounded error + luma bins):
-/// production vector-adds into per-column-group lanes and reduces once at the
-/// band's last inner row; the canonical shape keeps that one-reduce-per-band
-/// lifetime over canonical lanes.
-#[derive(Clone, Copy)]
-struct BandPools<P: Copy> {
-    fm_s: P,
-    fm_d: P,
-    fm_s2: P,
-    fm_d2: P,
-    fm_dd: P,
-    fm_ds: P,
-    be_m: P,
-    wd_num: P,
-    wd_den: P,
-    wb_num: P,
-    wb_den: P,
-}
-
 impl VblurPools<crate::featcanon::Lanes16F32> {
     /// Revision 7: fold the f32 row lanes into `row` and clear them
     /// (`crate::featcanon::Lanes16F32::fold_into`). The `hf_*_dst` lanes hold
@@ -4533,24 +3800,6 @@ impl VblurPools<crate::featcanon::Lanes16F32> {
                 self.iw_det4.fold_into(&mut row.iw_det4);
                 self.iw_mse.fold_into(&mut row.iw_mse);
             }
-        }
-    }
-}
-
-impl<P: crate::featcanon::Pool> BandPools<P> {
-    fn zero() -> Self {
-        Self {
-            fm_s: P::zero(),
-            fm_d: P::zero(),
-            fm_s2: P::zero(),
-            fm_d2: P::zero(),
-            fm_dd: P::zero(),
-            fm_ds: P::zero(),
-            be_m: P::zero(),
-            wd_num: P::zero(),
-            wd_den: P::zero(),
-            wb_num: P::zero(),
-            wb_den: P::zero(),
         }
     }
 }
@@ -4880,7 +4129,6 @@ fn vblur_ssim_elem_canon<P: crate::featcanon::Pool>(
     row: &mut VblurPools<P>,
     // Revision 7: where the f32-lane pools add (`None`: `row`, f64).
     mut row32: Option<&mut VblurPools<crate::featcanon::Lanes16F32>>,
-    band: &mut BandPools<P>,
     acc: &mut StripChannelAccum,
 ) {
     let lane = x & (P::LANES - 1);
@@ -5009,32 +4257,7 @@ fn vblur_ssim_elem_canon<P: crate::featcanon::Pool>(
     }
 
     // Free raw moments — band-lifetime canonical lanes.
-    if free.raw_moments {
-        band.fm_s.add(lane, s);
-        band.fm_d.add(lane, d);
-        band.fm_s2.add(lane, s * s);
-        band.fm_d2.add(lane, d * d);
-        let df = d - s;
-        band.fm_dd.add(lane, df * (d + s));
-        band.fm_ds.add(lane, df);
-    }
     // Free bounded error + luminance bins.
-    if free.bounded_err {
-        let sqm = (pd * pd).max(0.0);
-        let be_i = sqm / (sqm + C_MSE_F32);
-        band.be_m.add(lane, be_i);
-        if free.lum_bins {
-            let ry = s.max(0.0);
-            let t = ry / (ry + C_LUM_T_F32);
-            let one_mt = 1.0 - t;
-            let wd = one_mt * one_mt;
-            let wb = t * t;
-            band.wd_num.add(lane, wd * be_i);
-            band.wd_den.add(lane, wd);
-            band.wb_num.add(lane, wb * be_i);
-            band.wb_den.add(lane, wb);
-        }
-    }
 }
 
 /// Canonical (candidate-arithmetic) fused V-blur + SSIM/edge/HF/MSE feature
@@ -5094,7 +4317,6 @@ fn fused_vblur_ssim_canon<P: crate::featcanon::Pool>(
     );
 
     let mut acc = StripChannelAccum::zero();
-    let mut band = BandPools::<P>::zero();
 
     for y in 0..height {
         if y >= inner_start && y < inner_end {
@@ -5129,7 +4351,6 @@ fn fused_vblur_ssim_canon<P: crate::featcanon::Pool>(
                     s12_out,
                     &mut row,
                     None,
-                    &mut band,
                     &mut acc,
                 );
             }
@@ -5170,25 +4391,6 @@ fn fused_vblur_ssim_canon<P: crate::featcanon::Pool>(
                     acc.iw_art4 += row.iw_art4.fin();
                     acc.iw_det4 += row.iw_det4.fin();
                     acc.iw_mse += row.iw_mse.fin();
-                }
-            }
-            if y + 1 == inner_end {
-                if free.raw_moments {
-                    acc.sum_s += band.fm_s.fin();
-                    acc.sum_d += band.fm_d.fin();
-                    acc.sum_s2 += band.fm_s2.fin();
-                    acc.sum_d2 += band.fm_d2.fin();
-                    acc.sum_dd += band.fm_dd.fin();
-                    acc.sum_ds += band.fm_ds.fin();
-                }
-                if free.bounded_err {
-                    acc.sum_msat += band.be_m.fin();
-                    if free.lum_bins {
-                        acc.lum_wd_num += band.wd_num.fin();
-                        acc.lum_wd_den += band.wd_den.fin();
-                        acc.lum_wb_num += band.wb_num.fin();
-                        acc.lum_wb_den += band.wb_den.fin();
-                    }
                 }
             }
         }
@@ -5263,7 +4465,6 @@ fn fused_vblur_ssim_local<P: crate::featcanon::Pool>(
     let has_act = !planes.act.is_empty();
 
     let mut acc = StripChannelAccum::zero();
-    let mut band = BandPools::<P>::zero();
     let mut t_stack = [0.0f32; 33];
     let mut t_heap;
     let t = if diam <= 33 {
@@ -5348,7 +4549,6 @@ fn fused_vblur_ssim_local<P: crate::featcanon::Pool>(
                 } else {
                     None
                 },
-                &mut band,
                 &mut acc,
             );
             if rev7
@@ -5362,27 +4562,8 @@ fn fused_vblur_ssim_local<P: crate::featcanon::Pool>(
         if !rev7 {
             row.finish_into(&mut acc, free, ext);
         }
-        if y + 1 == inner_end {
-            if rev7 {
-                call_row.finish_into(&mut acc, free, ext);
-            }
-            if free.raw_moments {
-                acc.sum_s += band.fm_s.fin();
-                acc.sum_d += band.fm_d.fin();
-                acc.sum_s2 += band.fm_s2.fin();
-                acc.sum_d2 += band.fm_d2.fin();
-                acc.sum_dd += band.fm_dd.fin();
-                acc.sum_ds += band.fm_ds.fin();
-            }
-            if free.bounded_err {
-                acc.sum_msat += band.be_m.fin();
-                if free.lum_bins {
-                    acc.lum_wd_num += band.wd_num.fin();
-                    acc.lum_wd_den += band.wd_den.fin();
-                    acc.lum_wb_num += band.wb_num.fin();
-                    acc.lum_wb_den += band.wb_den.fin();
-                }
-            }
+        if y + 1 == inner_end && rev7 {
+            call_row.finish_into(&mut acc, free, ext);
         }
     }
 
@@ -5476,7 +4657,6 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
     let km = f32x8::splat_t(token, ext.k_mask);
     let kiw = f32x8::splat_t(token, ext.k_iw);
     let mut acc = StripChannelAccum::zero();
-    let mut band = BandPools::<P>::zero();
     let full = width / 8;
     // One slice construction per plane: every `base + x` / `x0 + 8` index
     // below is then statically `< height * width` or `<= full * 8`, so the
@@ -5630,7 +4810,7 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
             macro_rules! chunk {
                 ($vt:ident, $w:literal, $splats:expr, $consts:expr, $add:ident, $add64:ident, $window:ident, $x0:expr) => {{
                     let x0: usize = $x0;
-                    let (one, zero, c_mse, c_lumt, km, kiw) = $consts;
+                    let (one, zero, _c_mse, _c_lumt, km, kiw) = $consts;
                     let m1v = $window!(planes.m1, wm1, tm1, x0);
                     let m2v = $window!(planes.m2, wm2, tm2, x0);
                     let ssqv = $window!(planes.sq, wsq, tsq, x0);
@@ -5764,32 +4944,7 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
                     }
 
                     // Free raw moments — band-lifetime canonical lanes.
-                    if free.raw_moments {
-                        $add64!(band, fm_s, x0, sv);
-                        $add64!(band, fm_d, x0, dv);
-                        $add64!(band, fm_s2, x0, sv * sv);
-                        $add64!(band, fm_d2, x0, dv * dv);
-                        let df = dv - sv;
-                        $add64!(band, fm_dd, x0, df * (dv + sv));
-                        $add64!(band, fm_ds, x0, df);
-                    }
                     // Free bounded error + luminance bins.
-                    if free.bounded_err {
-                        let sqm = (pd * pd).max(zero);
-                        let be_i = sqm / (sqm + c_mse);
-                        $add64!(band, be_m, x0, be_i);
-                        if free.lum_bins {
-                            let ry = sv.max(zero);
-                            let t = ry / (ry + c_lumt);
-                            let omt = one - t;
-                            let wd = omt * omt;
-                            let wb = t * t;
-                            $add64!(band, wd_num, x0, wd * be_i);
-                            $add64!(band, wd_den, x0, wd);
-                            $add64!(band, wb_num, x0, wb * be_i);
-                            $add64!(band, wb_den, x0, wb);
-                        }
-                    }
                     if rev7 && (x0 + $w).is_multiple_of(crate::featcanon::ROW_LANES_FOLD) {
                         row32.fold_into(&mut *row, free, ext);
                     }
@@ -5804,8 +4959,6 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
                 && !free.local_only
                 && free.omit_peaks
                 && !free.omit_edges
-                && !free.raw_moments
-                && !free.bounded_err
                 && !ext.on
                 && !store_sd
                 && !store_mu
@@ -6062,7 +5215,6 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
                     s12_out,
                     &mut *row,
                     None,
-                    &mut band,
                     &mut acc,
                 );
             }
@@ -6071,27 +5223,8 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
             if !rev7 {
                 row.finish_into(&mut acc, free, ext);
             }
-            if y + 1 == inner_end {
-                if rev7 {
-                    call_row.finish_into(&mut acc, free, ext);
-                }
-                if free.raw_moments {
-                    acc.sum_s += band.fm_s.fin();
-                    acc.sum_d += band.fm_d.fin();
-                    acc.sum_s2 += band.fm_s2.fin();
-                    acc.sum_d2 += band.fm_d2.fin();
-                    acc.sum_dd += band.fm_dd.fin();
-                    acc.sum_ds += band.fm_ds.fin();
-                }
-                if free.bounded_err {
-                    acc.sum_msat += band.be_m.fin();
-                    if free.lum_bins {
-                        acc.lum_wd_num += band.wd_num.fin();
-                        acc.lum_wd_den += band.wd_den.fin();
-                        acc.lum_wb_num += band.wb_num.fin();
-                        acc.lum_wb_den += band.wb_den.fin();
-                    }
-                }
+            if y + 1 == inner_end && rev7 {
+                call_row.finish_into(&mut acc, free, ext);
             }
         }
 
@@ -6818,17 +5951,6 @@ mod tests {
                 a.ssim_d8,
                 a.edge_art8,
                 a.edge_det8,
-                a.sum_s,
-                a.sum_d,
-                a.sum_s2,
-                a.sum_d2,
-                a.sum_dd,
-                a.sum_ds,
-                a.sum_msat,
-                a.lum_wd_num,
-                a.lum_wd_den,
-                a.lum_wb_num,
-                a.lum_wb_den,
                 a.masked_ssim_d,
                 a.masked_ssim_d4,
                 a.masked_ssim_d2,
@@ -6870,27 +5992,18 @@ mod tests {
                 local_only: false,
                 omit_peaks: false,
                 omit_edges: false,
-                raw_moments: true,
-                bounded_err: true,
-                lum_bins: true,
             };
             let free_none = FreeExtrasWork {
                 revision: None,
                 local_only: true,
                 omit_peaks: false,
                 omit_edges: true,
-                raw_moments: false,
-                bounded_err: false,
-                lum_bins: false,
             };
             let free_mix = FreeExtrasWork {
                 revision: None,
                 local_only: false,
                 omit_peaks: false,
                 omit_edges: false,
-                raw_moments: false,
-                bounded_err: true,
-                lum_bins: false,
             };
             let ext_off = ExtPoolsWork {
                 on: false,
@@ -7290,9 +6403,6 @@ mod tests {
                 local_only: false,
                 omit_peaks: true,
                 omit_edges: false,
-                raw_moments: false,
-                bounded_err: false,
-                lum_bins: false,
             };
             let ext = ExtPoolsWork::default();
             type P = crate::featcanon::Lanes16F64;

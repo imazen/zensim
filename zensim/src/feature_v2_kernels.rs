@@ -477,6 +477,8 @@ pub use crate::feature_defs::FormulaRevision;
 /// feature blows the budget, keep it OFF by default and say so").
 #[derive(Debug, Clone, Copy)]
 pub struct V2NewFeatureToggles {
+    /// Preserve the plan's reference-only feature selection.
+    pub(crate) omit_pjnd_fragility: bool,
     pub gradient_features: bool,
     pub transducer_bank: bool,
     pub blockiness: bool,
@@ -568,13 +570,7 @@ pub struct V2NewFeatureToggles {
     /// lever can be measured and shipped independently of it.
     #[doc(hidden)]
     pub v1_only: bool,
-    /// FREE-EXTRAS (2026-09-01): emit the v2-era slots that a v1-only walk
-    /// can produce for free — see [`V1FreeExtras`]. `#[doc(hidden)] pub` for
-    /// the same reason [`Self::v1_only`] is: this struct is constructed
-    /// out-of-crate with `..Default::default()`, which requires every field
-    /// to be visible.
-    #[doc(hidden)]
-    pub free_extras: V1FreeExtras,
+
 }
 
 /// Which of v1's pool slots (`f156..372`) the folded walk emits live.
@@ -609,141 +605,6 @@ impl V1PoolsMode {
     pub const CARRIER_SLOTS: [usize; 10] = [178, 190, 196, 226, 231, 237, 243, 303, 321, 333];
 }
 
-/// Which v2-era slots a **v1-only** walk emits from byproducts the v1 fused
-/// kernel can carry without a new plane, a new load or a new pass.
-///
-/// The classification behind this type is
-/// `benchmarks/free_features_2026-09-01.md`. Read from source: of the 788
-/// slots above `f156`, exactly **40** are a function of the RAW `src`/`dst`
-/// planes alone — every other one needs either the V-blurred moment planes
-/// (which a v1 band computes at a DIFFERENT accumulation origin than phase A,
-/// so its value would not be the 944 table's value), the ref-side activity
-/// plane, the `bs2` σ-split plane, or a neighbour stencil. Those 40 are the
-/// three `GLOBAL_*` append slots and append2's `LUMA_MEAN_REF`, and all four
-/// finalize from the same four sums.
-///
-/// This is a COMPUTE-SET selector at a FIXED layout, exactly like
-/// [`V1PoolsMode`]: the emitted vector keeps the requesting regime's width
-/// and every other slot stays at its structural 0.0. Rows extracted with it
-/// ON are their own regime — never column-mix them with `Off` rows, whose
-/// `GLOBAL_*` are structural zeros rather than values.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum V1FreeExtras {
-    /// Nothing extra. The fused kernel runs the identical instruction
-    /// sequence it ran before this type existed.
-    #[default]
-    Off,
-    /// Accumulate Σsrc, Σdst, Σsrc², Σdst² in the fused kernel and finalize
-    /// `GLOBAL_DMEAN` / `GLOBAL_CGAIN` / `GLOBAL_CLOSS` (`f720+`, 3 per
-    /// (scale, channel), minus the `APPEND_SKIP_B_SCALE0` cell the 944 walk
-    /// also skips) and `LUMA_MEAN_REF` (`f924+`, one per scale, Y-only).
-    ///
-    /// Only writes slots whose OWNING block is not running: with the append
-    /// block on, the append kernel owns `GLOBAL_*` and this writes nothing
-    /// there. So a full 944 walk is unaffected whatever this is set to.
-    RawMoments,
-    /// [`Self::RawMoments`] PLUS the class-C **bounded-error** tranche —
-    /// a strict superset, so a request for this carries the raw moments too.
-    ///
-    /// Adds `Σ sat((s−d)², C_MSE)` on every channel and, on the Y channel
-    /// only, the dark/bright Bernstein-weighted sums of that same per-pixel
-    /// value. Those finalize:
-    ///
-    /// * the v2-348 `MSE` slot, 12 (scale, channel) cells;
-    /// * the append block's `LUM_DARK_ERR` / `LUM_MID_ERR` /
-    ///   `LUM_BRIGHT_ERR` trio at the Y channel, 4 scales = 12 slots
-    ///   (`LUM_MID_ERR` DERIVED from the partition of unity exactly as
-    ///   [`finish_append`] derives it).
-    ///
-    /// **Y only for the bins, by construction, not by choice.** The weight
-    /// is `sat(ref_Y, C_LUM_T)`, and the Y channel's own `src` plane IS the
-    /// reference luma — so on Y the value rides registers the walk already
-    /// holds. On X/B the same slots would need the ref-Y plane streamed
-    /// into a per-channel kernel: no new *compute*, but a new *load stream*,
-    /// which is outside the class-C ("no new plane, load or pass")
-    /// definition. Those 21 slots stay at their structural zeros; see
-    /// `benchmarks/free_features_classC_2026-09-04.md` §4.
-    ///
-    /// No slot is renumbered or invented: every one of the 24 is an existing
-    /// 944-layout position, filled by a cheaper route.
-    RawMomentsPlusBoundedErr,
-}
-
-/// Indices of the 40 FREE slots ([`V1FreeExtras::RawMoments`]) in the 944
-/// layout, for an `n_scales`-scale pyramid: the three `GLOBAL_*` append
-/// slots per (scale, channel) plus append2's per-scale `LUMA_MEAN_REF`. The
-/// `APPEND_SKIP_B_SCALE0` cell is excluded — the 944 walk never computes
-/// that append cell, so its slots are structural zeros on BOTH sides and
-/// including them would make a parity gate weaker, not stronger.
-///
-/// Shared by the registered feature definitions and free-accumulator gates.
-pub(crate) fn free_slot_indices(n_scales: usize) -> Vec<usize> {
-    // v1 (31/ch/scale) ++ v2 (29) ++ append (17) ++ append2 (5/scale).
-    let append0 = n_scales * 3 * (31 + FEATURES_PER_CHANNEL_V2_TOTAL);
-    let append2_0 = append0 + n_scales * 3 * FEATURES_PER_CHANNEL_APPEND;
-    let mut v = Vec::new();
-    for scale in 0..n_scales {
-        for ch in 0..3 {
-            if !append_cell_active(true, ch, scale) {
-                continue;
-            }
-            let base = append0
-                + scale * 3 * FEATURES_PER_CHANNEL_APPEND
-                + ch * FEATURES_PER_CHANNEL_APPEND;
-            for local in [
-                idx_append::GLOBAL_DMEAN,
-                idx_append::GLOBAL_CGAIN,
-                idx_append::GLOBAL_CLOSS,
-            ] {
-                v.push(base + local);
-            }
-        }
-        v.push(append2_0 + scale * APPEND2_PER_SCALE + idx_append2::LUMA_MEAN_REF);
-    }
-    v
-}
-
-/// Indices of the 24 CLASS-C slots
-/// ([`V1FreeExtras::RawMomentsPlusBoundedErr`]'s addition over
-/// [`V1FreeExtras::RawMoments`]) in the 944 layout: the v2-348 `MSE` slot
-/// per (scale, channel), plus the append block's three luminance-binned
-/// error slots at the Y channel only.
-///
-/// Same contract as [`free_slot_indices`] — ONE derivation, reused by the
-/// gate tests and by [`crate::feature_plan::Plan::for_bake`], never
-/// re-typed as a literal list.
-pub(crate) fn class_c_slot_indices(n_scales: usize) -> Vec<usize> {
-    let v1_total = n_scales * 3 * 31;
-    let append0 = v1_total + n_scales * 3 * FEATURES_PER_CHANNEL_V2_TOTAL;
-    let mut v = Vec::new();
-    for scale in 0..n_scales {
-        for ch in 0..3 {
-            v.push(
-                v1_total
-                    + scale * 3 * FEATURES_PER_CHANNEL_V2_TOTAL
-                    + ch * FEATURES_PER_CHANNEL_V2_TOTAL
-                    + idx::MSE,
-            );
-        }
-        // Luminance bins: Y channel only (the register-carry constraint —
-        // see `V1FreeExtras::RawMomentsPlusBoundedErr`), and only where the
-        // 944 walk itself computes the append cell.
-        let ch = APPEND2_CHANNEL;
-        if append_cell_active(true, ch, scale) {
-            let base = append0
-                + scale * 3 * FEATURES_PER_CHANNEL_APPEND
-                + ch * FEATURES_PER_CHANNEL_APPEND;
-            for local in [
-                idx_append::LUM_DARK_ERR,
-                idx_append::LUM_MID_ERR,
-                idx_append::LUM_BRIGHT_ERR,
-            ] {
-                v.push(base + local);
-            }
-        }
-    }
-    v
-}
 impl V2NewFeatureToggles {
 
 }
@@ -751,6 +612,7 @@ impl V2NewFeatureToggles {
 impl Default for V2NewFeatureToggles {
     fn default() -> Self {
         Self {
+            omit_pjnd_fragility: false,
             gradient_features: true,
             transducer_bank: true,
             blockiness: true,
@@ -758,7 +620,6 @@ impl Default for V2NewFeatureToggles {
             formula_revision: crate::ssim_form::active_revision(),
             v1_pools: V1PoolsMode::Off,
             v1_only: false,
-            free_extras: V1FreeExtras::Off,
         }
     }
 }
@@ -912,10 +773,7 @@ pub(crate) struct ComputeSet {
     pub transducers_luma_only: bool,
     /// Declared plans may omit the reference-only PJND fragility finalizer.
     pub omit_pjnd_fragility: bool,
-    /// The free v2-era slots a v1-only walk emits ([`V1FreeExtras`]). Held
-    /// here rather than re-read from the toggles at each site, so
-    /// `raw_moments` has ONE derivation.
-    pub free_extras: V1FreeExtras,
+
 }
 
 impl ComputeSet {
@@ -933,11 +791,6 @@ impl ComputeSet {
                 V1PoolsMode::Off
             } else {
                 self.pools_at(scale)
-            },
-            free_extras: if dead {
-                V1FreeExtras::Off
-            } else {
-                self.free_extras
             },
             v2_blocks: self.v2_blocks && live,
             gradient: self.gradient && live,
@@ -986,8 +839,7 @@ impl ComputeSet {
             blockiness: t.blockiness && v2_blocks,
             transducer_bank: t.transducer_bank,
             transducers_luma_only: t.transducers_luma_only,
-            omit_pjnd_fragility: false,
-            free_extras: t.free_extras,
+            omit_pjnd_fragility: t.omit_pjnd_fragility,
         };
         set.rev5_scope();
         set
@@ -1022,30 +874,6 @@ impl ComputeSet {
             self.v1_pools = V1PoolsMode::Peaks;
         }
         self.v1_full_scales = Self::ALL_SCALES;
-        self.free_extras = V1FreeExtras::Off;
-    }
-
-    /// Does the v1 fused kernel need to carry the four raw moments?
-    ///
-    /// Only when something will READ them: the free-extras request is on AND
-    /// at least one owning block is off (with `append` on, the append kernel
-    /// owns `GLOBAL_*`; with `append2` on it owns `LUMA_MEAN_REF`). So a full
-    /// 944 walk never pays for this however the toggle is set.
-    pub(crate) fn raw_moments(&self) -> bool {
-        self.free_extras != V1FreeExtras::Off
-    }
-
-    /// Does the v1 fused kernel need to carry the class-C bounded per-pixel
-    /// error `Σ sat((s−d)², C_MSE)`?
-    ///
-    /// Only when something will READ it: the request asks for the
-    /// bounded-error tranche AND at least one owning block is off — the v2
-    /// dense kernel owns the `MSE` slot, the append kernel owns the
-    /// luminance bins that weight the same per-pixel value. A full 944 walk
-    /// never pays for this however the toggle is set, exactly like
-    /// [`Self::raw_moments`].
-    pub(crate) fn bounded_err(&self) -> bool {
-        self.free_extras == V1FreeExtras::RawMomentsPlusBoundedErr
     }
 
     /// The per-channel free-extras work order handed to the fused kernel.
@@ -1057,16 +885,12 @@ impl ComputeSet {
         if self.formula_revision >= FormulaRevision::Rev5 && scale == 0 && ch != 1 {
             // Count actual scale-zero chroma consumers, regardless of plan intent.
         }
-        let bounded_err = self.bounded_err();
         crate::fused::FreeExtrasWork {
             revision: Some(self.formula_revision),
             omit_peaks: self.formula_revision >= FormulaRevision::Rev5
                 && self.v1_pools == V1PoolsMode::Off,
             local_only: self.local_only,
             omit_edges: self.omit_edges,
-            raw_moments: self.raw_moments(),
-            bounded_err,
-            lum_bins: bounded_err && ch == APPEND2_CHANNEL,
         }
     }
 
@@ -1145,7 +969,6 @@ impl ComputeSet {
         let v2_end = v1_total + n_scales * 3 * FEATURES_PER_CHANNEL_V2_TOTAL;
 
         let mut ranges: Vec<(usize, usize)> = Vec::new();
-        let mut scattered: Vec<usize> = Vec::new();
         if self.v1_basic {
             ranges.push((0, basic));
         }
@@ -1157,14 +980,7 @@ impl ComputeSet {
         if self.v2_blocks {
             ranges.push((v1_total, v2_end));
         }
-        if self.raw_moments() {
-            scattered.extend(free_slot_indices(n_scales));
-        }
-        if self.bounded_err() {
-            scattered.extend(class_c_slot_indices(n_scales));
-        }
         let slots = SlotSet::from_ranges(ranges)
-            .union(&SlotSet::from_slots(scattered))
             .clipped_to(layout_width);
         SlotSet::from_slots(slots.iter_slots().filter(|&id| {
             self.computes_edge_width_change(id, n_scales)
@@ -1216,7 +1032,6 @@ impl ComputeSet {
     /// the complete walk until their dependencies have their own plan.
     pub(crate) fn allows_full_res_y_subset(&self) -> bool {
         (!self.v2_blocks || self.v2_scales & 1 == 0 || self.chroma_local_families())
-            && self.free_extras == V1FreeExtras::Off
             && matches!(
                 self.v1_pools,
                 V1PoolsMode::Off | V1PoolsMode::Peaks | V1PoolsMode::Full
@@ -3446,82 +3261,4 @@ struct CsfwAccum {
 }
 
 impl CsfwAccum {
-}
-
-/// Finalize one channel-scale's append block into its 17 output slots.
-/// `dense`/`grad` supply the first moments matching `app`'s second moments
-/// (identical per-pixel values by construction — see [`AppendAccum`]).
-/// The three `GLOBAL_*` append slots, from the four raw moments — the ONE
-/// implementation, shared by [`finish_append`] (which reads the moments off
-/// the append kernel) and the free-extras finalize (which reads the
-/// BIT-SAME-DEFINITION moments off the v1 fused kernel). Sharing it is what
-/// makes `free_extras_match_append_block` a gate on the ACCUMULATION rather
-/// than a comparison of two hand-copied formulas.
-///
-/// Returns `(GLOBAL_DMEAN, g_cgain, g_closs)`; the caller applies its own
-/// clamp to the pair, exactly as before.
-#[inline]
-fn global_stats_from_raw_moments(
-    sum_s: f64,
-    sum_d: f64,
-    sum_s2: f64,
-    sum_d2: f64,
-    sum_dd: f64,
-    sum_ds: f64,
-    n_f: f64,
-    paired: bool,
-) -> (f64, f64, f64) {
-    let dmean = saturate((sum_s - sum_d).abs() / n_f, C_GDMEAN);
-    let gmean_s = sum_s / n_f;
-    let gmean_d = sum_d / n_f;
-    let gvar1 = (sum_s2 / n_f - gmean_s * gmean_s).max(0.0);
-    let gvar2 = (sum_d2 / n_f - gmean_d * gmean_d).max(0.0);
-    if paired {
-        // REVISION 2 (`freecomp`). `bounded_excess_pair` needs the DIFFERENCE
-        // `gvar2 - gvar1` and the SUM `gvar1 + gvar2`. Only the difference is
-        // ill-conditioned, and only because each variance is itself
-        // `sum(x^2)/n - mean^2` — so the difference of two variances is a
-        // difference of differences of large nearly-equal numbers.
-        //
-        // Reassociating removes the amplifier exactly:
-        //     gvar2 - gvar1 = [sum(d^2) - sum(s^2)]/n - (md^2 - ms^2)
-        //                   = sum((d-s)(d+s))/n - (md - ms)(md + ms)
-        // Both terms are now O(distortion) rather than O(mean^2), and
-        // `sum_dd` is accumulated per PIXEL so its cancellation happens on one
-        // pixel's small difference instead of between two large totals. The
-        // SUM keeps the raw form: when the variances are small enough for
-        // their error to matter, `C_GCONTRAST` (1e-4) already dominates the
-        // denominator.
-        //
-        // WHY THIS AND NOT THE OBVIOUS TWO, both tried and MEASURED to fail
-        // (`benchmarks/feature_rev2_2026-09-05.md`, 60 real source images,
-        // paired cells, free-vs-append past the 2e-5 bar):
-        //   * matching the append kernel's per-ROW reduction granularity in
-        //     the free walk: 4.47 % -> 3.90 %, worst cell WORSE. The error is
-        //     within one row, not across rows.
-        //   * Kahan-compensating the f32 second moments: compensating the FREE
-        //     route alone made agreement WORSE (4.97 % -> 5.39 %), which is
-        //     what identified the APPEND route as the inaccurate one;
-        //     compensating BOTH still left 9.66 %.
-        // The reason both fail is that they chase precision in `sum(s^2)`
-        // while the amplification is `mean^2/gvar`. With `sum(s^2)` accurate
-        // to one f32 ulp the predicted feature error is
-        // `1.2e-7 * mean^2 / (gvar1+gvar2+C)`, which for a flat region is
-        // ~3e-4 — and the MEASURED worst cell was 3.70e-4. The arithmetic
-        // says no f32 accumulation scheme can fix this; only removing the
-        // amplifier can.
-        //
-        // `GLOBAL_DMEAN` is untouched: it never squares, and it MEASURED
-        // clean (0 of 649 cells past the bar) while `GLOBAL_CGAIN` was 39.8 %
-        // and `GLOBAL_CLOSS` 11.6 %.
-        let diff = sum_dd / n_f - (sum_ds / n_f) * (gmean_d + gmean_s);
-        let recip_denom = 1.0 / (gvar1 + gvar2 + C_GCONTRAST);
-        return (
-            dmean,
-            diff.max(0.0) * recip_denom,
-            (-diff).max(0.0) * recip_denom,
-        );
-    }
-    let (g_cgain, g_closs) = bounded_excess_pair(gvar2, gvar1, C_GCONTRAST);
-    (dmean, g_cgain, g_closs)
 }

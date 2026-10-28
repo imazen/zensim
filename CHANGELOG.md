@@ -30,6 +30,8 @@
 - `PrecomputedReference::width` / `height`; `try_score_from_features` (`training` feature).
 
 #### Changed
+- Remove unused free-feature accumulators. Single-slot MSE plans use the same kernels as full plans,
+  and private feature-selection flags survive plan-to-toggle conversion.
 - Cut from the research repository imazen/zensimx on 2026-10-28; every kept profile scores bit-identically to it on
   the split parity run (`docs/PROFILES.md`).
 - Inputs below 64 px in either dimension are reflect-padded and scored; only empty images are rejected (0.2.7

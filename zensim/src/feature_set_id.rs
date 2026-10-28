@@ -95,12 +95,6 @@ pub enum ComputeToken {
     Append2,
     /// CSFW tier-1, `f944..955`.
     Csfw,
-    /// The free raw-moment tranche (`V1FreeExtras::RawMoments`) — 37 scattered
-    /// slots a v1-only walk finalizes without the v2-era passes.
-    Moments,
-    /// The class-C bounded-error tranche
-    /// (`V1FreeExtras::RawMomentsPlusBoundedErr`) — 24 scattered slots.
-    ClassC,
     /// RESERVED for the future HDR block. Append-only; its enum position
     Hdr,
     /// Rev4 grid-aligned blocking phase profile, `f986..1081`.
@@ -151,8 +145,6 @@ impl ComputeToken {
         ComputeToken::Z1max,
         ComputeToken::Gmsnative,
         ComputeToken::GlobAff,
-        ComputeToken::Moments,
-        ComputeToken::ClassC,
         ComputeToken::Hdr,
     ];
 
@@ -179,8 +171,6 @@ impl ComputeToken {
             ComputeToken::Z1max => "z1max",
             ComputeToken::Gmsnative => "gmsnative",
             ComputeToken::GlobAff => "globaff",
-            ComputeToken::Moments => "moments",
-            ComputeToken::ClassC => "classc",
             ComputeToken::Hdr => "hdr",
         }
     }
@@ -276,13 +266,6 @@ impl fmt::Display for ComputeParts {
         }
         let mut first = true;
         for t in ComputeToken::ALL.iter().copied() {
-            if t == ComputeToken::Moments && self.has_palette() {
-                if !first {
-                    f.write_str("+")?;
-                }
-                f.write_str("palette")?;
-                first = false;
-            }
             if !self.contains(t) {
                 continue;
             }

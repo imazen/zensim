@@ -20,7 +20,7 @@
 
 use crate::feature_layout::Layout;
 use crate::feature_set_id::{ComputeToken, SlotSet};
-use crate::feature_v2::{ComputeSet, V1FreeExtras, V1PoolsMode};
+use crate::feature_v2::{ComputeSet, V1PoolsMode};
 
 /// Why a request cannot be planned.
 ///
@@ -219,22 +219,8 @@ impl Plan {
             V1PoolsMode::Off
         };
 
-        // Does the request touch a block OUTSIDE its free tranche? If not,
-        // the free accumulators serve it and the (expensive) owning kernel
-        // stays off. This applies to the v2 dense block too, not just the
-        // append pair: class C's 24 slots include the v2-348 `MSE` slot at
-        // every (scale, channel), so a `+classC` request TOUCHES the v2 block
-        // while needing none of its kernels.
-        let outside_tranche = |t: ComputeToken| -> bool {
-            let fam = crate::feature_defs::family_slots(t, ns).clipped_to(layout_width);
-            let free = crate::feature_defs::family_slots(ComputeToken::Moments, ns)
-                .union(&crate::feature_defs::family_slots(ComputeToken::ClassC, ns))
-                .clipped_to(layout_width);
-            let touched = fam.intersect(&want);
-            !SlotSet::from_slots(touched.iter_slots().filter(|s| !free.contains(*s))).is_empty()
-        };
-        let append = touches(ComputeToken::Append) && outside_tranche(ComputeToken::Append);
-        let append2 = touches(ComputeToken::Append2) && outside_tranche(ComputeToken::Append2);
+        let append = touches(ComputeToken::Append);
+        let append2 = touches(ComputeToken::Append2);
         // append2 requires append (the block sits at f924+ and reuses append
         // accumulators — `V2NewFeatureToggles::append2_block` asserts it).
         let append = append || append2;
@@ -256,7 +242,7 @@ impl Plan {
         // `csfw_on` is `csfw_block && v2_blocks` in the walk, so a CSFW
         // request implies the v2-era pass regardless of what else is asked.
         // The four Rev4 feature-bank families are `rev4_* && v2_blocks` too.
-        let v2_blocks = (touches(ComputeToken::V2) && outside_tranche(ComputeToken::V2))
+        let v2_blocks = touches(ComputeToken::V2)
             || append
             || append2
             || csfw
@@ -268,15 +254,6 @@ impl Plan {
             || mapdev
             || z1max
             || gmsnative;
-
-        // Free extras: only meaningful when the owning block is NOT running.
-        let free_extras = if touches(ComputeToken::ClassC) && !append {
-            V1FreeExtras::RawMomentsPlusBoundedErr
-        } else if touches(ComputeToken::Moments) && !append {
-            V1FreeExtras::RawMoments
-        } else {
-            V1FreeExtras::Off
-        };
 
         let requested = ComputeSet {
             // A slot-set request carries no bake, so it takes the process's
@@ -301,13 +278,10 @@ impl Plan {
             } else {
                 ComputeSet::ALL_SCALES
             },
-            // Scales the v1 fold must run at: every v1-era read, plus every read of the free tranche (raw moments,
-            // class C), which the v1 fold's accumulators produce at their own scale.
+            // Scales read by v1 features.
             v1_scales: {
-                let free = crate::feature_defs::family_slots(ComputeToken::Moments, ns)
-                    .union(&crate::feature_defs::family_slots(ComputeToken::ClassC, ns));
                 want.iter_slots()
-                    .filter(|&id| id < 372 || free.contains(id))
+                    .filter(|&id| id < 372)
                     .filter_map(|id| crate::feature_defs::def_at(id, ns))
                     .fold(0, |mask, d| mask | (1 << d.scale))
             },
@@ -342,7 +316,6 @@ impl Plan {
                         d.signal.family == ComputeToken::V2 && d.signal.name == "pjnd_fragility"
                     })
                 }),
-            free_extras,
         };
         let mut requested = requested;
         if !requested.v2_blocks {
@@ -361,13 +334,6 @@ impl Plan {
         let basic_peaks_v2_only = kernel_want
             .iter_slots()
             .all(|id| id < peaks_end || (v2_start..v2_end).contains(&id));
-        // With the v2 block running over a request that reads nothing past f719, every class-C slot it touches is the v2
-        // `MSE` slot, which the v2 kernel itself finalizes (the free path writes `MSE` only when `v2_blocks` is off and
-        // the other free slots live in append/append2, which this request does not carry): the free-extras
-        // accumulation would only add v1-kernel work. Turn it off so the channel mask can apply and the walk is cheaper.
-        if requested.v2_blocks && basic_peaks_v2_only && requested.chroma_local_families() {
-            requested.free_extras = V1FreeExtras::Off;
-        }
         if requested.v2_blocks && basic_peaks_v2_only && requested.chroma_local_families() {
             let mut chroma = 0u8;
             for id in kernel_want.iter_slots() {
@@ -475,7 +441,6 @@ impl Plan {
         // the request (it is cheap, but a wide layout must not imply it).
         compute.full_res_xb = requested.full_res_xb || !compute.allows_full_res_y_subset();
         compute.coarse_y_only_scales = if (!compute.v2_blocks || compute.chroma_local_families())
-            && compute.free_extras == V1FreeExtras::Off
             && compute.v1_pools != V1PoolsMode::Full
         {
             requested.coarse_y_only_scales
@@ -608,6 +573,7 @@ impl Plan {
         let c = &self.compute;
         let _layout = LayoutBlocks::for_width(self.layout.walk_width(), ns);
         crate::feature_v2::V2NewFeatureToggles {
+            omit_pjnd_fragility: c.omit_pjnd_fragility,
             // THE revision this walk computes. Forwarded from the plan, so a
             // bake's declared revision reaches the finaliser rather than the
             // process-wide default.
@@ -635,7 +601,6 @@ impl Plan {
             // COMPUTE: `v1_only` turns every v2-era kernel off while leaving
             // the layout flags — and therefore the width — untouched.
             v1_only: !c.v2_blocks,
-            free_extras: c.free_extras,
         }
     }
 
@@ -737,7 +702,6 @@ impl Plan {
             // restrict, so it is on only when both sides ask for it.
             transducers_luma_only: a.transducers_luma_only && b.transducers_luma_only,
             omit_pjnd_fragility: a.omit_pjnd_fragility && b.omit_pjnd_fragility,
-            free_extras: free_union(a.free_extras, b.free_extras),
         };
         let _ = ns;
         // The union is only ever taken over a profile's own bakes, which are
@@ -785,16 +749,6 @@ fn pools_union(a: V1PoolsMode, b: V1PoolsMode) -> V1PoolsMode {
         V1PoolsMode::Off => 0u8,
         V1PoolsMode::Peaks => 2,
         V1PoolsMode::Full => 3,
-    };
-    if rank(a) >= rank(b) { a } else { b }
-}
-
-/// The wider of two free-extras modes.
-fn free_union(a: V1FreeExtras, b: V1FreeExtras) -> V1FreeExtras {
-    let rank = |m: V1FreeExtras| match m {
-        V1FreeExtras::Off => 0u8,
-        V1FreeExtras::RawMoments => 1,
-        V1FreeExtras::RawMomentsPlusBoundedErr => 2,
     };
     if rank(a) >= rank(b) { a } else { b }
 }
@@ -859,28 +813,6 @@ mod tests {
 
     fn slots(r: impl IntoIterator<Item = (usize, usize)>) -> SlotSet {
         SlotSet::from_ranges(r)
-    }
-
-    #[test]
-    #[ignore]
-    fn zz_probe_moments() {
-        let m = crate::feature_defs::family_slots(
-            crate::feature_set_id::ComputeToken::Moments,
-            crate::NUM_SCALES,
-        );
-        println!("moments slots: {m}");
-        let free = SlotSet::from_ranges([(0, 228)]).union(&m).clipped_to(944);
-        println!("free set len {} : {free}", free.len());
-        let in228_300: Vec<usize> = free
-            .iter_slots()
-            .filter(|s| (228..300).contains(s))
-            .collect();
-        let in300_372: Vec<usize> = free
-            .iter_slots()
-            .filter(|s| (300..372).contains(s))
-            .collect();
-        println!("in masked range: {in228_300:?}");
-        println!("in iw range: {in300_372:?}");
     }
 
     /// A basic-only request skips the pool block entirely.
@@ -960,16 +892,12 @@ mod toggle_gates {
     /// prevent.
     #[test]
     fn normalization_is_a_fixed_point() {
-        let ns = crate::NUM_SCALES;
         let cases: [(SlotSet, usize); 5] = [
             (SlotSet::from_ranges([(0, 156)]), 372),
             (SlotSet::from_ranges([(0, 372)]), 372),
             (SlotSet::from_ranges([(0, 228)]), 944),
             (
-                SlotSet::from_ranges([(0, 228)]).union(&crate::feature_defs::family_slots(
-                    ComputeToken::Moments,
-                    ns,
-                )),
+                SlotSet::from_ranges([(0, 228)]).union(&SlotSet::default()),
                 944,
             ),
             (SlotSet::from_ranges([(0, 720)]), 720),
@@ -1005,19 +933,15 @@ mod toggle_gates {
             (SlotSet::from_ranges([(0, 156)]), 372usize),
             (SlotSet::from_ranges([(0, 372)]), 372),
             (
-                SlotSet::from_ranges([(0, 228)]).union(&crate::feature_defs::family_slots(
-                    ComputeToken::Moments,
-                    ns,
-                )),
+                SlotSet::from_ranges([(0, 228)]).union(&SlotSet::default()),
                 944,
             ),
             (
                 SlotSet::from_ranges([(0, 228)])
-                    .union(&crate::feature_defs::family_slots(
-                        ComputeToken::Moments,
-                        ns,
-                    ))
-                    .union(&crate::feature_defs::family_slots(ComputeToken::ClassC, ns)),
+                    .union(&SlotSet::default())
+                    .union(&SlotSet::from_slots(
+                        (0..ns * 3).map(|cell| 372 + cell * 29 + 5),
+                    )),
                 944,
             ),
         ];

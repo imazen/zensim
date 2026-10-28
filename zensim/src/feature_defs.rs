@@ -99,42 +99,6 @@ pub(crate) enum Statistic {
 
 impl Statistic {}
 
-/// Whether a slot can be harvested by a v1-only walk that never runs the
-/// block the slot lives in — `feature_v2::V1FreeExtras`'s two tranches.
-///
-/// **This is why cost is a property of a SLOT, not of a SIGNAL.** The
-/// registry's first draft declared it per signal and the cross-check gate
-/// caught it: `lum_dark_err` is harvestable at Y and not at X/B;
-/// `global_dmean` is harvestable everywhere EXCEPT the `(B, scale 0)` append
-/// cell the 944 walk skips entirely; and the v2-348 `mse` slot is harvestable
-/// despite living in the most expensive block in the layout. A per-signal
-/// cost field is wrong by 16 slots on the raw-moment tranche alone.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Tranche {
-    /// Not harvestable — needs its owning block.
-    None,
-    /// `V1FreeExtras::RawMoments`: derivable from the fused kernel's raw
-    /// `Σs`, `Σd`, `Σs²`, `Σd²`.
-    RawMoments,
-    /// `V1FreeExtras::RawMomentsPlusBoundedErr`'s addition: derivable from
-    /// the fused kernel's saturating-MSE and luminance-weighted sums.
-    ClassC,
-}
-
-impl Tranche {}
-
-/// Which (scale, channel) placements of a signal its [`Tranche`] can serve.
-///
-/// Mirrors the two real restrictions in `feature_v2`'s owner functions:
-/// `APPEND_SKIP_B_SCALE0` (the 944 walk never computes that append cell, so
-/// its slots are structural zeros on both sides) and the Y-only register-carry
-/// constraint on the luminance bins.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Placement {
-    /// Every cell the block occupies.
-    AllCells,
-}
-
 /// Whether a slot is a difference between reference and distorted, and so
 /// whether an identity pair must drive it to zero.
 ///
@@ -310,35 +274,6 @@ impl FormulaRevision {
     pub(crate) const fn stable_forms(self) -> bool {
         matches!(self, Self::Rev7)
     }
-
-    /// Whether `GLOBAL_CGAIN`/`GLOBAL_CLOSS` are formed from the PAIRED
-    /// second moment `Σ(d−s)(d+s)` instead of the difference of two raw
-    /// variances — the `freecomp` half of revision 2.
-    ///
-    /// F5: `fused.rs`'s own comment claims the band-batched reorder "costs
-    /// negligible precision: worst |Δ| vs the 944 append block is 5.35e-6".
-    /// That was measured through `free_extras_match_the_944_append_block`,
-    /// which is SYNTHETIC-IMAGE-ONLY. On real pairs the audit measures 2,607
-    /// of 28,601 cells (9.12 %) past the 2e-5 bar, worst 3.63e-3 — because
-    /// `Σs²/n − mean²` amplifies the accumulated f32 error by `mean²/var`,
-    /// which is unbounded as a region flattens, and synthetic images do not
-    /// produce the flat-but-not-constant regions that make it large.
-    ///
-    /// **Granularity was tried first and MEASURED not to be the lever**:
-    /// matching the append kernel's per-row reduction moves the paired
-    /// disagreement only 4.47 % -> 3.90 % past the bar and leaves the worst
-    /// cell worse, because the error lives in the f32 accumulation WITHIN one
-    /// row. Compensation removes the depth dependence instead. See
-    /// [`crate::fused`]'s `kahan_add16` for the full measurement.
-    ///
-    /// It changes **no shipped byte**: only the free walk is compensated, the
-    /// append route is untouched, so no 944 table moves. That also makes the
-    /// free route the more accurate of the two, which is what turns the
-    /// remaining free-vs-append gap into a MEASUREMENT of the append route's
-    /// own error (plan R4) rather than an unattributed disagreement.
-    pub(crate) const fn paired_global_contrast(self) -> bool {
-        matches!(self, Self::Rev5 | Self::Rev7)
-    }
 }
 
 /// Internal dispatch family. Palette has no supported public token.
@@ -383,10 +318,6 @@ pub(crate) struct SignalDef {
     pub family: Family,
     /// Name stem, `[a-z0-9_]+`, unique within the family.
     pub name: &'static str,
-    /// Whether a v1-only walk can harvest this signal without its block.
-    pub tranche: Tranche,
-    /// Which placements the tranche can serve.
-    pub placement: Placement,
     pub form: Form,
 }
 
@@ -420,8 +351,6 @@ const fn v1(family: ComputeToken, name: &'static str) -> SignalDef {
     SignalDef {
         family: Family::Supported(family),
         name,
-        tranche: Tranche::None,
-        placement: Placement::AllCells,
         // Every v1 slot is a difference form: the 372 identity probe is the
         // ZERO vector on all 38 dial-grid references, measured
         // (benchmarks/dial_addressability_gate_2026-09-04.md §15).
@@ -442,8 +371,6 @@ const fn v1_rev(family: ComputeToken, name: &'static str) -> SignalDef {
     SignalDef {
         family: Family::Supported(family),
         name,
-        tranche: Tranche::None,
-        placement: Placement::AllCells,
         form: Form::Difference,
     }
 }
@@ -453,8 +380,6 @@ const fn v1_with_defect(family: ComputeToken, name: &'static str) -> SignalDef {
     SignalDef {
         family: Family::Supported(family),
         name,
-        tranche: Tranche::None,
-        placement: Placement::AllCells,
         form: Form::Difference,
     }
 }
@@ -470,12 +395,10 @@ const fn v1_defect(
     v1_with_defect(family, name)
 }
 
-const fn v2sig(name: &'static str, form: Form, tranche: Tranche) -> SignalDef {
+const fn v2sig(name: &'static str, form: Form) -> SignalDef {
     SignalDef {
         family: Family::Supported(ComputeToken::V2),
         name,
-        tranche,
-        placement: Placement::AllCells,
         form,
         // F18 reaches the v2 block too: `ssim_dev4` is `(M4/n)^(1/4)`, the
         // same `powf(0.25)` in three finalizers (`OnlineMoments::finish`, the
@@ -494,10 +417,9 @@ const fn v2sig_rev(
     form: Form,
     _direction: Direction,
     _kernel: KernelId,
-    tranche: Tranche,
     _defect: Option<Defect>,
 ) -> SignalDef {
-    let base = v2sig(name, form, tranche);
+    let base = v2sig(name, form);
     SignalDef { ..base }
 }
 
@@ -601,37 +523,18 @@ pub(crate) static V2: [SignalDef; 29] = {
             Difference,
             HigherIsWorse,
             V2Dense,
-            Tranche::None,
             None,
         ),
-        v2sig_rev(
-            1,
-            "ssim_dev2",
-            L2,
-            Difference,
-            HigherIsWorse,
-            V2Dense,
-            Tranche::None,
-            None,
-        ),
-        v2sig_rev(
-            2,
-            "ssim_dev4",
-            L4,
-            Difference,
-            HigherIsWorse,
-            V2Dense,
-            Tranche::None,
-            None,
-        ),
-        v2sig("art", Difference, Tranche::None),
-        v2sig("det", Difference, Tranche::None),
+        v2sig_rev(1, "ssim_dev2", L2, Difference, HigherIsWorse, V2Dense, None),
+        v2sig_rev(2, "ssim_dev4", L4, Difference, HigherIsWorse, V2Dense, None),
+        v2sig("art", Difference),
+        v2sig("det", Difference),
         // Class C: harvestable from the fused kernel's saturating-MSE sum,
         // despite living in the most expensive block in the layout.
-        v2sig("mse", Difference, Tranche::ClassC),
-        v2sig("hf_gain", Difference, Tranche::None),
-        v2sig("hf_loss", Difference, Tranche::None),
-        v2sig("hf_mag_loss", Difference, Tranche::None),
+        v2sig("mse", Difference),
+        v2sig("hf_gain", Difference),
+        v2sig("hf_loss", Difference),
+        v2sig("hf_mag_loss", Difference),
         // Soft-saliency peak block (idx 9..11).
         v2sig_rev(
             9,
@@ -640,11 +543,10 @@ pub(crate) static V2: [SignalDef; 29] = {
             Difference,
             HigherIsWorse,
             V2Dense,
-            Tranche::None,
             None,
         ),
-        v2sig("art_soft_peak", Difference, Tranche::None),
-        v2sig("det_soft_peak", Difference, Tranche::None),
+        v2sig("art_soft_peak", Difference),
+        v2sig("det_soft_peak", Difference),
         // Masked block (idx 12..15).
         v2sig_rev(
             12,
@@ -653,12 +555,11 @@ pub(crate) static V2: [SignalDef; 29] = {
             Difference,
             HigherIsWorse,
             V2Dense,
-            Tranche::None,
             None,
         ),
-        v2sig("masked_art", Difference, Tranche::None),
-        v2sig("masked_det", Difference, Tranche::None),
-        v2sig("masked_mse", Difference, Tranche::None),
+        v2sig("masked_art", Difference),
+        v2sig("masked_det", Difference),
+        v2sig("masked_mse", Difference),
         // IW block (idx 16..19).
         v2sig_rev(
             16,
@@ -667,24 +568,23 @@ pub(crate) static V2: [SignalDef; 29] = {
             Difference,
             HigherIsWorse,
             V2Dense,
-            Tranche::None,
             None,
         ),
-        v2sig("iw_art", Difference, Tranche::None),
-        v2sig("iw_det", Difference, Tranche::None),
-        v2sig("iw_mse", Difference, Tranche::None),
+        v2sig("iw_art", Difference),
+        v2sig("iw_det", Difference),
+        v2sig("iw_mse", Difference),
         // Near-threshold core (idx 20..21). FRAGILITY is reference-only
         // masking-susceptibility — see `idx::PJND_FRAGILITY`'s own doc.
-        v2sig("pjnd_transducer", Difference, Tranche::None),
+        v2sig("pjnd_transducer", Difference),
         // F15: ReferenceOnly, and its nonzero identity-pair value is correct
         // (it equals the same-reference siblings). The defect is the 1.0 a
         // v1-only walk reads from zeroed accumulators.
-        v2sig("pjnd_fragility", ReferenceOnly, Tranche::None),
+        v2sig("pjnd_fragility", ReferenceOnly),
         // Phase-2 additions (idx 22..28).
-        v2sig("gms", Difference, Tranche::None),
-        v2sig("pjnd_transducer_low_k", Difference, Tranche::None),
-        v2sig("pjnd_transducer_high_k", Difference, Tranche::None),
-        v2sig("blockiness", Difference, Tranche::None),
+        v2sig("gms", Difference),
+        v2sig("pjnd_transducer_low_k", Difference),
+        v2sig("pjnd_transducer_high_k", Difference),
+        v2sig("blockiness", Difference),
         v2sig_rev(
             26,
             "ringing",
@@ -692,13 +592,12 @@ pub(crate) static V2: [SignalDef; 29] = {
             Difference,
             HigherIsWorse,
             V2Gradient,
-            Tranche::None,
             Some(DEFECT_RING_GLOBAL),
         ),
-        v2sig("banding", Difference, Tranche::None),
+        v2sig("banding", Difference),
         // The one scale-level (not per-pixel) signal in the set — see
         // `idx::EDGE_WIDTH_CHANGE`'s doc and the v2 spec.
-        v2sig("edge_width_change", Difference, Tranche::None),
+        v2sig("edge_width_change", Difference),
     ]
 };
 
@@ -852,8 +751,6 @@ pub(crate) const CARRIER_SLOTS: [usize; 10] = [178, 190, 196, 226, 231, 237, 243
 /// [`tests::family_slots_match_compute_set_populated_slots`].
 pub(crate) fn family_slots(family: impl Into<Family>, n_scales: usize) -> SlotSet {
     match family.into() {
-        Family::Supported(ComputeToken::Moments) => tranche_slots(Tranche::RawMoments, n_scales),
-        Family::Supported(ComputeToken::ClassC) => tranche_slots(Tranche::ClassC, n_scales),
         Family::Supported(ComputeToken::Carriers) => SlotSet::from_slots(CARRIER_SLOTS),
         // `Hdr` is RESERVED — registered in the vocabulary, emitted by
         // nothing, so its slot set is legitimately empty rather than absent.
@@ -863,37 +760,6 @@ pub(crate) fn family_slots(family: impl Into<Family>, n_scales: usize) -> SlotSe
             None => SlotSet::default(),
         },
     }
-}
-
-/// Does this signal's [`Placement`] admit `(scale, channel)`?
-fn placement_admits(placement: Placement) -> bool {
-    match placement {
-        Placement::AllCells => true,
-    }
-}
-
-/// The slots a v1-only walk can harvest at `tranche`, at `n_scales`.
-///
-/// **Derived, never listed.** Gated bit-for-bit against `feature_v2`'s owner
-/// functions (`free_slot_indices` / `class_c_slot_indices`) by
-/// [`tests::tranche_slots_match_the_feature_v2_owners`], so the registry
-/// carries the same answer without the registry being a second copy of the
-/// arithmetic: it derives the set from per-signal declarations, and the gate
-/// is what makes the two provably equal.
-///
-/// [`Tranche::ClassC`] is the ADDITION over [`Tranche::RawMoments`], matching
-/// `V1FreeExtras::RawMomentsPlusBoundedErr`'s own definition — not a superset.
-pub(crate) fn tranche_slots(tranche: Tranche, n_scales: usize) -> SlotSet {
-    let mut out = Vec::new();
-    for id in 0..full_width(n_scales) {
-        let Some(d) = def_at(id, n_scales) else {
-            continue;
-        };
-        if d.signal.tranche == tranche && placement_admits(d.signal.placement) {
-            out.push(id);
-        }
-    }
-    SlotSet::from_slots(out)
 }
 
 #[cfg(test)]
@@ -937,20 +803,6 @@ mod tests {
             }
         }
     }
-
-    /// The two tranches are DISJOINT — class C is the ADDITION over the raw
-    /// moments, matching `V1FreeExtras::RawMomentsPlusBoundedErr`'s own
-    /// definition rather than being a superset.
-    #[test]
-    fn the_two_tranches_are_disjoint() {
-        let raw = tranche_slots(Tranche::RawMoments, NS);
-        let bounded = tranche_slots(Tranche::ClassC, NS);
-        assert!(
-            raw.intersect(&bounded).is_empty(),
-            "tranches overlap: {}",
-            raw.intersect(&bounded)
-        );
-    }
 }
 
 /// Cross-checks against the `feature_v2` owners — the gates that make the
@@ -963,36 +815,6 @@ mod tests {
 mod owner_gates {
     use super::*;
     use crate::feature_v2;
-
-    const NS: usize = crate::NUM_SCALES;
-
-    /// **The tranche gate.** The registry derives the free tranches from
-    /// per-signal `Tranche` + `Placement` declarations; `feature_v2` derives
-    /// them from hand-written loops. They must be the SAME SET.
-    ///
-    /// This gate is what caught the registry's first draft, which declared
-    /// cost per SIGNAL and was wrong by 16 slots (it gave the luminance bins
-    /// to all three channels and the `GLOBAL_*` family the `(B, scale 0)` cell
-    /// the 944 walk never computes).
-    #[test]
-    fn tranche_slots_match_the_feature_v2_owners() {
-        // The owners also list slots in the research blocks after the v2 block, which
-        // this registry does not carry; compare within the registered width.
-        let raw_owner =
-            SlotSet::from_slots(feature_v2::free_slot_indices(NS)).clipped_to(full_width(NS));
-        assert_eq!(
-            tranche_slots(Tranche::RawMoments, NS),
-            raw_owner,
-            "raw-moment tranche disagrees with feature_v2::free_slot_indices"
-        );
-        let cc_owner =
-            SlotSet::from_slots(feature_v2::class_c_slot_indices(NS)).clipped_to(full_width(NS));
-        assert_eq!(
-            tranche_slots(Tranche::ClassC, NS),
-            cc_owner,
-            "class-C tranche disagrees with feature_v2::class_c_slot_indices"
-        );
-    }
 
     /// The carrier list is the owner's list.
     #[test]

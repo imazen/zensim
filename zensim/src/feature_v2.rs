@@ -235,53 +235,8 @@ pub const C_GRAD_DECAY: f64 = 1e-4;
 // f0..f719 bit-stability is structural, not incidental.
 // ============================================================================
 
-/// Features per channel per scale in the append block (17 × 3 ch × 4
-/// scales = 204; full folded-append vector = 720 + 204 = 924).
-pub const FEATURES_PER_CHANNEL_APPEND: usize = 17;
-
-/// Skip the append kernel entirely for the B (yellow-violet) channel at
-/// scale 0 — its 17 slots emit 0.0 (index-stable, deprecate-by-absence).
-/// Grounds: the yellow-violet foveal resolution limit is ~53 ppd vs 94
-/// achromatic (Ashraf/Chapiro/Mantiuk 2025), and butteraugli carries no B
-/// channel at all in its two highest-frequency bands — finest-scale B
-/// append features would model signal the eye cannot resolve, at 25% of
-/// the append block's pixel cost (scale 0 is ~75% of pyramid pixels).
-pub const APPEND_SKIP_B_SCALE0: bool = true;
-
 /// Named local offsets within one channel's append block.
-pub mod idx_append {
-    /// Bounded error (`mse_i = sat((s−d)², C_MSE)` — the v1/v2 MSE
-    /// vocabulary) pooled over the DARK reference-luminance soft bin,
-    /// weight `(1−t)²` (A2: shadow banding/blocking that uniform pooling
-    /// dilutes). Reference-only weights — same foldable `Σw·v/Σw` shape
-    /// as the masked/IW families. Pools `mse_i` rather than a
-    /// recomputed SSIM map: the luminance CONDITIONING is the feature;
-    /// `mse_i` needs no extra plane loads and keeps the kernel inside
-    /// the perf gate.
-    pub const LUM_DARK_ERR: usize = 2;
-    /// Mid-luminance soft bin, weight `2t(1−t)`.
-    pub const LUM_MID_ERR: usize = 3;
-    /// Bright soft bin, weight `t²`.
-    pub const LUM_BRIGHT_ERR: usize = 4;
-    /// Global per-channel mean shift (A9): `sat(|mean(s)−mean(d)|,
-    /// C_GDMEAN)` — the windowed features under-weigh global casts.
-    pub const GLOBAL_DMEAN: usize = 13;
-    /// Global contrast gain: `bounded_excess(gvar₂, gvar₁, C_GCONTRAST)`
-    /// on whole-plane variances.
-    pub const GLOBAL_CGAIN: usize = 14;
-    /// Global contrast loss: reverse polarity of [`GLOBAL_CGAIN`].
-    pub const GLOBAL_CLOSS: usize = 15;
-}
-
-/// Saturating half-point mapping the (cbrt-domain, ~[0,1]) reference Y
-/// value to the bin parameter `t = y/(y+C_LUM_T)` used by the luminance
-/// soft bins and the luminance transducer term. 0.35 puts `t=0.5` near
-/// mid-gray in XYB's cube-root intensity scale.
-pub const C_LUM_T: f64 = 0.35;
-/// Saturating half-point for the global |Δmean| feature.
-pub const C_GDMEAN: f64 = 0.02;
-/// Stabilizer for the global variance gain/loss pair.
-pub const C_GCONTRAST: f64 = 1e-4;
+pub mod idx_append {}
 
 // ============================================================================
 // append2 (f924+) constants — BANDVIS + luminance conditioner + HL bins.
@@ -296,31 +251,8 @@ pub const C_GCONTRAST: f64 = 1e-4;
 /// [0,1] products — same class as `C_EDGE`).
 pub(crate) const C_BV: f64 = 1e-4;
 
-/// append2 slots per scale (Y-only block — no channel axis; layout
-/// `f924 + scale*APPEND2_PER_SCALE + local`, 4 scales × 5 = 20 slots,
-/// full vector = 944). Documented deviation from the append block's
-/// scale-major×channel layout: every append2 signal is Y-only by
-/// design, so a channel axis would be 2/3 structural zeros.
-pub const APPEND2_PER_SCALE: usize = 5;
-
-/// The one channel the append2 block is computed on (Y). The block has no
-/// channel axis in its LAYOUT (see [`APPEND2_PER_SCALE`]), but its signals
-/// are accumulated from the Y-channel kernels, so the attribution density
-/// contributes on this channel only.
-///
-/// Layout metadata, so it stays compiled in every configuration — but its
-/// only non-test reader is the `custom-profiles`-gated attribution-density
-/// cluster, hence the targeted dead-code allowance.
-pub(crate) const APPEND2_CHANNEL: usize = 1;
-
 /// Named local offsets within one scale's append2 block (all Y-only).
-pub mod idx_append2 {
-    /// Reference-only local-adaptation conditioner: `sat(mean(ref Y),
-    /// C_LUM_T)` from the append kernel's existing `sum_s` accumulator
-    /// (finalize-only — FREE). Correct-0 in any steering fold, like
-    /// `PJND_FRAGILITY`/`GRAD_SRC_MEAN`.
-    pub const LUMA_MEAN_REF: usize = 2;
-}
+pub mod idx_append2 {}
 
 // ============================================================================
 // CSFW (f944+) constants — chunk-3 luminance-CSF tier-1: Y-only
@@ -535,22 +467,6 @@ pub(crate) fn bounded_excess(a: f64, b: f64, c: f64) -> f64 {
     (a - b).max(0.0) / (a + b + c)
 }
 
-/// [`bounded_excess`]`(a,b,c)` PAIRED with [`bounded_excess`]`(b,a,c)`, one
-/// shared division instead of two (phase-6 §A.16 lever A step 1: the two
-/// calls' denominators — `a+b+c` and `b+a+c` — are the SAME value by
-/// commutativity of addition, computed once here). Returns
-/// `(bounded_excess(a,b,c), bounded_excess(b,a,c))`. Used for the
-/// hf_gain/hf_loss pair, which is exactly this shape (`bounded_excess
-/// (dst_sq,src_sq,c)` / `bounded_excess(src_sq,dst_sq,c)`).
-#[inline]
-fn bounded_excess_pair(a: f64, b: f64, c: f64) -> (f64, f64) {
-    let recip_denom = 1.0 / (a + b + c);
-    (
-        (a - b).max(0.0) * recip_denom,
-        (b - a).max(0.0) * recip_denom,
-    )
-}
-
 /// Michelson-contrast-style saturating ratio `x/(x+c)`, bounded `[0, 1)`
 /// for `x >= 0`.
 #[inline]
@@ -560,169 +476,6 @@ fn saturate(x: f64, c: f64) -> f64 {
 }
 
 include!("feature_v2_kernels.rs");
-
-#[cfg(test)]
-mod global_contrast_rev2_tests {
-    use super::*;
-
-    /// **The F5 gate.** Replaces (does not re-run) the synthetic-image
-    /// `free_extras_match_the_944_append_block` comparison, which could not
-    /// see this defect because synthetic content does not produce the
-    /// flat-but-not-constant regions where `mean²/gvar` is large.
-    ///
-    /// The property under test is the one that actually broke: given raw
-    /// moments carrying only f32-grade precision — which is all either route
-    /// can deliver, since both accumulate in f32 lanes — how far does the
-    /// computed `GLOBAL_CGAIN`/`GLOBAL_CLOSS` land from the exact answer?
-    ///
-    /// MEASURED consequence on real pixels (60 source images, 1,120 paired
-    /// tranche cells, `benchmarks/feature_rev2_2026-09-05.md`): free-vs-append
-    /// disagreement past the 2e-5 bar falls from **8.30 % to 0.18 %** and the
-    /// worst cell from 2.31e-4 to 2.49e-5.
-    #[test]
-    fn paired_form_survives_f32_grade_moments_where_the_raw_form_does_not() {
-        // A flat-but-not-constant region: large mean, tiny variance, tiny
-        // distortion — the configuration where `mean^2/gvar` is the amplifier.
-        let n = 65536.0f64;
-        let (ms, md) = (0.5f64, 0.5f64 + 3e-5);
-        let (var_s, var_d) = (1.0e-6f64, 1.3e-6f64);
-
-        let sum_s = ms * n;
-        let sum_d = md * n;
-        let sum_s2 = (var_s + ms * ms) * n;
-        let sum_d2 = (var_d + md * md) * n;
-        let sum_ds = (md - ms) * n;
-        // sum((d-s)(d+s)) = sum(d^2) - sum(s^2), formed per pixel.
-        let sum_dd = sum_d2 - sum_s2;
-
-        // Exact answer, in full f64 from the variances themselves.
-        let (want_gain, want_loss) = bounded_excess_pair(var_d, var_s, C_GCONTRAST);
-
-        // f32-grade moments: round the four raw totals to f32, which is the
-        // precision any f32 lane accumulation can deliver no matter how it is
-        // ordered or compensated. The PAIRED inputs are per-pixel differences,
-        // so they are small and survive the same rounding.
-        let f32r = |x: f64| x as f32 as f64;
-        let (raw_gain, raw_loss) = {
-            let (_, g, l) = global_stats_from_raw_moments(
-                f32r(sum_s),
-                f32r(sum_d),
-                f32r(sum_s2),
-                f32r(sum_d2),
-                f32r(sum_dd),
-                f32r(sum_ds),
-                n,
-                false,
-            );
-            (g, l)
-        };
-        let (pair_gain, pair_loss) = {
-            let (_, g, l) = global_stats_from_raw_moments(
-                f32r(sum_s),
-                f32r(sum_d),
-                f32r(sum_s2),
-                f32r(sum_d2),
-                f32r(sum_dd),
-                f32r(sum_ds),
-                n,
-                true,
-            );
-            (g, l)
-        };
-
-        let raw_err = (raw_gain - want_gain)
-            .abs()
-            .max((raw_loss - want_loss).abs());
-        let pair_err = (pair_gain - want_gain)
-            .abs()
-            .max((pair_loss - want_loss).abs());
-        // The bar is the audit's own 2e-5 route-parity bar, not a number
-        // picked to make the test pass: the defect is exactly "the raw form
-        // lands further from truth than the bar allows".
-        const BAR: f64 = 2e-5;
-        assert!(
-            raw_err > BAR,
-            "the raw form should cross the parity bar here (that IS the defect); got {raw_err}"
-        );
-        assert!(
-            pair_err < BAR / 10.0 && pair_err < raw_err / 10.0,
-            "paired form must land an order below the bar: paired {pair_err} vs raw {raw_err}"
-        );
-    }
-
-    /// The reassociation is an ALGEBRAIC IDENTITY, so with exact inputs the
-    /// two forms must agree. If they ever do not, the revision changed the
-    /// definition rather than its conditioning.
-    #[test]
-    fn the_two_forms_are_the_same_function_in_exact_arithmetic() {
-        for &(ms, md, var_s, var_d) in &[
-            (0.5f64, 0.5f64, 0.01f64, 0.02f64),
-            (0.2, 0.9, 0.3, 0.05),
-            (0.0, 0.0, 0.0, 0.0),
-            (1000.0, 1000.5, 4.0, 3.0),
-        ] {
-            let n = 4096.0;
-            let sum_s = ms * n;
-            let sum_d = md * n;
-            let sum_s2 = (var_s + ms * ms) * n;
-            let sum_d2 = (var_d + md * md) * n;
-            let a = global_stats_from_raw_moments(
-                sum_s,
-                sum_d,
-                sum_s2,
-                sum_d2,
-                sum_d2 - sum_s2,
-                (md - ms) * n,
-                n,
-                false,
-            );
-            let b = global_stats_from_raw_moments(
-                sum_s,
-                sum_d,
-                sum_s2,
-                sum_d2,
-                sum_d2 - sum_s2,
-                (md - ms) * n,
-                n,
-                true,
-            );
-            let tol = 1e-9 * a.1.abs().max(a.2.abs()).max(1.0);
-            assert_eq!(a.0, b.0, "GLOBAL_DMEAN must be untouched by the revision");
-            assert!(
-                (a.1 - b.1).abs() <= tol && (a.2 - b.2).abs() <= tol,
-                "{a:?} vs {b:?}"
-            );
-        }
-    }
-}
-
-/// The three luminance-binned bounded-error values, from the dark/bright
-/// weighted sums plus `Σ mse_i` and `n` — the ONE implementation, shared by
-/// [`finish_append`] (reading the append kernel's accumulators) and the
-/// free-extras finalize (reading the BIT-SAME-DEFINITION sums off the v1
-/// fused kernel). Returns `[dark, mid, bright]`, each already `clamp(0,2)`.
-///
-/// The mid bin is DERIVED, not accumulated: the Bernstein weights
-/// `(1−t)²`, `2t(1−t)`, `t²` are a partition of unity, so
-/// `Σw_mid = n − Σw_dark − Σw_bright` and
-/// `Σw_mid·v = Σv − Σw_dark·v − Σw_bright·v`.
-#[inline]
-fn lum_bins_from_weighted_sums(
-    ws_dark: WeightedSum,
-    ws_bright: WeightedSum,
-    sum_mse: f64,
-    n_f: f64,
-) -> [f64; 3] {
-    let ws_mid = WeightedSum {
-        num: sum_mse - ws_dark.num - ws_bright.num,
-        den: n_f - ws_dark.den - ws_bright.den,
-    };
-    [
-        ws_dark.finish().clamp(0.0, 2.0),
-        ws_mid.finish().clamp(0.0, 2.0),
-        ws_bright.finish().clamp(0.0, 2.0),
-    ]
-}
 
 /// `out[i] = input[i]²` — the streamed walk's σ-split square (reads the
 /// wide window in place, writes into a free scratch buffer). Plain scalar
@@ -791,24 +544,10 @@ struct V1BasicSums {
     // Σsrc, Σdst, Σsrc², Σdst² over this (scale, channel). Zero unless the
     // request asked for them; the fused kernel's own fields of the same
     // name are their only source.
-    sum_s: crate::featcanon::SumVar,
-    sum_d: crate::featcanon::SumVar,
-    sum_s2: crate::featcanon::SumVar,
-    sum_d2: crate::featcanon::SumVar,
-    /// Revision 2's paired second moment `Σ(d−s)(d+s)`, carried alongside the
-    /// raw pair so `global_stats_from_raw_moments` can pick per revision.
-    sum_dd: crate::featcanon::SumVar,
-    /// Revision 2's paired first difference `Σ(d−s)`.
-    sum_ds: crate::featcanon::SumVar,
     // --- FREE bounded error ([`V1FreeExtras::RawMomentsPlusBoundedErr`]) ---
     // Σ sat((s−d)², C_MSE) over this (scale, channel), and the Y-only
     // dark/bright weighted sums of that same per-pixel value. Zero unless
     // the request asked for them.
-    sum_msat: crate::featcanon::SumVar,
-    lum_wd_num: crate::featcanon::SumVar,
-    lum_wd_den: crate::featcanon::SumVar,
-    lum_wb_num: crate::featcanon::SumVar,
-    lum_wb_den: crate::featcanon::SumVar,
 }
 
 impl V1BasicSums {
@@ -847,17 +586,6 @@ impl V1BasicSums {
             iw_art4: SumVar::f64_elems(crate::featcanon::mode(revision)),
             iw_det4: SumVar::f64_elems(crate::featcanon::mode(revision)),
             iw_mse: SumVar::f64_elems(crate::featcanon::mode(revision)),
-            sum_s: SumVar::f64_elems(crate::featcanon::mode(revision)),
-            sum_d: SumVar::f64_elems(crate::featcanon::mode(revision)),
-            sum_s2: SumVar::f64_elems(crate::featcanon::mode(revision)),
-            sum_d2: SumVar::f64_elems(crate::featcanon::mode(revision)),
-            sum_dd: SumVar::f64_elems(crate::featcanon::mode(revision)),
-            sum_ds: SumVar::f64_elems(crate::featcanon::mode(revision)),
-            sum_msat: SumVar::f64_elems(crate::featcanon::mode(revision)),
-            lum_wd_num: SumVar::f64_elems(crate::featcanon::mode(revision)),
-            lum_wd_den: SumVar::f64_elems(crate::featcanon::mode(revision)),
-            lum_wb_num: SumVar::f64_elems(crate::featcanon::mode(revision)),
-            lum_wb_den: SumVar::f64_elems(crate::featcanon::mode(revision)),
         }
     }
 }
@@ -903,17 +631,6 @@ impl V1BasicSums {
         self.iw_art4.merge_from(&o.iw_art4);
         self.iw_det4.merge_from(&o.iw_det4);
         self.iw_mse.merge_from(&o.iw_mse);
-        self.sum_s.merge_from(&o.sum_s);
-        self.sum_d.merge_from(&o.sum_d);
-        self.sum_s2.merge_from(&o.sum_s2);
-        self.sum_d2.merge_from(&o.sum_d2);
-        self.sum_dd.merge_from(&o.sum_dd);
-        self.sum_ds.merge_from(&o.sum_ds);
-        self.sum_msat.merge_from(&o.sum_msat);
-        self.lum_wd_num.merge_from(&o.lum_wd_num);
-        self.lum_wd_den.merge_from(&o.lum_wd_den);
-        self.lum_wb_num.merge_from(&o.lum_wb_num);
-        self.lum_wb_den.merge_from(&o.lum_wb_den);
     }
 
     /// Merge one strip's channel partials. The term-level accumulation axis
@@ -947,19 +664,8 @@ impl V1BasicSums {
         // FREE raw moments: plain sums, so an unconditional merge is exact
         // whether the kernel filled them (+0.0 otherwise) — same shape as
         // the peaks above.
-        self.sum_s.add64(0, s.sum_s);
-        self.sum_d.add64(0, s.sum_d);
-        self.sum_s2.add64(0, s.sum_s2);
-        self.sum_d2.add64(0, s.sum_d2);
-        self.sum_dd.add64(0, s.sum_dd);
-        self.sum_ds.add64(0, s.sum_ds);
         // FREE bounded error: plain sums, merged the same unconditional way
         // as the raw moments above (+0.0 when the kernel did not fill them).
-        self.sum_msat.add64(0, s.sum_msat);
-        self.lum_wd_num.add64(0, s.lum_wd_num);
-        self.lum_wd_den.add64(0, s.lum_wd_den);
-        self.lum_wb_num.add64(0, s.lum_wb_num);
-        self.lum_wb_den.add64(0, s.lum_wb_den);
     }
 
     /// Finalize the v1 pool blocks — peaks (6/ch), masked (6/ch), IW
@@ -1027,62 +733,6 @@ impl V1BasicSums {
             .quarter_root(root_form)
             .abs();
         iw[5] = self.iw_mse.fin() * one_over_n;
-    }
-
-    /// Finalize the FREE v2-era slots ([`V1FreeExtras::RawMoments`]) this
-    /// (scale, channel)'s raw moments can produce: the three `GLOBAL_*`
-    /// append values (via the shared [`global_stats_from_raw_moments`]) and
-    /// append2's `LUMA_MEAN_REF` (Y-channel only, the same
-    /// `saturate(mean ref, C_LUM_T).clamp(0,1)` the append2 finalize applies
-    /// to the append kernel's `sum_s`).
-    fn finalize_free(
-        &self,
-        n: usize,
-        rev: crate::feature_defs::FormulaRevision,
-    ) -> ([f64; 3], f64) {
-        let n_f = n as f64;
-        let (dmean, cgain, closs) = global_stats_from_raw_moments(
-            self.sum_s.fin(),
-            self.sum_d.fin(),
-            self.sum_s2.fin(),
-            self.sum_d2.fin(),
-            self.sum_dd.fin(),
-            self.sum_ds.fin(),
-            n_f,
-            rev.paired_global_contrast(),
-        );
-        (
-            [dmean, cgain.clamp(0.0, 1.0), closs.clamp(0.0, 1.0)],
-            saturate(self.sum_s.fin() / n_f, C_LUM_T).clamp(0.0, 1.0),
-        )
-    }
-
-    /// Finalize the class-C bounded-error slots
-    /// ([`V1FreeExtras::RawMomentsPlusBoundedErr`]) from the fused kernel's
-    /// `Σ mse_i` + luminance-weighted sums: the v2-348 `MSE` value and the
-    /// dark / mid / bright luminance-binned means.
-    ///
-    /// Both routes go through [`lum_bins_from_weighted_sums`] and the same
-    /// `clamp01(Σ mse_i / n)` the v2 finalize applies, so the parity gate is
-    /// on the ACCUMULATION rather than on two hand-copied formulas — the
-    /// discipline `global_stats_from_raw_moments` already established.
-    fn finalize_free_bounded(&self, n: usize) -> (f64, [f64; 3]) {
-        let n_f = n as f64;
-        (
-            (self.sum_msat.fin() / n_f).clamp(0.0, 1.0),
-            lum_bins_from_weighted_sums(
-                WeightedSum {
-                    num: self.lum_wd_num.fin(),
-                    den: self.lum_wd_den.fin(),
-                },
-                WeightedSum {
-                    num: self.lum_wb_num.fin(),
-                    den: self.lum_wb_den.fin(),
-                },
-                self.sum_msat.fin(),
-                n_f,
-            ),
-        )
     }
 
     /// Finalize into one channel's 13 basic features, replicating v1's
@@ -3007,13 +2657,6 @@ fn band_slots_for(band_parallel: bool) -> usize {
     n
 }
 
-/// True when the append kernel runs for this (channel, scale) — mirrors
-/// the materialized walk's [`APPEND_SKIP_B_SCALE0`] dispatch.
-#[inline]
-fn append_cell_active(append_on: bool, ch: usize, scale: usize) -> bool {
-    append_on && !(APPEND_SKIP_B_SCALE0 && ch == 2 && scale == 0)
-}
-
 /// One (strip, channel)'s wide input windows: zero-copy slices of the
 /// producer's rolling planes for interior strips, or the scratch
 /// `src_wide`/`dst_wide` buffers filled via `fill_wide` when the strip
@@ -4492,31 +4135,11 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                 // here silently zeroes these 40 slots the moment a wider
                 // variant is requested (caught by
                 // `class_c_extras_are_pure_addition_to_the_free_walk`).
-                if toggles.free_extras != V1FreeExtras::Off {
-                    let (_globals, _luma_mean) =
-                        acc.v1[scale].finalize_free(n, toggles.formula_revision);
-                    // `GLOBAL_*` live in the append block. The 944 walk skips
-                    // the (B, scale 0) append cell entirely
-                    // (`APPEND_SKIP_B_SCALE0`), so this must skip it too or
-                    // the emitted row would not be the 944 row.
-                    // `LUMA_MEAN_REF` is append2's, Y-only.
-                }
                 // CLASS-C FREE EXTRAS: the bounded-error slots, written under
                 // the same "only where the owning block is off" rule. The v2
                 // finalize above already ran and left `MSE` at its structural
                 // `clamp01(0/n) = 0.0` when `v2_blocks` is off, so this
                 // overwrite is the value's first and only real write.
-                if toggles.free_extras == V1FreeExtras::RawMomentsPlusBoundedErr {
-                    let (mse, _lum) = acc.v1[scale].finalize_free_bounded(n);
-                    if !v2_blocks {
-                        features_v12[v1_total
-                            + scale_base
-                            + ch * FEATURES_PER_CHANNEL_V2_TOTAL
-                            + idx::MSE] = mse;
-                    }
-                    // The luminance bins are append's, and Y-only for the
-                    // same register-carry reason the kernel is.
-                }
                 if toggles.v1_pools != V1PoolsMode::Off {
                     // v1's block-major 372 layout: [basic 156][peaks 72]
                     // [masked 72][iw 72], each pool block scale-major then
