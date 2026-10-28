@@ -39,3 +39,13 @@ Release steps, per crate: bump the version, `cargo update -w`, commit `release: 
 v<version>`, push, wait for CI, `git tag <crate>-v<version>`, push the tag, `gh release create`,
 then `cargo publish --manifest-path <crate>/Cargo.toml`. Never publish without a matching
 pushed tag and GitHub release.
+
+## Known Bugs
+
+- Cross-path audit at `d15a5486` (2026-10-28): profile A's interleaved and planar
+  linear diffmap scores differ on the 65×63 checkerboard fixture with padded rows.
+  Score bits: interleaved `4635359462469191635`, planar `4635359462376882550`.
+  The audit also found PreviewV0_2 score mismatches and legacy map rounding
+  differences at 65×63 and 257×193. Reproducer fixture: `tests/cross_path.rs`.
+  This predates the reuse refactor; preserving
+  every existing score prevents silently canonicalizing either path.
