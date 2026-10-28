@@ -419,23 +419,6 @@ pub const APPEND_SKIP_B_SCALE0: bool = true;
 
 /// Named local offsets within one channel's append block.
 pub mod idx_append {
-    /// Cross-channel masked transducer (gap-audit A1). Y channel ONLY:
-    /// `err/(err + C_PJND_CLAMP·(1 + K_PJND_MASK·act_Y + K_XCH·(act_X +
-    /// act_B)))` — the ColorVideoVDP-trained masking direction (chromatic
-    /// channels mask achromatic; Switkes 1988; vdp-csf-perceptual-math.md
-    /// Eq. 9-11 discussion). X/B slots emit 0.0 (deprecate-by-absence:
-    /// luma does NOT mask chroma per the same trained matrix, and the
-    /// chroma-side planes are not available without a second sweep).
-    pub const XMASK_TRANSDUCER: usize = 0;
-    /// Luminance-adapted transducer (A2): activity + local-luminance term
-    /// in the divisive denominator, `t = sat(ref_Y, C_LUM_T)` standing in
-    /// for the DeVries-Rose/Weber background-luminance dependence.
-    /// Y channel ONLY (X/B emit 0.0): the 2026-07-19 luma-gate ablation
-    /// measured the v2 chroma transducers as a broad CID22 cost with
-    /// near-zero steering mass — the same masking family, so the append
-    /// block ships luma-gated from the start
-    /// (`zensim:benchmarks/v2_trainability_ab_2026-07-19.md:209-216`).
-    pub const LUM_TRANSDUCER: usize = 1;
     /// Bounded error (`mse_i = sat((s−d)², C_MSE)` — the v1/v2 MSE
     /// vocabulary) pooled over the DARK reference-luminance soft bin,
     /// weight `(1−t)²` (A2: shadow banding/blocking that uniform pooling
@@ -449,38 +432,6 @@ pub mod idx_append {
     pub const LUM_MID_ERR: usize = 3;
     /// Bright soft bin, weight `t²`.
     pub const LUM_BRIGHT_ERR: usize = 4;
-    /// Normalize-then-difference divisive comparison (A3, NLPD/MSCN
-    /// shape — Laparra et al. 2017; BRISQUE's MSCN): per-pixel
-    /// `sat(|r₁/σ₁′ − r₂/σ₂′|, C_MSCN_ABS)` mean, `r_i` the blur
-    /// residual, `σ_i′ = sqrt(var_i + C_MSCN_VAR)`. Unlike the pjnd
-    /// transducer (reference-masked raw error), BOTH images normalize by
-    /// their OWN local energy first. The σ-split comes from the cached /
-    /// replayed reference plane `bs2 = blur(src²)`:
-    /// `var₁ = bs2 − mu1²`, `var₂ = (ssq − bs2) − mu2²` — no per-pair
-    /// blur is ever run for it.
-    pub const MSCN_DIFF_MEAN: usize = 5;
-    /// Squared variant: `sat((n₁−n₂)², C_MSCN_SQ)` mean.
-    pub const MSCN_DIFF_L2: usize = 6;
-    /// Local contrast gain (A4): `bounded_excess(var₂, var₁, C_CONTRAST)`
-    /// mean — distorted window has MORE energy (over-sharpen, ringing,
-    /// added grain) — requires the σ-split (`d2` plane).
-    pub const CONTRAST_GAIN: usize = 7;
-    /// Local contrast loss: `bounded_excess(var₁, var₂, C_CONTRAST)` mean
-    /// (washed-out / smoothed rendering as a field, not via HF proxies).
-    pub const CONTRAST_LOSS: usize = 8;
-    /// Alignment-free texture-energy dissimilarity (A4, the cheap DISTS
-    /// texture term — Ding et al. 2020): `1 − bounded_sim(var₁, var₂,
-    /// C_CONTRAST)` mean. Compares local contrast STATISTICS, not
-    /// pixel-registered values.
-    pub const TEXTURE_DISSIM: usize = 9;
-    /// GMSD-style deviation pooling of the GMS map (A5; Xue et al. 2013
-    /// §3.3 — std of the map, the documented reason GMSD beats GMSM).
-    /// Zero when `gradient_features` is off.
-    pub const GMS_DEV2: usize = 10;
-    /// Deviation (std) of the edge-artifact map (A5).
-    pub const ART_DEV2: usize = 11;
-    /// Deviation (std) of the detail-lost map (A5).
-    pub const DET_DEV2: usize = 12;
     /// Global per-channel mean shift (A9): `sat(|mean(s)−mean(d)|,
     /// C_GDMEAN)` — the windowed features under-weigh global casts.
     pub const GLOBAL_DMEAN: usize = 13;
@@ -489,48 +440,17 @@ pub mod idx_append {
     pub const GLOBAL_CGAIN: usize = 14;
     /// Global contrast loss: reverse polarity of [`GLOBAL_CGAIN`].
     pub const GLOBAL_CLOSS: usize = 15;
-    /// Mean source gradient magnitude, saturated (A2.iv): the >92%
-    /// first-JND PSNR predictor (Bondžulić et al. 2022 via
-    /// jnd-sur.md:204-210) as a reference-side complexity conditioner.
-    /// Reference-only (correct 0 in any steering fold, like
-    /// `PJND_FRAGILITY`). Zero when `gradient_features` is off.
-    pub const GRAD_SRC_MEAN: usize = 16;
 }
 
-/// Cross-channel masking strength for the chroma→luma term (append
-/// [`idx_append::XMASK_TRANSDUCER`]). Same order of magnitude as
-/// `K_PJND_MASK` (the CVVDP `k_{i,c}` values are trained; we seed at the
-/// core masking strength and let the head learn usage via the feature
-/// weight).
-pub const K_XCH: f64 = 4.0;
-/// Luminance-term strength in [`idx_append::LUM_TRANSDUCER`]'s divisive
-/// denominator.
-pub const K_LUM_ADAPT: f64 = 4.0;
 /// Saturating half-point mapping the (cbrt-domain, ~[0,1]) reference Y
 /// value to the bin parameter `t = y/(y+C_LUM_T)` used by the luminance
 /// soft bins and the luminance transducer term. 0.35 puts `t=0.5` near
 /// mid-gray in XYB's cube-root intensity scale.
 pub const C_LUM_T: f64 = 0.35;
-/// Variance floor inside the MSCN normalizer `σ′ = sqrt(var + C_MSCN_VAR)`
-/// (≈ (0.032)² in unit-XYB scale — same role as BRISQUE's C, keeps the
-/// normalized residual bounded by `|r|/sqrt(C_MSCN_VAR)`).
-pub const C_MSCN_VAR: f64 = 1e-3;
-/// Per-pixel saturating half-point for `|n₁−n₂|` (bounded-by-construction
-/// per the D6 design principle).
-pub const C_MSCN_ABS: f64 = 0.5;
-/// Per-pixel saturating half-point for `(n₁−n₂)²`.
-pub const C_MSCN_SQ: f64 = 0.25;
-/// Stabilizer for the var-based contrast gain/loss/texture-sim family
-/// (variances of unit-XYB windows are `activity²`-scale; matches
-/// `C_ACTIVITY²` order).
-pub const C_CONTRAST: f64 = 1e-4;
 /// Saturating half-point for the global |Δmean| feature.
 pub const C_GDMEAN: f64 = 0.02;
 /// Stabilizer for the global variance gain/loss pair.
 pub const C_GCONTRAST: f64 = 1e-4;
-/// Saturating half-point for the mean source-gradient conditioner
-/// (matches `C_PJND_GRAD` — same signal family).
-pub const C_GRADM: f64 = 0.02;
 
 // ============================================================================
 // append2 (f924+) constants — BANDVIS + luminance conditioner + HL bins.
@@ -541,25 +461,9 @@ pub const C_GRADM: f64 = 0.02;
 // front-ends so a front-end change that invalidates them fails loudly.
 // ============================================================================
 
-/// BANDVIS band-pass lower half-point, SDR/cbrt route: ≈0.5× the Y-plane
-/// |∇| of a one-8-bit-code plateau step at mid-gray.
-pub(crate) const BV_DELTA_LO_SDR: f32 = 0.00169;
-/// Upper half-point, SDR route: ≈5× the one-code step.
-pub(crate) const BV_DELTA_HI_SDR: f32 = 0.0169;
 /// Stabilizer for the BANDVIS FR `bounded_excess` pair (indicators are
 /// [0,1] products — same class as `C_EDGE`).
 pub(crate) const C_BV: f64 = 1e-4;
-/// HL bin 1 anchor: the HDR route's Y-plane value of GRAY at 100 cd/m²
-/// (SDR white in PU-normalized units) — measured by
-/// `bandvis_delta_derivation_table`; the bin weighs error ABOVE SDR white.
-pub(crate) const HL1_Y_ANCHOR: f32 = 1.01;
-/// HL bin 2 anchor: Y-plane value of gray at 1000 cd/m².
-pub(crate) const HL2_Y_ANCHOR: f32 = 1.649;
-/// Softness half-point for the HL soft steps `u/(u+c)`, `u = max(y − anchor, 0)`
-/// — ½ the measured anchor spacing (1.649 − 1.010 ≈ 0.64) so the two bins
-/// overlap smoothly (E2 partition caveat: they also overlap the existing
-/// bright bin — trainers must treat the three as non-orthogonal).
-pub(crate) const C_HL: f64 = 0.32;
 
 /// append2 slots per scale (Y-only block — no channel axis; layout
 /// `f924 + scale*APPEND2_PER_SCALE + local`, 4 scales × 5 = 20 slots,
@@ -605,37 +509,6 @@ pub mod idx_append2 {
 // front-ends and brackets these constants — the `bandvis_delta_derivation_
 // table` pattern that keeps them honest.
 // ============================================================================
-
-/// SDR-route achromatic weight quadratic `φ_Y(y) = c0 + c1·y + c2·y²`,
-/// with `y` the LIVE reference Y-plane value
-/// (`cbrt(rel + β) − cbrt(β) + 0.01`, β the opsin bias — measured through
-/// `srgb_to_positive_xyb_planar_into`). LSQ over sRGB codes 4–253, this
-/// refit: rms 0.092, max 0.431 (dark tail). Implementation-found
-/// deviation from the design doc's §5.3 table: those values were fitted
-/// in an idealized bias-free `cbrt(rel)` coordinate that the live plane
-/// is NOT an affine map of (the opsin bias regularizes the doc's
-/// dark-tail derivative collapse); §6's pre-composition rule resolves
-/// in favor of the live coordinate, and `csfw_phi_derivation_table`
-/// recomputes this exact fit and pins the constants to it.
-pub(crate) const CSFW_PHI_Y_SDR: [f64; 3] = [1.77430, -5.81908, 4.04916];
-/// Fitted amplitude for the achromatic luminance modulation — SEED 1.0
-/// (design §5.3: `κ = 1` applies the derived castleCSF curve exactly;
-/// `κ = 0` reproduces the unweighted features bit-for-bit). Stage-1/2
-/// calibration (§9.2) adjusts this from measurement, never by hand.
-pub(crate) const CSFW_KAPPA_Y: f64 = 1.0;
-/// Per-band (per-scale) strength multipliers `λ_b`, achromatic only —
-/// the published chromatic peak frequencies do NOT move with luminance
-/// (castleCSF Eq. 24 discussion; design §3.3). `λ_2 ≡ 1` is the
-/// identifiability anchor; all SEED 1.0. Pre-registered expectation for
-/// the stage-1 fit: increasing toward finer scales (falsifier 2).
-pub(crate) const CSFW_LAMBDA_B: [f64; 4] = [1.0, 1.0, 1.0, 1.0];
-/// Weight clamp bounds (design §5.3): bracket every derived curve (SDR
-/// span 2.96×, HDR chroma 2.5×) and own the sub-0.5 cd/m² glare
-/// disagreement + the fit's dark-tail extrapolation. No lane can be
-/// annihilated (§3.2: supra-threshold flattening — MAD's premise).
-pub(crate) const CSFW_W_MIN: f64 = 0.25;
-/// Upper weight clamp bound (see [`CSFW_W_MIN`]).
-pub(crate) const CSFW_W_MAX: f64 = 4.0;
 
 /// CSFW slots per scale (Y-only tier-1 block — no channel axis, same
 /// documented layout deviation as append2; layout
@@ -755,45 +628,6 @@ fn rev4_hats(c: &[f64; REV4_HATS], u: f64) -> [f64; REV4_HATS] {
     h
 }
 
-/// Pinned IEEE-754 bit patterns for C3's 31 true-log interior edges
-/// `10^(-6 + k*log10(2e6)/32)` (k = 1..31). The 2026-09-23 TRAIN-only
-/// registry revision extended the top endpoint from 1 to 2; the final
-/// interior edge is 1.2709334445868168. Runtime binning and quantile
-/// emission use only this table, independent of platform `powf`.
-const TAIL_EDGE_BITS: [u64; 31] = [
-    0x3eba66c2a74a2306,
-    0x3ec4c5f32ba53f33,
-    0x3ed0584963ee7360,
-    0x3ed9b8969445d847,
-    0x3ee43ce83c83f32c,
-    0x3eefd8eaa4b1df44,
-    0x3ef90ee7884af44e,
-    0x3f03b76562438fa3,
-    0x3f0f06d135f4b230,
-    0x3f186997e71fea72,
-    0x3f2335535097fe64,
-    0x3f2e3a21d1f34d40,
-    0x3f37c88ad7e2850b,
-    0x3f42b69b54e81970,
-    0x3f4d72b8c0d9ca6c,
-    0x3f572ba43fff3718,
-    0x3f623b275257b423,
-    0x3f6cb0733676d0d9,
-    0x3f7692c8be49a365,
-    0x3f81c2e1bdebc593,
-    0x3f8bf32f4c29143a,
-    0x3f95fddda6357e33,
-    0x3fa14db59ac807b4,
-    0x3fab3acbfaf4e35d,
-    0x3fb56cc8fb2ef3d0,
-    0x3fc0db8e76856372,
-    0x3fca872915c0bda2,
-    0x3fd4df716c11c450,
-    0x3fe06c5865a085fb,
-    0x3fe9d82743b7eddb,
-    0x3ff455be4ebe49c1,
-];
-
 /// Binade LUT for the pinned C3 edges, used to bin in ~5 ops.
 struct TailEdges {
     /// 31 ascending interior-edge bit patterns.
@@ -807,24 +641,6 @@ struct TailEdges {
 }
 
 impl TailEdges {
-    fn build() -> Self {
-        let edges = TAIL_EDGE_BITS;
-        let mut base = Box::new([0u8; 1024]);
-        let mut inner = Box::new([0u8; 1024]);
-        for e in 0..=1023usize {
-            let lo = (e as u64) << 52;
-            let hi = ((e as u64) + 1) << 52;
-            let b = edges.partition_point(|&x| x < lo);
-            let n_in = edges[b..].partition_point(|&x| x < hi);
-            debug_assert!(
-                n_in <= 2,
-                "edge spacing admits at most two edges per binade"
-            );
-            base[e] = b as u8;
-            inner[e] = n_in as u8;
-        }
-        Self { edges, base, inner }
-    }
 
     /// [`bin`](Self::bin) with the `c3negfold` correction: non-positive (and
     /// NaN) values fold into bin 0. The maps are non-negative by construction
@@ -861,12 +677,6 @@ impl TailEdges {
         }
         bin
     }
-}
-
-fn tail_edges() -> &'static TailEdges {
-    use std::sync::OnceLock;
-    static E: OnceLock<TailEdges> = OnceLock::new();
-    E.get_or_init(TailEdges::build)
 }
 
 // ---------------------------------------------------------------------------
@@ -1176,37 +986,6 @@ fn rev4_grad_pixel(
     }
 }
 
-/// One (strip, channel)'s rev4 work order — the at-scale [`ComputeSet`]
-/// flags resolved against the channel, handed to [`stream_phase_b`] (and
-/// the materialized [`compute_channel_scale_v2`]). `gridblk_period == 0`
-/// is the C1-off marker (a period can never legitimately be 0), and
-/// `bleed_mask` is `Some` only on the two chroma channels.
-#[derive(Clone, Copy)]
-struct Rev4Work<'a> {
-    /// C1 lattice period for this (channel, scale) — `8 >> s` on Y,
-    /// `16 >> s` on X/B — or 0 when `gridblk` is off or degenerate (`< 2`).
-    gridblk_period: usize,
-    /// C2 ring bins run in the gradient kernel.
-    ringbasis: bool,
-    /// C3 tail histograms run in the dense kernel.
-    tailhist: bool,
-    /// C4 flat-region HF-gain noise runs in the dense kernel.
-    flat: bool,
-    /// C4 dilated dst-luma-edge mask (strip_n bytes of 0.0/1.0), `Some`
-    /// only when `arttype` is on AND this is a chroma channel.
-    bleed_mask: Option<&'a [f32]>,
-    /// C8 gradient-similarity bank runs in the same gradient pass.
-    gmsbank: bool,
-    bank: GmsBankWork<'a>,
-}
-
-/// Does the C8 gradient bank run for this (scale, channel)? C8 proper: every
-/// coarse channel plus native Y. `gmsnative` (restored cut) adds the native X
-/// and B cells; they reuse the same per-channel stabilisers and accumulators.
-fn gmsbank_cell_live(local: &ComputeSet, scale: usize, ch: usize) -> bool {
-    false
-}
-
 // ---------------------------------------------------------------------------
 // REV4 emission: one PerChannel cell = gridblk(8) + ringbasis(6) +
 // tailhist(12) = 26 slots in that order; arttype is emitted per scale by
@@ -1374,21 +1153,6 @@ fn saturate(x: f64, c: f64) -> f64 {
     x / (x + c)
 }
 
-/// Fused PJND masking-transducer band: `saturate(raw_abs_err/(1+k*act), c)`
-/// collapsed to ONE division (phase-6 §A.16 lever A step 1, exact — not an
-/// approximation). Derivation: let `D = 1+k*act` (always `>= 1 > 0` since
-/// `k, act >= 0`); `saturate(x/D, c) = (x/D)/((x/D)+c)`; multiplying
-/// numerator and denominator by `D` (valid, `D` is a positive nonzero
-/// scalar) gives `x/(x + c*D) = x/(x + c + c*k*act)` — the original chained
-/// `raw_abs_err/(1+k*act)` THEN `t/(t+c)` (2 divisions) becomes one
-/// division against a directly-computed denominator. Bounded `[0, 1)` for
-/// `raw_abs_err >= 0`, same contract as `saturate(raw_abs_err/(1+k*act),
-/// c)`.
-#[inline]
-fn pjnd_transducer(raw_abs_err: f64, act: f64, k: f64, c: f64) -> f64 {
-    raw_abs_err / (raw_abs_err + c * (1.0 + k * act))
-}
-
 include!("feature_v2_kernels.rs");
 
 #[cfg(test)]
@@ -1552,75 +1316,6 @@ fn lum_bins_from_weighted_sums(
         ws_mid.finish().clamp(0.0, 2.0),
         ws_bright.finish().clamp(0.0, 2.0),
     ]
-}
-
-fn finish_append(
-    dense: &DenseAccum,
-    app: &AppendAccum,
-    grad: &GradientAccum,
-    n: usize,
-    cross: bool,
-    toggles: V2NewFeatureToggles,
-    out: &mut [f64],
-) {
-    debug_assert_eq!(out.len(), FEATURES_PER_CHANNEL_APPEND);
-    let n_f = n as f64;
-    #[inline]
-    fn clamp01(v: f64) -> f64 {
-        v.clamp(0.0, 1.0)
-    }
-    #[inline]
-    fn dev_from_moments(sum: f64, sum_sq: f64, n_f: f64) -> f64 {
-        let mean = sum / n_f;
-        ((sum_sq / n_f) - mean * mean).max(0.0).sqrt()
-    }
-
-    out[idx_append::XMASK_TRANSDUCER] = if cross {
-        clamp01(app.sum_xmask / n_f)
-    } else {
-        0.0
-    };
-    out[idx_append::LUM_TRANSDUCER] = if cross {
-        clamp01(app.sum_lumt / n_f)
-    } else {
-        0.0
-    };
-    // Mid bin derived from the Bernstein partition of unity — see
-    // [`lum_bins_from_weighted_sums`], the shared owner of all three.
-    let lum = lum_bins_from_weighted_sums(app.ws_dark, app.ws_bright, app.sum_mse, n_f);
-    out[idx_append::LUM_DARK_ERR] = lum[0];
-    out[idx_append::LUM_MID_ERR] = lum[1];
-    out[idx_append::LUM_BRIGHT_ERR] = lum[2];
-    out[idx_append::MSCN_DIFF_MEAN] = clamp01(app.sum_mscn / n_f);
-    out[idx_append::MSCN_DIFF_L2] = clamp01(app.sum_mscn2 / n_f);
-    out[idx_append::CONTRAST_GAIN] = clamp01(app.sum_cgain / n_f);
-    out[idx_append::CONTRAST_LOSS] = clamp01(app.sum_closs / n_f);
-    out[idx_append::TEXTURE_DISSIM] = clamp01(app.sum_tex / n_f);
-    out[idx_append::GMS_DEV2] = if toggles.gradient_features {
-        clamp01(dev_from_moments(grad.sum_gms, grad.sum_gms2, n_f))
-    } else {
-        0.0
-    };
-    out[idx_append::ART_DEV2] = clamp01(dev_from_moments(dense.sum_art, app.sum_art2, n_f));
-    out[idx_append::DET_DEV2] = clamp01(dev_from_moments(dense.sum_det, app.sum_det2, n_f));
-    let (g_dmean, g_cgain, g_closs) = global_stats_from_raw_moments(
-        app.sum_s,
-        app.sum_d,
-        app.sum_s2,
-        app.sum_d2,
-        app.sum_dd,
-        app.sum_ds,
-        n_f,
-        toggles.formula_revision.paired_global_contrast(),
-    );
-    out[idx_append::GLOBAL_DMEAN] = g_dmean;
-    out[idx_append::GLOBAL_CGAIN] = clamp01(g_cgain);
-    out[idx_append::GLOBAL_CLOSS] = clamp01(g_closs);
-    out[idx_append::GRAD_SRC_MEAN] = if toggles.gradient_features {
-        saturate(grad.sum_grad_src / n_f, C_GRADM)
-    } else {
-        0.0
-    };
 }
 
 /// `out[i] = input[i]²` — the streamed walk's σ-split square (reads the
@@ -3347,13 +3042,7 @@ fn rev5_execute_job(
         true,
         false,
         false,
-        false,
-        &[],
-        None,
-        None,
-        None,
         local.free_work(job.ch, scale),
-        local.rev4_work(scale, job.ch, None, None),
         &mut job.result,
     );
     if fold_v1 {
@@ -4169,13 +3858,6 @@ fn stream_phase_a<S: ImageSource, D: ImageSource>(
 /// Phase B of one (strip, channel): the materialized walk's kernel set
 /// over the phase-A planes, folded into `acc` in kernel-strip order.
 ///
-/// `refy_strip` is the reference Y plane's strip rows (from the
-/// producer's rolling plane — valid until the next `next_strip` call);
-/// `cross` is `Some((act_x, act_b))` strip slices for the Y channel's
-/// cross-masked transducer (X/B's phase-A activity, still live in their
-/// scratches — computed once per strip, replacing the materialized pair
-/// path's whole-plane replay planes).
-///
 /// LOCALITY CONTRACT: call this IMMEDIATELY after the same channel's
 /// [`stream_phase_a`] — the fold band replay re-reads the H planes and
 /// the kernels re-read the V planes while they are cache-hot (the same
@@ -4198,18 +3880,9 @@ fn stream_phase_b(
     // (`!v2_blocks`) and `v1_pools` is `Full` (SelfBlur needs the band pool
     // scratch) — `foldapp_streaming_walk` owns that decision.
     self_blur: bool,
-    append: bool,
-    refy_strip: &[f32],
-    cross: Option<(&[f32], &[f32])>,
-    append2: Option<Append2Params>,
-    csfw: Option<CsfwParams>,
     // The resolved per-channel work order. Do not reconstruct it from public
     // toggles: that loses private subset restrictions and runs dead reductions.
     free: crate::fused::FreeExtrasWork,
-    // REV4's resolved per-(strip, channel) work order — `Rev4Work::OFF`
-    // on every non-rev4 call (loop-invariant Option branches inside the
-    // kernels, same shape as `transducer_bank`).
-    r4w: Rev4Work<'_>,
     acc: &mut StreamChannelAccums,
 ) {
     let width = info.plane_w;
@@ -4234,22 +3907,6 @@ fn stream_phase_b(
         let s12_strip = &scr.s12[off..off + strip_n];
         let act_strip = &scr.activity[off..off + strip_n];
 
-        // REV4 C3/C4-noise hook — `None` when both are off (the
-        // `transducer_bank`-shaped invariant branch inside the kernel).
-        let cell = &mut acc.rev4[scale];
-        let r4d = if r4w.tailhist || r4w.flat {
-            Some(Rev4Dense {
-                tail: if r4w.tailhist {
-                    Some(&mut cell.tail)
-                } else {
-                    None
-                },
-                flat: if r4w.flat { Some(&mut cell.flat) } else { None },
-                edges: tail_edges(),
-            })
-        } else {
-            None
-        };
         let d = dense_block_kernel_at_revision(
             src_strip,
             dst_strip,
@@ -4261,7 +3918,7 @@ fn stream_phase_b(
             width,
             strip_h,
             toggles.transducer_bank,
-            r4d,
+            None,
             toggles.formula_revision,
         );
         acc.dense[scale].accumulate(&d);
@@ -4271,33 +3928,13 @@ fn stream_phase_b(
         // whenever either hook has work, even with `gradient_features`
         // off (the hook's `Option` gates keep the rev4-off call
         // byte-identical to the pre-rev4 signature).
-        if toggles.gradient_features || r4w.ringbasis || r4w.bleed_mask.is_some() || r4w.gmsbank {
+        if toggles.gradient_features {
             let g_off = (HALO_P - 1) * width;
             let g_n = width * (strip_h + 2);
             // BANDVIS accumulates only on (Y, append2 on) — the const-split
             // instantiation; every other path runs the byte-identical
             // BANDVIS=false kernel. The dst self-mask plane routes in only
             // when `append2_dst_activity` is live (third instantiation).
-            let bandvis = append2
-                .filter(|_| cross.is_some())
-                .map(|p| (p.bv_delta_lo, p.bv_delta_hi));
-            let bv_act_dst = append2
-                .filter(|p| cross.is_some() && p.dst_activity)
-                .map(|_| &scr.activity_dst[off..off + strip_n]);
-            let cell = &mut acc.rev4[scale];
-            let r4g = if r4w.ringbasis || r4w.bleed_mask.is_some() || r4w.gmsbank {
-                Some(Rev4Grad {
-                    ring: if r4w.ringbasis {
-                        Some(&mut cell.ring)
-                    } else {
-                        None
-                    },
-                    bleed: r4w.bleed_mask.map(|m| (m, &mut cell.bleed)),
-                    bank: r4w.bank,
-                })
-            } else {
-                None
-            };
             let g = gradient_block_kernel_at_revision(
                 &src_win[g_off..g_off + g_n],
                 &dst_win[g_off..g_off + g_n],
@@ -4305,10 +3942,10 @@ fn stream_phase_b(
                 Some((mu1_strip, mu2_strip)),
                 width,
                 strip_h,
-                bandvis,
-                bv_act_dst,
-                r4g,
-                r4w.gmsbank,
+                None,
+                None,
+                None,
+                false,
                 toggles.formula_revision,
             );
             acc.grad[scale].accumulate(&g);
@@ -4317,22 +3954,6 @@ fn stream_phase_b(
             }
         }
 
-        // REV4 C1 — the full-boundary pass over the wide window (the
-        // phase-A activity plane covers the halo rows, which is exactly
-        // what `gridblk_strip_wide`'s contract requires).
-        if r4w.gridblk_period >= 2 {
-            gridblk_strip_wide(
-                &src_win[..n_wide],
-                &dst_win[..n_wide],
-                &scr.activity[..n_wide],
-                width,
-                y0,
-                strip_h,
-                info.plane_h,
-                r4w.gridblk_period,
-                &mut acc.rev4[scale].grid,
-            );
-        }
     }
 
     if fold_v1 {
@@ -4348,50 +3969,6 @@ fn stream_phase_b(
             free,
             acc,
         );
-    }
-
-    if append {
-        debug_assert!(v2_blocks, "append_block requires the v2 planes");
-        debug_assert_eq!(refy_strip.len(), strip_n);
-        // Re-bind the phase-A V planes: they are scoped to the `v2_blocks`
-        // arm above, and `append` can only be set when that arm ran.
-        let mu1_strip = &scr.mu1[off..off + strip_n];
-        let mu2_strip = &scr.mu2[off..off + strip_n];
-        let ssq_strip = &scr.ssq[off..off + strip_n];
-        let act_strip = &scr.activity[off..off + strip_n];
-        let hl = append2.map(|p| p.hl_bins).unwrap_or(false) && cross.is_some();
-        let a = append_block_kernel(
-            src_strip,
-            dst_strip,
-            mu1_strip,
-            mu2_strip,
-            ssq_strip,
-            &scr.bs2[off..off + strip_n],
-            act_strip,
-            refy_strip,
-            cross,
-            hl,
-            width,
-            strip_h,
-        );
-        acc.app[scale].accumulate(&a);
-
-        // CSFW pass accumulates only on (Y, csfw_block on) — a separate
-        // kernel invocation over the strip-resident rows (design §4.2);
-        // every other path never dispatches it. `cross.is_some()` is the
-        // Y-channel discriminant, same as the BANDVIS gate above.
-        if let Some(cp) = csfw.filter(|_| cross.is_some()) {
-            let c = csfw_block_kernel(
-                src_strip,
-                dst_strip,
-                refy_strip,
-                cp.eff[scale],
-                width,
-                strip_h,
-                toggles.formula_revision,
-            );
-            acc.csfw[scale].accumulate(&c);
-        }
     }
 
     if v2_blocks && toggles.blockiness {
@@ -4569,255 +4146,6 @@ fn blockiness_sparse_strip_wide(
 // per-boundary scalar scatter cannot meet the family's runtime budget.
 // ============================================================================
 
-/// Per-cell C1 accumulation entry — lazily sizes the `ẽ` planes and runs
-/// the dispatched strip kernel. `plane_h` is the FULL plane height.
-#[allow(clippy::too_many_arguments)]
-fn gridblk_strip_wide(
-    src_wide: &[f32],
-    dst_wide: &[f32],
-    act_wide: &[f32],
-    width: usize,
-    y0: usize,
-    strip_h: usize,
-    plane_h: usize,
-    period: usize,
-    acc: &mut GridblkAccum,
-) {
-    // rev4canon: the computation's own mode selects the scalar canon body —
-    // `LanesF64` at Rev4; the oracle arms under `ZENSIM_FEATCANON`.
-    // `compute_mode()` is `mode(comp_rev)` here (see it for the guarantee);
-    // `Off` below Rev4 runs the shipped SIMD body byte-for-byte.
-    let mode = crate::featcanon::compute_mode();
-    if mode.active() {
-        use crate::featcanon::{LanesF64, Mode};
-        return match mode {
-            Mode::Canon64 => gridblk_strip_wide_canon::<LanesF64>(
-                src_wide, dst_wide, act_wide, width, y0, strip_h, plane_h, period, acc,
-            ),
-            Mode::Off => unreachable!("active() excludes Off"),
-        };
-    }
-    incant!(
-        gridblk_strip_wide_entry(
-            src_wide, dst_wide, act_wide, width, y0, strip_h, plane_h, period, acc
-        ),
-        [v4x, v4, v3, neon, wasm128, scalar]
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
-#[magetypes(v4x, v4, v3, neon, wasm128, scalar)]
-fn gridblk_strip_wide_entry(
-    token: Token,
-    src_wide: &[f32],
-    dst_wide: &[f32],
-    act_wide: &[f32],
-    width: usize,
-    y0: usize,
-    strip_h: usize,
-    plane_h: usize,
-    period: usize,
-    acc: &mut GridblkAccum,
-) {
-    gridblk_strip_wide_generic::<_>(
-        token, src_wide, dst_wide, act_wide, width, y0, strip_h, plane_h, period, acc,
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
-fn gridblk_strip_wide_generic<T: F32x8Backend + Copy>(
-    token: T,
-    src_wide: &[f32],
-    dst_wide: &[f32],
-    act_wide: &[f32],
-    width: usize,
-    y0: usize,
-    strip_h: usize,
-    plane_h: usize,
-    period: usize,
-    acc: &mut GridblkAccum,
-) {
-    debug_assert!((2..=GRIDBLK_MAX_PERIOD).contains(&period));
-    debug_assert!(period.is_power_of_two());
-    debug_assert_eq!(src_wide.len(), width * (strip_h + 2 * HALO_P));
-    debug_assert_eq!(dst_wide.len(), src_wide.len());
-    debug_assert_eq!(act_wide.len(), src_wide.len());
-    let n_plane = width * plane_h;
-    if acc.plane_v.len() != n_plane {
-        acc.plane_v.resize(n_plane, 0.0);
-        acc.plane_h.resize(n_plane, 0.0);
-    }
-    let half = V8::<T>::splat_t(token, 0.5);
-    let c_act = V8::<T>::splat_t(token, C_ACTIVITY as f32);
-    // Lane-phase accumulators for the chunked V span — folded to f64 once
-    // per strip (see module doc above for the lane→phase map).
-    let mut acc_v_abs = [V8::<T>::zero_t(token), V8::<T>::zero_t(token)];
-    let mut acc_v_sgn = [V8::<T>::zero_t(token), V8::<T>::zero_t(token)];
-    macro_rules! ld_at {
-        ($plane:expr, $off:expr) => {
-            V8::<T>::from_array_t(token, $plane[$off..$off + 8].try_into().unwrap())
-        };
-    }
-    for k in 0..strip_h {
-        let y = y0 + k;
-        let row = (HALO_P + k) * width;
-        let prow = y * width;
-
-        // ---- Vertical boundaries (x ∈ 1..width), phase `x mod period`.
-        // Full chunks from x = 1 step 8 keep a fixed lane→phase map.
-        let interior_w = width - 1;
-        let chunk_end = 1 + interior_w - (interior_w % 8);
-        let mut x = 1usize;
-        let mut c = 0usize;
-        while x < chunk_end {
-            let i = row + x;
-            let e = (ld_at!(dst_wide, i) - ld_at!(dst_wide, i - 1)).abs()
-                - (ld_at!(src_wide, i) - ld_at!(src_wide, i - 1)).abs();
-            let norm = (ld_at!(act_wide, i - 1) + ld_at!(act_wide, i)) * half + c_act;
-            let et = e / norm;
-            et.store(
-                (&mut acc.plane_v[prow + x..prow + x + 8])
-                    .try_into()
-                    .unwrap(),
-            );
-            let j = c & 1;
-            acc_v_abs[j] += et.abs();
-            acc_v_sgn[j] += et;
-            x += 8;
-            c += 1;
-        }
-        while x < width {
-            let i = row + x;
-            let e = (dst_wide[i] - dst_wide[i - 1]).abs() - (src_wide[i] - src_wide[i - 1]).abs();
-            let et = e / ((act_wide[i - 1] + act_wide[i]) * 0.5 + C_ACTIVITY as f32);
-            acc.plane_v[prow + x] = et;
-            let p = x % period;
-            acc.abs_v[p] += et.abs() as f64;
-            acc.signed_v[p] += et as f64;
-            x += 1;
-        }
-
-        // ---- Horizontal boundaries (row y vs y−1), phase `y mod period`.
-        // `y == 0` never fires: the lattice has no boundary above the
-        // plane. For interior strips the halo row is the real `y − 1`.
-        if y > 0 {
-            let ph = y % period;
-            let row_u = row - width;
-            let mut acc_h_abs = V8::<T>::zero_t(token);
-            let mut acc_h_sgn = V8::<T>::zero_t(token);
-            let chunk_end_h = width - (width % 8);
-            let mut x = 0usize;
-            while x < chunk_end_h {
-                let i = row + x;
-                let e = (ld_at!(dst_wide, i) - ld_at!(dst_wide, row_u + x)).abs()
-                    - (ld_at!(src_wide, i) - ld_at!(src_wide, row_u + x)).abs();
-                let norm = (ld_at!(act_wide, row_u + x) + ld_at!(act_wide, i)) * half + c_act;
-                let et = e / norm;
-                et.store(
-                    (&mut acc.plane_h[prow + x..prow + x + 8])
-                        .try_into()
-                        .unwrap(),
-                );
-                acc_h_abs += et.abs();
-                acc_h_sgn += et;
-                x += 8;
-            }
-            let mut t_abs = 0.0f32;
-            let mut t_sgn = 0.0f32;
-            while x < width {
-                let i = row + x;
-                let iu = row_u + x;
-                let e = (dst_wide[i] - dst_wide[iu]).abs() - (src_wide[i] - src_wide[iu]).abs();
-                let et = e / ((act_wide[iu] + act_wide[i]) * 0.5 + C_ACTIVITY as f32);
-                acc.plane_h[prow + x] = et;
-                t_abs += et.abs();
-                t_sgn += et;
-                x += 1;
-            }
-            let a = acc_h_abs.to_array();
-            let s = acc_h_sgn.to_array();
-            let row_abs = a[0] + a[1] + a[2] + a[3] + a[4] + a[5] + a[6] + a[7] + t_abs;
-            let row_sgn = s[0] + s[1] + s[2] + s[3] + s[4] + s[5] + s[6] + s[7] + t_sgn;
-            acc.abs_h[ph] += row_abs as f64;
-            acc.signed_h[ph] += row_sgn as f64;
-        }
-    }
-    // Strip-end lane fold — phase (1 + 8j + k) mod period per doc above.
-    for (j, (av, sv)) in acc_v_abs.iter().zip(acc_v_sgn.iter()).enumerate() {
-        let a = av.to_array();
-        let s = sv.to_array();
-        for k in 0..8 {
-            let p = (1 + 8 * j + k) % period;
-            acc.abs_v[p] += a[k] as f64;
-            acc.signed_v[p] += s[k] as f64;
-        }
-    }
-}
-
-// featacc: measurement-mode `gridblk` bodies. The canon body computes `ẽ`
-// in scalar f32 (the SIMD body's op order — `(a−b).abs() − (c−d).abs()`,
-// `(act_lo + act_hi) * 0.5 + C`, one division), stores the f32 plane, and
-// accumulates the per-phase profiles through per-strip `Pool`s at
-// canonical lane `x mod 8` (V: one pair of pools per phase, folded once
-// per strip like the production lane-parity fold; H: one pool pair per
-// row, folded per row like production). `exact` evaluates `ẽ` in f64 into
-// the `plane_*64` shadow planes and pools through `Neum64`.
-#[allow(clippy::too_many_arguments)]
-fn gridblk_strip_wide_canon<P: crate::featcanon::Pool>(
-    src_wide: &[f32],
-    dst_wide: &[f32],
-    act_wide: &[f32],
-    width: usize,
-    y0: usize,
-    strip_h: usize,
-    plane_h: usize,
-    period: usize,
-    acc: &mut GridblkAccum,
-) {
-    let n_plane = width * plane_h;
-    if acc.plane_v.len() != n_plane {
-        acc.plane_v.resize(n_plane, 0.0);
-        acc.plane_h.resize(n_plane, 0.0);
-    }
-    let mut pv_abs = [P::zero(); GRIDBLK_MAX_PERIOD];
-    let mut pv_sgn = [P::zero(); GRIDBLK_MAX_PERIOD];
-    for k in 0..strip_h {
-        let y = y0 + k;
-        let row = (HALO_P + k) * width;
-        let prow = y * width;
-        for x in 1..width {
-            let i = row + x;
-            let e = (dst_wide[i] - dst_wide[i - 1]).abs() - (src_wide[i] - src_wide[i - 1]).abs();
-            let et = e / ((act_wide[i - 1] + act_wide[i]) * 0.5 + C_ACTIVITY as f32);
-            acc.plane_v[prow + x] = et;
-            let p = x % period;
-            pv_abs[p].add(x & 7, et.abs());
-            pv_sgn[p].add(x & 7, et);
-        }
-        if y > 0 {
-            let ph = y % period;
-            let row_u = row - width;
-            let mut h_abs = P::zero();
-            let mut h_sgn = P::zero();
-            for x in 0..width {
-                let i = row + x;
-                let iu = row_u + x;
-                let e = (dst_wide[i] - dst_wide[iu]).abs() - (src_wide[i] - src_wide[iu]).abs();
-                let et = e / ((act_wide[iu] + act_wide[i]) * 0.5 + C_ACTIVITY as f32);
-                acc.plane_h[prow + x] = et;
-                h_abs.add(x & 7, et.abs());
-                h_sgn.add(x & 7, et);
-            }
-            acc.abs_h[ph] += h_abs.fin();
-            acc.signed_h[ph] += h_sgn.fin();
-        }
-    }
-    for p in 0..period {
-        acc.abs_v[p] += pv_abs[p].fin();
-        acc.signed_v[p] += pv_sgn[p].fin();
-    }
-}
-
 // ============================================================================
 // REV4 C4 `arttype` bleed mask builder (design note §C4).
 //
@@ -4853,15 +4181,6 @@ struct BleedMaskWork {
 }
 
 impl BleedMaskWork {
-    /// Size all buffers for `width` × strips of at most `max_strip_h`.
-    fn sized(width: usize, max_strip_h: usize) -> Self {
-        Self {
-            dh: vec![0.0; width * (max_strip_h + 4)],
-            e_row: vec![0.0; width],
-            ehd: vec![0.0; width * (max_strip_h + 2)],
-            mask: vec![0.0; width * max_strip_h],
-        }
-    }
 }
 
 pub(crate) fn compute_folded_v1_372_streaming_stoppable(
@@ -5303,40 +4622,10 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
     // it. Bands inside a channel are independent, so they are the next axis;
     // rayon nests fine inside the channel fan-out.
     let band_parallel = parallel;
-    // LAYOUT vs COMPUTE. The emitted vector keeps the WIDTH and REGIME the
-    // caller asked for — a v1-only 944 request is still a 944 row, with
-    // `f372..` at the structural 0.0 — while the `*_on` flags below drive
-    // what is actually COMPUTED. Deriving the regime from the compute flags
-    // instead would silently hand back a 720-wide vector for a 944 request.
-    // REV4 family layout flags — independent (each family emits iff its
-    // own layout flag, so a rev4-subset request keeps its exact width).
-    // `globaff` (revision 6): the layout flag sets the width; `compute.globaff`
-    // decides whether the strip moment sums run.
-    // Only read below under `threads` (the `fuse_channels` derivation a few
-    // lines down); the `not(threads)` arm hardcodes `fuse_channels = false`
-    // without it, so `--no-default-features --features feature-regime-v2`
-    // (no `threads`) sees this as a genuinely unused binding.
-    #[cfg(feature = "threads")]
-    let append_on = false;
-    assert!(
-        true,
-        "append2_block requires append_block (f924+ sits after the append block)"
-    );
     assert!(
         true,
         "append2_dst_activity requires append2_block (it refines the BANDVIS lanes)"
     );
-    let append2 = false.then(|| {
-        use crate::feature_v2_stream::FrontEnd;
-        match front_end {
-            FrontEnd::Sdr => Append2Params {
-                bv_delta_lo: BV_DELTA_LO_SDR,
-                bv_delta_hi: BV_DELTA_HI_SDR,
-                hl_bins: false,
-                dst_activity: false,
-            },
-        }
-    });
     assert!(
         true,
         "csfw_block requires append2_block (f944+ sits after the append2 block)"
@@ -5370,12 +4659,6 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
     // pre-composed with each route's own encoding (design §6 — runtime
     // never inverts an encoding; the route-dependence lives entirely in
     // which constant set is selected, the `BV_DELTA_*` pattern).
-    let csfw = false.then(|| {
-        use crate::feature_v2_stream::FrontEnd;
-        match front_end {
-            FrontEnd::Sdr => CsfwParams::for_phi(CSFW_PHI_Y_SDR),
-        }
-    });
     let n_scales = crate::NUM_SCALES;
     let (w0, h0) = (source.width(), source.height());
 
@@ -5400,7 +4683,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
     // they were computed inside the loop purely because that is where they are
     // read — and the loop now reads these, so there is one definition of each.
     #[cfg(feature = "threads")]
-    let fuse_channels = parallel && !append_on;
+    let fuse_channels = parallel;
     #[cfg(not(feature = "threads"))]
     let fuse_channels = false;
     let self_blur = fuse_channels && compute.self_blur_eligible();
@@ -5488,13 +4771,9 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
             compute.formula_revision,
         )
     });
-    // REV4 C4's strip scratch — sized for the largest plane width; the
-    // per-strip build slices it down to `info.plane_w`.
-    let mut bleed_work = false.then(|| BleedMaskWork::sized(dims[0].0, STRIP_ROWS));
     // BANDVIS dst self-mask live: phase A additionally produces the Y
     // channel's dst-activity plane (and ONLY the Y channel's — the block
     // is Y-only, so X/B never pay the chain).
-    let act_dst_on = append2.map(|p| p.dst_activity).unwrap_or(false);
     let mut producer = StripPlaneProducer::new_with_ref_feed(
         source,
         distorted,
@@ -5570,8 +4849,6 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
         // strip order — before the dead-scale skip, which knows nothing of it.
         let local = compute.at_scale(scale);
         let v2_blocks = local.v2_blocks;
-        let append2 = append2.filter(|_| false);
-        let csfw = csfw.filter(|_| false);
         let toggles = V2NewFeatureToggles {
             v1_pools: local.v1_pools,
             v1_only: !v2_blocks,
@@ -5683,50 +4960,14 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
             mo.add_strip(info.y0, info.strip_h, info.plane_w, src, dst, parallel);
         }
 
-        // REV4 C4: the strip's ±1-px dilated dst-Y edge mask — built once
-        // pump's slot), so the serial order's X/B phase B has it ready.
-        // Only a live chroma channel consumes it (the mask is dst-LUMA
-        // edges read by the chroma gradient hooks).
-        let bleed_mask: Option<&[f32]> = { None };
-
-        // C8 reads the co-sited B rows directly from the existing producer.
-        // These immutable strip views stay live across the channel fan-out.
-        let chroma_strip = false.then(|| ChromaStrip {
-            reference: producer.rows(
-                crate::feature_v2_stream::Side::Source,
-                2,
-                scale,
-                info.y0,
-                info.y0 + info.strip_h,
-            ),
-            distorted: producer.rows(
-                crate::feature_v2_stream::Side::Distorted,
-                2,
-                scale,
-                info.y0,
-                info.y0 + info.strip_h,
-            ),
-        });
-
-        // ref_y strip rows straight from the producer's rolling plane
-        // (valid until the next `next_strip` call).
-        let refy = { &[][..] };
-
-        // FUSED PER-CHANNEL FAN-OUT (fold-MT lane). When no channel reads
-        // another channel's phase-A output, each worker can finish its own
-        // retention and phase B. A split fan-out costs the walk's
+        // FUSED PER-CHANNEL FAN-OUT (fold-MT lane). No channel reads another
+        // channel's phase-A output, so each worker finishes its own phase B.
+        // A split fan-out costs the walk's
         // locality contract: it holds THREE channels' ~9 MB phase-A buffers
         // live across a barrier, then re-reads them from wherever they landed.
         // The serial arm already fuses A->B per channel for exactly that
         // reason (measured +50 ms/pair on aic3-100 when interleaved); this is
         // the same shape under threads.
-        //
-        // The two preconditions, checked rather than assumed:
-        // * `!append_on` => `cross` is `None` on every channel and `refy` is
-        //   empty, so Y needs nothing from X/B — the ONLY cross-channel edge
-        //   in the walk.
-        // * Retention destinations are disjoint channel/row views, so each
-        //   worker copies its own outputs before phase B.
         //
         // Byte-neutral by construction: identical kernels on identical inputs
         // into per-channel accumulators that are already disjoint. Only which
@@ -5757,7 +4998,6 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
         // fact the compute set does not model.
         #[cfg(feature = "threads")]
         let self_blur = fuse_channels && local.self_blur_eligible();
-        #[cfg(feature = "threads")]
 
         #[cfg(feature = "threads")]
         if fuse_channels {
@@ -5798,13 +5038,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                         v2_blocks,
                         band_parallel,
                         self_blur,
-                        false,
-                        &[][..],
-                        None,
-                        append2,
-                        csfw,
                         local.free_work(ch, scale),
-                        local.rev4_work(scale, ch, bleed_mask, chroma_strip),
                         acc,
                     );
                 });
@@ -5830,8 +5064,8 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                         &producer,
                         &info,
                         ch,
-                        append_cell_active(false, ch, scale),
-                        ch == 1 && act_dst_on && append_cell_active(false, 1, scale),
+                        false,
+                        false,
                         v2_blocks,
                         true,
                         scr,
@@ -5847,16 +5081,6 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                 }
                 let (src_win, dst_win) =
                     stream_windows_shared(&producer, &info, ch, &scratches[ch]);
-                let cross = if ch == 1 && append_cell_active(false, ch, scale) {
-                    let off = HALO_P * info.plane_w;
-                    let strip_n = info.plane_w * info.strip_h;
-                    Some((
-                        &scratches[0].activity[off..off + strip_n],
-                        &scratches[2].activity[off..off + strip_n],
-                    ))
-                } else {
-                    None
-                };
                 stream_phase_b(
                     &scratches[ch],
                     src_win,
@@ -5867,13 +5091,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                     v2_blocks,
                     band_parallel,
                     false,
-                    append_cell_active(false, ch, scale),
-                    refy,
-                    cross,
-                    append2,
-                    csfw,
                     local.free_work(ch, scale),
-                    local.rev4_work(scale, ch, bleed_mask, chroma_strip),
                     acc,
                 );
             });
@@ -5902,31 +5120,21 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
             let (s0, s_rest) = scratch_strips.split_at_mut(1);
             let scr = &mut s0[0];
             let (stash_x_buf, stash_b_buf) = s_rest.split_at_mut(1);
-            let y_active = append_cell_active(false, 1, scale);
             for ch in [0usize, 2] {
                 if !ALL_CHANNELS && !compute.channel_active(scale, ch) {
                     continue;
                 }
-                let active = append_cell_active(false, ch, scale);
                 stream_phase_a(
                     &producer,
                     &info,
                     ch,
-                    active,
+                    false,
                     false,
                     v2_blocks,
                     false,
                     scr,
                     compute.formula_revision,
                 );
-                if y_active {
-                    let stash = if ch == 0 {
-                        &mut stash_x_buf[0].activity
-                    } else {
-                        &mut stash_b_buf[0].activity
-                    };
-                    stash[..strip_n].copy_from_slice(&scr.activity[off..off + strip_n]);
-                }
                 let (src_win, dst_win) = stream_windows_shared(&producer, &info, ch, scr);
                 stream_phase_b(
                     scr,
@@ -5938,13 +5146,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                     v2_blocks,
                     band_parallel,
                     false,
-                    active,
-                    refy,
-                    None,
-                    append2,
-                    csfw,
                     local.free_work(ch, scale),
-                    local.rev4_work(scale, ch, bleed_mask, chroma_strip),
                     &mut accums[ch],
                 );
             }
@@ -5953,21 +5155,13 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                     &producer,
                     &info,
                     1,
-                    y_active,
-                    y_active && act_dst_on,
+                    false,
+                    false,
                     v2_blocks,
                     false,
                     scr,
                     compute.formula_revision,
                 );
-                let cross = if y_active {
-                    Some((
-                        &stash_x_buf[0].activity[..strip_n],
-                        &stash_b_buf[0].activity[..strip_n],
-                    ))
-                } else {
-                    None
-                };
                 let (src_win, dst_win) = stream_windows_shared(&producer, &info, 1, scr);
                 stream_phase_b(
                     scr,
@@ -5979,13 +5173,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                     v2_blocks,
                     band_parallel,
                     false,
-                    y_active,
-                    refy,
-                    cross,
-                    append2,
-                    csfw,
                     local.free_work(1, scale),
-                    local.rev4_work(scale, 1, bleed_mask, chroma_strip),
                     &mut accums[1],
                 );
             }
@@ -6016,51 +5204,8 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
     //     values ⇒ identical bits). ---
     let v1_total = if fold_v1 { n_scales * 3 * 31 } else { 0 };
     let v12_total = v1_total + n_scales * 3 * FEATURES_PER_CHANNEL_V2_TOTAL;
-    let append_total = { 0 };
-    let append2_total = { 0 };
-    let csfw_total = { 0 };
-    let reserved_total = { 0 };
-    // REV4 tail blocks — emit order `gridblk | ringbasis | tailhist |
-    // except PerScale `arttype`.
-    let gridblk_total = { 0 };
-    let ringbasis_total = { 0 };
-    let tailhist_total = { 0 };
-    let arttype_total = { 0 };
-    let gmsbank_total = { 0 };
-    let mapdev_total = { 0 };
-    let z1max_total = { 0 };
-    let gmsnative_total = { 0 };
-    let before_tail = v12_total
-        + append_total
-        + append2_total
-        + csfw_total
-        + reserved_total
-        + gridblk_total
-        + ringbasis_total
-        + tailhist_total
-        + arttype_total
-        + gmsbank_total
-        + mapdev_total
-        + z1max_total
-        + gmsnative_total;
-    // `globaff` sits at its registered base: the reserved slots and the
-    // research palette block before it (f1820..1866) are structural zeros.
-    let (reserved_tail_total, globaff_total) = { (0, 0) };
-    let mut features = vec![0.0f64; before_tail + reserved_tail_total + globaff_total];
-    let (features_v12, features_tail) = features.split_at_mut(v12_total);
-    let (features_app, features_tail2) = features_tail.split_at_mut(append_total);
-    let (features_app2, features_tail3) = features_tail2.split_at_mut(append2_total);
-    let (features_csfw, features_tail4) = features_tail3.split_at_mut(csfw_total);
-    let (_reserved, features_tail5) = features_tail4.split_at_mut(reserved_total);
-    let (features_gridblk, features_tail6) = features_tail5.split_at_mut(gridblk_total);
-    let (features_ring, features_tail7) = features_tail6.split_at_mut(ringbasis_total);
-    let (features_thist, features_tail8) = features_tail7.split_at_mut(tailhist_total);
-    let (features_art, features_tail9) = features_tail8.split_at_mut(arttype_total);
-    let (features_gmsbank, features_tail10) = features_tail9.split_at_mut(gmsbank_total);
-    let (features_mapdev, features_tail11) = features_tail10.split_at_mut(mapdev_total);
-    let (features_z1max, features_tail12) = features_tail11.split_at_mut(z1max_total);
-    let (features_gmsnative, features_tail13) = features_tail12.split_at_mut(gmsnative_total);
-    let (_reserved_tail, features_globaff) = features_tail13.split_at_mut(reserved_tail_total);
+    let mut features = vec![0.0f64; v12_total];
+    let features_v12 = &mut features[..];
     let mut prev_grad: [Option<(f64, f64)>; 3] = [None; 3];
 
     #[allow(clippy::needless_range_loop)] // scale derives 3+ offsets across distinct arrays
@@ -6101,20 +5246,6 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                 compute.omit_pjnd_fragility,
                 compute.formula_revision,
             );
-            if append_cell_active(false, ch, scale) {
-                let out_app = &mut features_app
-                    [app_scale_base + ch * FEATURES_PER_CHANNEL_APPEND..]
-                    [..FEATURES_PER_CHANNEL_APPEND];
-                finish_append(
-                    &acc.dense[scale],
-                    &acc.app[scale],
-                    &acc.grad[scale],
-                    n,
-                    ch == 1,
-                    toggles,
-                    out_app,
-                );
-            }
             apply_transducer_luma_gate(out, ch, toggles);
         }
 

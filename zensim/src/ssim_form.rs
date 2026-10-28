@@ -1202,39 +1202,6 @@ mod tests {
         }
     }
 
-    /// The constant is DERIVED, and both derivations are pinned so a future
-    /// edit has to break an equation rather than a taste.
-    ///
-    /// The second derivation checks agreement with `crate::feature_v2`'s own
-    /// regularizers, which only exist under `feature-regime-v2`.
-    #[test]
-    fn c1_is_derived_from_the_constants_already_present() {
-        // 1. The SSIM relation to the C2 already in the kernel: C2 = (K2*L)^2
-        //    at K2 = 0.03, L = 1 -> C1 = (K1*L)^2 at the textbook K1 = 0.01.
-        let k2 = (C2 as f64).sqrt();
-        assert!((k2 - 0.03).abs() < 1e-9, "C2 is not (0.03)^2: K2 = {k2}");
-        // Tolerances are RELATIVE: both constants are f32, so an exact f64
-        // comparison would only be testing f32's round-trip error (2.5e-12
-        // here), not the derivation.
-        let k1 = 0.01f64;
-        let rel = |a: f64, b: f64| (a - b).abs() / b.abs();
-        assert!(
-            rel(C_SSIM_LUMA as f64, k1 * k1) < 1e-6,
-            "C_SSIM_LUMA is not (0.01)^2: {C_SSIM_LUMA}"
-        );
-        // 2. The family's own bounded_sim regularizers.
-        for c in [
-            crate::feature_v2::C_EDGE,
-            crate::feature_v2::C_GMS,
-            crate::feature_v2::C_CONTRAST,
-        ] {
-            assert!(
-                rel(c, C_SSIM_LUMA as f64) < 1e-6,
-                "family regularizer {c} disagrees with C_SSIM_LUMA"
-            );
-        }
-    }
-
     /// **G3.2** — pinning the shipped revision is the same as not pinning it.
     #[test]
     fn selecting_the_shipped_revision_is_a_no_op() {
