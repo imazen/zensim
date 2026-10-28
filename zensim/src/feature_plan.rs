@@ -275,7 +275,6 @@ impl Plan {
             gradient: v2_blocks,
             blockiness: v2_blocks,
             transducer_bank: v2_blocks,
-            transducers_luma_only: false,
             omit_pjnd_fragility: v2_blocks
                 && !want.iter_slots().any(|id| {
                     crate::feature_defs::def_at(id, ns).is_some_and(|d| {
@@ -525,7 +524,6 @@ impl Plan {
             gradient_features: c.gradient,
             transducer_bank: c.transducer_bank,
             blockiness: c.blockiness,
-            transducers_luma_only: c.transducers_luma_only,
             // LAYOUT: a block's flag is on when the declared width reaches
             // it, whether or not its kernel runs. The chain is NESTED, not
             // four independent tests — `append2_block` asserts
@@ -644,7 +642,6 @@ impl Plan {
             transducer_bank: a.transducer_bank || b.transducer_bank,
             // A luma-only request is a RESTRICTION; the union must not
             // restrict, so it is on only when both sides ask for it.
-            transducers_luma_only: a.transducers_luma_only && b.transducers_luma_only,
             omit_pjnd_fragility: a.omit_pjnd_fragility && b.omit_pjnd_fragility,
         };
         let _ = ns;

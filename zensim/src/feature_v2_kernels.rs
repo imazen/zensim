@@ -482,17 +482,6 @@ pub struct V2NewFeatureToggles {
     pub gradient_features: bool,
     pub transducer_bank: bool,
     pub blockiness: bool,
-    /// Emit the masking transducers (core + fragility + bank) on the LUMA
-    /// (Y) channel only; zero them on X/B. The 2026-07-19 ablation +
-    /// combined-model steering analysis found the chroma transducers cost
-    /// CID22 and carry near-zero steering mass in a combined model (masking
-    /// is fundamentally a luma phenomenon), while the Y transducer carries
-    /// the CSIQ signal. Index-stable: the X/B slots stay at their indices,
-    /// emitted as 0 (deprecate-by-mask, never renumber). Default OFF — this
-    /// is a compression↔general-FR trade (CID22 up, CSIQ down), so it is
-    /// opt-in until the ship recipe fixes the operating point.
-    /// See `benchmarks/v2_trainability_ab_2026-07-19.md`.
-    pub transducers_luma_only: bool,
     /// Emit v1's peak / masked / IW pool blocks (`f156..372`) LIVE inside
     /// the folded walk instead of the structural zeros (2026-08-30, the
     /// carrier lane: `benchmarks/balance_campaign_2026-08-28.md` "carriers
@@ -616,25 +605,10 @@ impl Default for V2NewFeatureToggles {
             gradient_features: true,
             transducer_bank: true,
             blockiness: true,
-            transducers_luma_only: false,
             formula_revision: crate::ssim_form::active_revision(),
             v1_pools: V1PoolsMode::Off,
             v1_only: false,
         }
-    }
-}
-
-/// Zero the masking-transducer slots (core, fragility, low-k, high-k) for a
-/// non-luma channel when `transducers_luma_only` is set. Index-stable
-/// deprecate-by-mask: the slots keep their positions, emitted as 0. `ch==1`
-/// is the Y (luma) channel — left untouched. No-op when the toggle is off.
-#[inline]
-pub(crate) fn apply_transducer_luma_gate(out: &mut [f64], ch: usize, toggles: V2NewFeatureToggles) {
-    if toggles.transducers_luma_only && ch != 1 {
-        out[idx::PJND_TRANSDUCER] = 0.0;
-        out[idx::PJND_FRAGILITY] = 0.0;
-        out[idx::PJND_TRANSDUCER_LOW_K] = 0.0;
-        out[idx::PJND_TRANSDUCER_HIGH_K] = 0.0;
     }
 }
 
@@ -770,7 +744,6 @@ pub(crate) struct ComputeSet {
     pub gradient: bool,
     pub blockiness: bool,
     pub transducer_bank: bool,
-    pub transducers_luma_only: bool,
     /// Declared plans may omit the reference-only PJND fragility finalizer.
     pub omit_pjnd_fragility: bool,
 
@@ -838,7 +811,6 @@ impl ComputeSet {
             gradient: t.gradient_features && v2_blocks,
             blockiness: t.blockiness && v2_blocks,
             transducer_bank: t.transducer_bank,
-            transducers_luma_only: t.transducers_luma_only,
             omit_pjnd_fragility: t.omit_pjnd_fragility,
         };
         set.rev5_scope();
@@ -1747,7 +1719,6 @@ fn gradient_block_kernel_generic<T: F32x8Backend + Copy>(
 
     for y in 0..height {
 
-
         let row = (y + 1) * width;
         let row_u = y * width;
         let row_d = (y + 2) * width;
@@ -2111,7 +2082,6 @@ fn gradient_block_kernel_canon<
 ) -> GradientAccum {
     let mut acc = GradientAccum::default();
 
-
     // Revision 7: the interior pools' f64 lanes live for the whole call (each
     // row's f32 row lanes fold into them) and finish once, after the last row.
     let mut call_pools = [P::zero(); 8];
@@ -2120,8 +2090,6 @@ fn gradient_block_kernel_canon<
         let row_u = y * width;
         let row_d = (y + 2) * width;
         let act_row = y * width;
-
-
 
         gradient_border_pixel::<R7>(
             src_h,
@@ -2352,7 +2320,6 @@ fn gradient_block_kernel_canon64_vec<
 ) -> GradientAccum {
     let mut acc = GradientAccum::default();
 
-
     // Revision 7 (`rowlanes`): the chunks' adds of the six non-cancelling
     // pools go to f32 row lanes, folded into the f64 lanes every
     // `ROW_LANES_FOLD` columns and at the end of the chunks (the scalar body's
@@ -2422,8 +2389,6 @@ fn gradient_block_kernel_canon64_vec<
         let row_u = y * width;
         let row_d = (y + 2) * width;
         let act_row = y * width;
-
-
 
         gradient_border_pixel::<R7>(
             src_h,

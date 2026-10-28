@@ -30,6 +30,7 @@
 - `PrecomputedReference::width` / `height`; `try_score_from_features` (`training` feature).
 
 #### Changed
+- Remove the constant transducer channel gate after auditing profile, cached, and training paths.
 - Fold revision-1 defaults in legacy kernels; canonical kernels retain explicit per-call revisions.
 - Remove empty research feature families and their unused planner and accumulator code.
 - Remove unused free-feature accumulators. Single-slot MSE plans use the same kernels as full plans,

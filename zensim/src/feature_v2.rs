@@ -4088,7 +4088,6 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                 compute.omit_pjnd_fragility,
                 compute.formula_revision,
             );
-            apply_transducer_luma_gate(out, ch, toggles);
         }
 
         // Retention hooks (appendix N): the EXACT pooled cells + the
