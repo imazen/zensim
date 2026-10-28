@@ -184,54 +184,6 @@ pub fn per_sample_alpha_head(h: &[f32], p: &PerSampleAlphaParams<'_>, form: PowF
     alpha * y_rank + (1.0 - alpha) * y_pool
 }
 
-/// Apply the hybrid head to a hidden vector `h`.
-///
-/// Returns `f64::NAN` when `h` is empty or `rank_w` disagrees with its
-/// length — see [`per_sample_alpha_head`] for why the check is here.
-pub fn hybrid_head(h: &[f32], p: &HybridHeadParams<'_>, form: PowForm) -> f64 {
-    let n = h.len();
-    if n == 0 || p.rank_w.len() != n {
-        return f64::NAN;
-    }
-
-    let mut y_rank = p.rank_b as f64;
-    let mut sum = 0.0_f64;
-    let mut max_v = f64::NEG_INFINITY;
-    let mut sum_p = 0.0_f64;
-    let pn = p.p_norm as f64;
-    for (j, &hj) in h.iter().enumerate() {
-        let hjf = hj as f64;
-        y_rank += hjf * p.rank_w[j] as f64;
-        sum += hjf;
-        if hjf > max_v {
-            max_v = hjf;
-        }
-        sum_p += hjf.abs().det_powf(pn, form);
-    }
-    let nf = n as f64;
-    let mu = sum / nf;
-    let mut var = 0.0_f64;
-    for &hj in h.iter() {
-        let d = hj as f64 - mu;
-        var += d * d;
-    }
-    let sigma = (var / nf).sqrt().max(POOL_STD_FLOOR);
-    let p_norm_stat = (sum_p / nf).det_powf(1.0 / pn, form);
-
-    let y_pool = mu * p.reducer_w[0] as f64
-        + sigma * p.reducer_w[1] as f64
-        + max_v * p.reducer_w[2] as f64
-        + p_norm_stat * p.reducer_w[3] as f64
-        + p.reducer_b as f64;
-
-    // sigmoid with clamp (matches the trainer's `sigmoid` helper).
-    let alpha = {
-        let xc = (p.alpha_logit as f64).clamp(-20.0, 20.0);
-        1.0 / (1.0 + (-xc).det_exp(form))
-    };
-    alpha * y_rank + (1.0 - alpha) * y_pool
-}
-
 /// The tanh-pinned `[0, 100]` sigmoid wrap: `100 · σ(y_pre / scale)`.
 ///
 /// Matches `zensim-train-core::per_sample_alpha_head::
@@ -425,48 +377,6 @@ mod tests {
         }
     }
 
-    /// The heads are NOT form-invariant — the property whose absence made the
-    /// validate-side fork invisible. If a future edit routes them back through
-    /// `f64::powf`, both arms would agree and this fails.
-    #[test]
-    fn both_heads_respond_to_the_pow_form() {
-        let mut psa_moved = 0usize;
-        let mut hyb_moved = 0usize;
-        for seed in 0..2_000u64 {
-            let n = 8 + (seed as usize % 121);
-            let h = hidden(n, seed);
-            let w = hidden(n, seed ^ 0xAAAA);
-            let r = hidden(n, seed ^ 0x5555);
-            let p = psa_params(&w, &r);
-            let a = per_sample_alpha_head(&h, &p, PowForm::LibmPowf);
-            let b = per_sample_alpha_head(&h, &p, PowForm::PureRust);
-            if a.to_bits() != b.to_bits() {
-                psa_moved += 1;
-            }
-            let hp = HybridHeadParams {
-                rank_w: &r,
-                rank_b: 3.5,
-                alpha_logit: 0.75,
-                reducer_w: [0.7, -1.3, 0.4, 0.9],
-                reducer_b: -2.0,
-                p_norm: 6.0,
-            };
-            let c = hybrid_head(&h, &hp, PowForm::LibmPowf);
-            let d = hybrid_head(&h, &hp, PowForm::PureRust);
-            if c.to_bits() != d.to_bits() {
-                hyb_moved += 1;
-            }
-        }
-        assert!(
-            psa_moved > 0,
-            "per_sample_alpha_head is form-INVARIANT — it is not routed through det_math"
-        );
-        assert!(
-            hyb_moved > 0,
-            "hybrid_head is form-INVARIANT — it is not routed through det_math"
-        );
-    }
-
     /// The two arms are a rounding question, never a semantic one.
     #[test]
     fn the_two_pow_arms_stay_close_on_the_heads() {
@@ -482,26 +392,6 @@ mod tests {
             let rel = (a - b).abs() / a.abs().max(b.abs()).max(1.0);
             assert!(rel < 1e-12, "seed {seed}: {a} vs {b} (rel {rel:e})");
         }
-    }
-
-    #[test]
-    fn heads_return_nan_on_a_length_mismatch() {
-        let h = vec![0.5_f32; 4];
-        let w = vec![1.0_f32; 3];
-        let p = psa_params(&w, &w);
-        assert!(per_sample_alpha_head(&h, &p, PowForm::LibmPowf).is_nan());
-        let hp = HybridHeadParams {
-            rank_w: &w,
-            rank_b: 0.0,
-            alpha_logit: 0.0,
-            reducer_w: [1.0; 4],
-            reducer_b: 0.0,
-            p_norm: 2.0,
-        };
-        assert!(hybrid_head(&h, &hp, PowForm::LibmPowf).is_nan());
-        let empty: [f32; 0] = [];
-        let ep = psa_params(&empty, &empty);
-        assert!(per_sample_alpha_head(&empty, &ep, PowForm::LibmPowf).is_nan());
     }
 
     #[test]

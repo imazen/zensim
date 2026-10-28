@@ -728,7 +728,6 @@ impl crate::metric::Zensim {
                 params,
                 width as u32,
                 height as u32,
-                None,
             )?;
         }
 
@@ -940,7 +939,6 @@ impl crate::metric::Zensim {
                 params,
                 width as u32,
                 height as u32,
-                None,
             )?;
         }
 

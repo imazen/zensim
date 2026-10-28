@@ -38,13 +38,6 @@ impl<'a> BakeScorer<'a> {
                 reason: "invalid zentrain.feature_ids declaration or input count",
             });
         }
-        if let Some(head) = metadata.minmax_head.as_ref()
-            && (head.n != model.n_inputs() || model.caller_input_width() != model.n_inputs())
-        {
-            return Err(ZensimError::ModelLoadFailed {
-                reason: "min-max head width differs from model input width",
-            });
-        }
         Ok(Self {
             model,
             predictor: crate::mlp::Predictor::new(model),
@@ -70,7 +63,6 @@ impl<'a> BakeScorer<'a> {
         features: &[f64],
         width: u32,
         height: u32,
-        codec_hint: Option<&str>,
     ) -> Result<f64, ZensimError> {
         forward_model_with_codec(
             self.model,
@@ -83,7 +75,6 @@ impl<'a> BakeScorer<'a> {
             features,
             width,
             height,
-            codec_hint,
         )
     }
 }

@@ -1171,43 +1171,6 @@ impl Zensim {
         source: &impl ImageSource,
         distorted: &impl ImageSource,
     ) -> Result<ZensimResult, ZensimError> {
-        self.compute_with_codec_hint(source, distorted, None)
-    }
-
-    /// Compare source and distorted images, supplying an optional
-    /// codec hint that drives **per-codec post-spline affine**
-    /// calibration (EXP-CROSS-CODEC-V11-E, 2026-05-20).
-    ///
-    /// When the loaded profile's bake carries
-    /// `zentrain.per_codec_calibration` metadata AND `codec_hint`
-    /// names a registered codec, the runtime applies an extra
-    /// `score = α_c + β_c · spline(raw)` affine after the standard
-    /// scoring path. The affine is monotone within codec
-    /// (β > 0 by construction) so within-codec rank ordering is
-    /// bit-exact preserved; only the cross-codec systematic bias
-    /// is pulled toward consensus at JND landmarks.
-    ///
-    /// Accepted codec hint strings (case-insensitive):
-    /// `"jpeg"` / `"jpg"` / `"zenjpeg"` / `"mozjpeg"` / `"libjpeg"`,
-    /// `"webp"` / `"zenwebp"`,
-    /// `"avif"` / `"zenavif"`,
-    /// `"jxl"` / `"zenjxl"` / `"jpegxl"`,
-    /// `"png"` / `"zenpng"`. Any other hint is treated as unknown
-    /// (no affine applied — identical to calling
-    /// [`Self::compute`]).
-    ///
-    /// Profiles without the metadata silently ignore the hint
-    /// (output is identical to [`Self::compute`]).
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ZensimError`] if dimensions are mismatched or too small.
-    pub(crate) fn compute_with_codec_hint(
-        &self,
-        source: &impl ImageSource,
-        distorted: &impl ImageSource,
-        codec_hint: Option<&str>,
-    ) -> Result<ZensimResult, ZensimError> {
         let params = self.profile.params();
         validate_pair(source, distorted)?;
         check_within_max_pixels(source.width(), source.height(), self.max_pixels)?;
@@ -1229,7 +1192,6 @@ impl Zensim {
             params,
             source.width() as u32,
             source.height() as u32,
-            codec_hint,
         )?;
         Ok(result.with_profile(self.profile))
     }
@@ -2328,7 +2290,7 @@ pub(crate) fn apply_mlp_scoring(
     width: u32,
     height: u32,
 ) -> Result<(), ZensimError> {
-    apply_mlp_scoring_with_codec(result, params, width, height, None)
+    apply_mlp_scoring_with_codec(result, params, width, height)
 }
 
 /// Same as [`apply_mlp_scoring`] but accepts an optional codec hint
@@ -2343,7 +2305,6 @@ pub(crate) fn apply_mlp_scoring_with_codec(
     params: &crate::profile::ProfileParams,
     width: u32,
     height: u32,
-    codec_hint: Option<&str>,
 ) -> Result<(), ZensimError> {
     let Some(loader) = params.mlp_bytes else {
         return Ok(());
@@ -2396,7 +2357,6 @@ pub(crate) fn apply_mlp_scoring_with_codec(
             result.features(),
             width,
             height,
-            codec_hint,
         )?;
         let score = dispose_mlp_raw(raw, params);
         result.set_mlp_score(raw, score);
@@ -2524,61 +2484,6 @@ fn apply_output_calibration_spline(x: f64, spline: &OutputCalibrationSpline) -> 
 //   `[u32 k, u32 j, u32 n, w[k·j·n] f32, b[k·j] f32]`
 // so `12 + 4·(k·j·n + k·j)` bytes. `n` MUST equal the bake's `n_inputs`.
 
-/// Standardized-feature clamp applied before the min-max forward. Mirrors
-/// `train_minmax`'s `.clamp(-8.0, 8.0)` on the standardized feature vector so
-/// the shipped bake scores identically to the held-out eval that qualified it.
-const MINMAX_STD_CLAMP: f64 = 8.0;
-
-/// Min-max forward: `min_g max_h (w[g][h]·x + b[g][h])`. `x` is the clamped
-/// standardized feature vector (length `meta.n`). Mirrors
-/// `MinMaxMonotone::forward` (weights are f32 in the bake, accumulated in f64).
-fn apply_minmax_runtime(x: &[f64], meta: &MinMaxHeadMeta) -> f64 {
-    let n = meta.n;
-    let mut best_min = f64::INFINITY;
-    for g in 0..meta.k {
-        let mut best_max = f64::NEG_INFINITY;
-        for h in 0..meta.j {
-            let base = (g * meta.j + h) * n;
-            let mut acc = meta.b[g * meta.j + h] as f64;
-            for (wv, xv) in meta.w[base..base + n].iter().zip(&x[..n]) {
-                acc += *wv as f64 * xv;
-            }
-            if acc > best_max {
-                best_max = acc;
-            }
-        }
-        if best_max < best_min {
-            best_min = best_max;
-        }
-    }
-    best_min
-}
-
-/// Look up the per-codec affine for the given codec hint. Returns
-/// `None` for unrecognized codecs (caller substitutes identity).
-///
-/// Match is case-insensitive and accepts common aliases (the table's
-/// own name plus standard codec-family aliases). The metadata stores
-/// canonical names (e.g. "jpeg", "webp", "avif", "jxl"); aliases like
-/// "zenjpeg" / "mozjpeg" / "libjpeg" / "jpg" all map to "jpeg" etc.
-fn lookup_per_codec_affine(cal: &PerCodecCalibration, codec_hint: &str) -> Option<(f32, f32)> {
-    let lower = codec_hint.to_ascii_lowercase();
-    let canon: &str = match lower.as_str() {
-        "jpeg" | "jpg" | "zenjpeg" | "mozjpeg" | "libjpeg" => "jpeg",
-        "webp" | "zenwebp" => "webp",
-        "avif" | "zenavif" => "avif",
-        "jxl" | "zenjxl" | "jpegxl" | "jpeg-xl" => "jxl",
-        "png" | "zenpng" => "png",
-        other => other,
-    };
-    for entry in &cal.entries {
-        if entry.name == canon {
-            return Some((entry.alpha, entry.beta));
-        }
-    }
-    None
-}
-
 impl PerSampleAlphaMeta {
     /// Borrowed view for [`crate::score_math`], the owner of the arithmetic.
     /// Free — no allocation, no copy of either weight vector.
@@ -2637,30 +2542,6 @@ fn apply_per_sample_alpha_runtime(h: &[f32], meta: &PerSampleAlphaMeta) -> f64 {
 // The pool sigma floor is owned by `crate::score_math::POOL_STD_FLOOR`.
 
 impl HybridHeadMeta {
-    /// Borrowed view for [`crate::score_math`] — see
-    /// [`PerSampleAlphaMeta::params`].
-    fn params(&self) -> crate::score_math::HybridHeadParams<'_> {
-        crate::score_math::HybridHeadParams {
-            rank_w: &self.rank_w,
-            rank_b: self.rank_b,
-            alpha_logit: self.alpha_logit,
-            reducer_w: self.reducer_w,
-            reducer_b: self.reducer_b,
-            p_norm: self.p_norm,
-        }
-    }
-}
-
-/// Apply the hybrid-head runtime to a hidden vector `h`. Returns the
-/// final mixed score `y`. Bit-exact match with
-/// `zensim_train_core::hybrid_head::apply_hybrid_head_runtime`
-/// (asserted by the canonical regression test in
-/// `tests/hybrid_head_runtime.rs`).
-fn apply_hybrid_head_runtime(h: &[f32], meta: &HybridHeadMeta) -> f64 {
-    debug_assert_eq!(meta.rank_w.len(), h.len());
-    debug_assert!(!h.is_empty());
-    // ONE owner — see `apply_per_sample_alpha_runtime` above.
-    crate::score_math::hybrid_head(h, &meta.params(), active_pow_form())
 }
 
 /// Forward one bake over `features` and return the raw output scalar.
@@ -2833,12 +2714,11 @@ fn forward_one_bake_with_codec(
     features: &[f64],
     width: u32,
     height: u32,
-    codec_hint: Option<&str>,
 ) -> Result<f64, ZensimError> {
     let model = cached_profile_model(bytes)?;
     let bundle = cached_bake_metadata(bytes, &model)?;
     let mut scorer = BakeScorer::with_metadata(&model, bundle)?;
-    scorer.score_features(features, width, height, codec_hint)
+    scorer.score_features(features, width, height)
 }
 
 // One inference dispatch for named profiles, dynamically loaded bakes and eval.
@@ -2855,24 +2735,13 @@ fn forward_model_with_codec(
     features: &[f64],
     width: u32,
     height: u32,
-    codec_hint: Option<&str>,
 ) -> Result<f64, ZensimError> {
     let n_inputs = model.caller_input_width();
     let needs_transforms = model.has_nontrivial_feature_transforms();
     let per_sample_alpha = bundle.per_sample_alpha.as_deref();
-    let hybrid_head = bundle.hybrid_head.as_deref();
     let tanh_pin_scale = bundle.tanh_pin_scale;
     let output_spline = bundle.output_spline.as_deref();
-    // EXP-CROSS-CODEC-V11-E (2026-05-20): per-codec post-spline affine.
-    // Applies AFTER the PCHIP spline. Only active when the bake carries
-    // `zentrain.per_codec_calibration` metadata AND the caller supplied
-    // a codec hint that maps to a registered codec entry. The
-    // calibration table itself is cached; only the codec-hint lookup
-    // runs per call.
-    let per_codec_affine: Option<(f32, f32)> = match (&bundle.per_codec_calibration, codec_hint) {
-        (Some(cal), Some(hint)) => lookup_per_codec_affine(cal, hint),
-        _ => None,
-    };
+    let per_codec_affine: Option<(f32, f32)> = None;
 
     // **LAYOUT — resolved ONCE, before any head branches.** A bake declaring a
     // DENSE feature set reads its ids at packed positions, so the caller's
@@ -2940,10 +2809,8 @@ fn forward_model_with_codec(
             f32_features,
             needs_transforms,
             per_sample_alpha,
-            hybrid_head,
             tanh_pin_scale,
             output_spline,
-            per_codec_affine,
         );
     }
 
@@ -2952,50 +2819,6 @@ fn forward_model_with_codec(
     // transforms directly, apply transform→scale→clamp±8→min-max, then the
     // shared PCHIP spline + per-codec affine. The clamp mirrors the trainer's
     // standardize clamp so runtime scoring is bit-exact with the qualifying eval.
-    if let Some(mm) = bundle.minmax_head.as_deref() {
-        // INTERNAL layer-0 width on purpose (NOT `caller_input_width()`):
-        // this path indexes the transform array by layer-0 position, so it
-        // needs the two to be equal and refuses the bake below when they are
-        // not. See campaign appendix E.9 for the distinction.
-        let n = model.n_inputs();
-        // The loop below indexes `transforms[i]` at layer-0 index `i`, which
-        // only aligns for a 1:1 transform pipeline. A variable-arity bake
-        // (expander, or pruned with `drop`) breaks the alignment AND panics
-        // in the scalar `apply_with_params`; refuse instead.
-        if mm.n != n || feats.len() < n || model.caller_input_width() != n {
-            return Err(ZensimError::ModelForwardFailed {
-                reason: "min-max head n does not match bake n_inputs / feature length",
-            });
-        }
-        let transforms = model.feature_transforms();
-        let params = model.feature_transform_params();
-        let mean = model.scaler_mean();
-        let scale = model.scaler_scale();
-        x_std.resize(n, 0.0);
-        for (i, slot) in x_std.iter_mut().enumerate() {
-            // transform in f32 (matches the trainer's `apply_with_params(x as f32)`)
-            let raw = feats[i] as f32;
-            let t = match (transforms, params) {
-                (Some(tf), Some(p)) => tf[i].apply_with_params(raw, &p[i]),
-                (Some(tf), None) => tf[i].apply_with_params(raw, &[]),
-                (None, _) => raw,
-            } as f64;
-            // standardize (sklearn zero-variance guard) + clamp, matching train_minmax
-            let s = scale[i] as f64;
-            let safe = if s == 0.0 { 1.0 } else { s };
-            *slot = ((t - mean[i] as f64) / safe).clamp(-MINMAX_STD_CLAMP, MINMAX_STD_CLAMP);
-        }
-        let raw = apply_minmax_runtime(x_std, mm);
-        let y_pre = tanh_pin_scale.map_or(raw, |scale| apply_tanh_output_pin(raw, scale));
-        let y_after_spline = match output_spline {
-            Some(spline) => apply_output_calibration_spline(y_pre, spline),
-            None => y_pre,
-        };
-        return Ok(match per_codec_affine {
-            Some((alpha, beta)) => (alpha as f64) + (beta as f64) * y_after_spline,
-            None => y_after_spline,
-        });
-    }
 
     let dispatch = |p: &mut crate::mlp::Predictor<'_>, x: &[f32]| -> Result<f64, ZensimError> {
         bake_dispatch_one(
@@ -3003,10 +2826,8 @@ fn forward_model_with_codec(
             x,
             needs_transforms,
             per_sample_alpha,
-            hybrid_head,
             tanh_pin_scale,
             output_spline,
-            per_codec_affine,
         )
     };
     prep_bake_input_f32(feats, n_inputs, width, height, f32_features)?;
@@ -3060,10 +2881,8 @@ fn bake_dispatch_one(
     x: &[f32],
     needs_transforms: bool,
     per_sample_alpha: Option<&PerSampleAlphaMeta>,
-    hybrid_head: Option<&HybridHeadMeta>,
     tanh_pin_scale: Option<f64>,
     output_spline: Option<&OutputCalibrationSpline>,
-    per_codec_affine: Option<(f32, f32)>,
 ) -> Result<f64, ZensimError> {
     let out = if needs_transforms {
         p.predict_transformed(x)
@@ -3078,20 +2897,16 @@ fn bake_dispatch_one(
     finish_network_output(
         out,
         per_sample_alpha,
-        hybrid_head,
         tanh_pin_scale,
         output_spline,
-        per_codec_affine,
     )
 }
 
 fn finish_network_output(
     out: &[f32],
     per_sample_alpha: Option<&PerSampleAlphaMeta>,
-    hybrid_head: Option<&HybridHeadMeta>,
     tanh_pin_scale: Option<f64>,
     output_spline: Option<&OutputCalibrationSpline>,
-    per_codec_affine: Option<(f32, f32)>,
 ) -> Result<f64, ZensimError> {
     let y_pre = if let Some(meta) = per_sample_alpha {
         // `out` is the hidden vector h (n_hidden floats). Apply
@@ -3104,15 +2919,6 @@ fn finish_network_output(
             });
         }
         apply_per_sample_alpha_runtime(out, meta)
-    } else if let Some(meta) = hybrid_head {
-        // `out` is the hidden vector h. Apply the scalar-α
-        // hybrid runtime formula.
-        if out.len() != meta.rank_w.len() {
-            return Err(ZensimError::ModelForwardFailed {
-                reason: "hybrid-head metadata n_hidden does not match bake output length",
-            });
-        }
-        apply_hybrid_head_runtime(out, meta)
     } else {
         out.first()
             .copied()
@@ -3136,9 +2942,7 @@ fn finish_network_output(
     // Otherwise pass through unchanged. The affine is monotone
     // (beta > 0 by parse) so within-codec rank ordering is
     // preserved bit-exact.
-    Ok(if let Some((alpha, beta)) = per_codec_affine {
-        (alpha as f64) + (beta as f64) * y_after_spline
-    } else {
+    Ok({
         y_after_spline
     })
 }

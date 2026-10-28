@@ -338,29 +338,6 @@ pub(crate) fn caller_line_reads(model: &crate::mlp::Model) -> Option<Vec<bool>> 
     let layer = model.layer(0);
     let (in_dim, out_dim) = (layer.in_dim, layer.out_dim);
     let spans = caller_col_spans(model, in_dim)?;
-    // This head replaces the network. Layer-zero zeros cannot prove its
-    // inputs dead. Use the same parser as scoring, and require the scalar
-    // head's one-to-one transform contract before making a skip decision.
-    if let Some(entry) = model
-        .metadata()
-        .get(crate::bake_metadata::MINMAX_MONOTONE_HEAD_KEY)
-    {
-        let head = crate::bake_metadata::parse_minmax_head_meta(entry.value)?;
-        if head.n != in_dim
-            || spans.len() != head.n
-            || spans
-                .iter()
-                .enumerate()
-                .any(|(i, &span)| span != (i, i + 1))
-        {
-            return None;
-        }
-        return Some(
-            (0..head.n)
-                .map(|i| head.w.chunks_exact(head.n).any(|piece| piece[i] != 0.0))
-                .collect(),
-        );
-    }
     Some(
         spans
             .iter()
