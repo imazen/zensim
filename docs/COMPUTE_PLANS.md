@@ -32,3 +32,21 @@ The public training config still controls blur radius, passes and kernel, scale
 count, extended and IW features and their strengths, full feature extraction,
 score mapping, and threading. Those controls remain intact. Cached references
 retain their existing configuration and revision checks.
+
+
+## Request revision routing
+
+Public custom configurations default to revision 1. `ZensimConfig::formula_revision`
+is crate-private, and `ProfileParams::custom` sets its private `mlp_bytes` to `None`.
+There is no public conversion from named-profile parameters to either custom input.
+
+Named profiles obtain their revision from the embedded model. Their canonical
+configurations use four scales, radius five, one blur pass, and all-feature extraction,
+so they satisfy `fold_engine::is_fold_backable`. Both cached diffmap entry points use
+these same profile configurations. Full-feature extraction changes only the extraction
+flag after configuration construction.
+
+The removed process-mix and raw-config canonical refusals could therefore never return
+an error through the public callers. `metric::tests::public_configs_preserve_revision_route_invariants`
+pins the named-profile conditions and custom defaults. Cached-reference compatibility
+checks remain separate and unchanged.

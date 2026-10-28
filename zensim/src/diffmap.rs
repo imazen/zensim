@@ -658,7 +658,6 @@ impl crate::metric::Zensim {
         let height = distorted.height();
         self.check_stop()?;
         let config = config_from_params(params, self.parallel());
-        crate::metric::check_profile_route(params, &config)?;
         crate::metric::validate_cached_revision(precomputed, config.revision())?;
         let (per_scale_ch, scale_blend) = options.weighting.resolve_multiscale(
             params.weights,
@@ -847,7 +846,6 @@ impl crate::metric::Zensim {
 
         self.check_stop()?;
         let config = config_from_params(params, self.parallel());
-        crate::metric::check_profile_route(params, &config)?;
         crate::metric::validate_cached_revision(precomputed, config.revision())?;
         let (per_scale_ch, scale_blend) = options.weighting.resolve_multiscale(
             params.weights,

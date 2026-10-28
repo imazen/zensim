@@ -1459,7 +1459,7 @@ fn process_strip_channel(
     let fused_ext = stable && need_ssim && (config.extended_features || config.compute_iw_features);
     debug_assert!(
         !stable || config.blur_passes == 1,
-        "Rev3 route gate must have refused blur_passes != 1 before reaching the strip walk"
+        "canonical strip arithmetic requires a single blur pass"
     );
 
     // Fused path: 1-pass blur (the common case for scale 0).

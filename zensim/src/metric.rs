@@ -424,18 +424,6 @@ pub fn precompute_reference_with_scales(
     ))
 }
 
-#[cfg(any(feature = "training", test))]
-fn refuse_rev5_masked_config(config: &ZensimConfig) -> Result<(), ZensimError> {
-    if config.revision() >= crate::feature_defs::FormulaRevision::Rev5
-        && (config.extended_features || config.compute_iw_features)
-    {
-        return Err(ZensimError::ModelLoadFailed {
-            reason: "formula revision 5 supports only basic + peaks + v2; raw configuration requests masked or IW features",
-        });
-    }
-    Ok(())
-}
-
 /// Compute zensim with a precomputed reference and custom configuration.
 ///
 /// **Research / feature-extraction API; not stable.** The
@@ -453,12 +441,6 @@ pub fn compute_zensim_with_ref_and_config(
     height: usize,
     config: ZensimConfig,
 ) -> Result<ZensimResult, ZensimError> {
-    // These two entries take a caller-built config rather than a profile, so
-    // they never pass through `config_from_params` — the route refusal has to
-    // be repeated here or a `blur_passes != 1` config would reach the strip
-    // walk under an arithmetic revision that does not serve it.
-    crate::ssim_form::check_route(&config)?;
-    refuse_rev5_masked_config(&config)?;
     if width < 8 || height < 8 {
         return Err(ZensimError::ImageTooSmall);
     }
@@ -1149,7 +1131,6 @@ impl Zensim {
         check_within_max_pixels(source.width(), source.height(), self.max_pixels)?;
         self.check_stop()?;
         let config = config_from_params(params, self.parallel_now());
-        check_profile_route(params, &config)?;
         let mut result = compute_with_config_inner(
             source,
             distorted,
@@ -1305,7 +1286,6 @@ impl Zensim {
         // which already rejected HDR — so only check the distorted side
         // here. Symmetry across the call path is preserved.
         let config = config_from_params(params, self.parallel_now());
-        check_profile_route(params, &config)?;
         validate_cached_revision(precomputed, config.revision())?;
         let (ow, oh) = (distorted.width(), distorted.height());
         // Pad a sub-64px distorted to the pyramid minimum so it aligns with the
@@ -1351,7 +1331,6 @@ impl Zensim {
         validate_ref_match(precomputed, distorted)?;
         check_within_max_pixels(distorted.width(), distorted.height(), self.max_pixels)?;
         let config = config_from_params(params, self.parallel_now());
-        check_profile_route(params, &config)?;
         validate_cached_revision(precomputed, config.revision())?;
         let (ow, oh) = (distorted.width(), distorted.height());
         // ENGINE ROUTING (fold-MT lane). `compute_with_ref` has routed to the
@@ -1477,7 +1456,6 @@ impl Zensim {
         let params = self.profile.params();
         validate_pair(source, distorted)?;
         let mut config = config_from_params(params, self.parallel_now());
-        check_profile_route(params, &config)?;
         config.compute_all_features = true;
         let extraction_plan = if config.revision() >= crate::feature_defs::FormulaRevision::Rev5 {
             use crate::feature_defs::family_slots;
@@ -1564,7 +1542,6 @@ impl Zensim {
     ) -> Result<ZensimResult, ZensimError> {
         validate_pair(source, distorted)?;
         let config = config_from_params(params, true);
-        check_profile_route(params, &config)?;
         let serving_plan = if config.revision() >= crate::feature_defs::FormulaRevision::Rev5 {
             crate::fold_engine::score_plan(params, &config, true)
         } else {
@@ -2174,22 +2151,6 @@ fn identical_result_at(config: &ZensimConfig, min_width: usize) -> ZensimResult 
         [0.0; 3],
     )
     .mark_identical()
-}
-
-// Named Rev5 models own their declared plans. Raw research configs retain the process-mix guard.
-pub(crate) fn check_profile_route(
-    params: &ProfileParams,
-    config: &ZensimConfig,
-) -> Result<(), ZensimError> {
-    if params.mlp_bytes.is_some()
-        && config
-            .formula_revision
-            .is_some_and(|r| r >= crate::feature_defs::FormulaRevision::Rev5)
-        && crate::fold_engine::is_fold_backable(config)
-    {
-        return Ok(());
-    }
-    crate::ssim_form::check_route(config)
 }
 
 pub(crate) fn config_from_params(params: &ProfileParams, parallel: bool) -> ZensimConfig {
@@ -3183,12 +3144,6 @@ pub fn compute_zensim_with_config(
     height: usize,
     config: ZensimConfig,
 ) -> Result<ZensimResult, ZensimError> {
-    // Validation. The route refusal comes first: this entry takes a
-    // caller-built config, so it never passes through `config_from_params`
-    // and would otherwise carry a `blur_passes != 1` config into the strip
-    // walk under an arithmetic revision that does not serve it.
-    crate::ssim_form::check_route(&config)?;
-    refuse_rev5_masked_config(&config)?;
     if width < 8 || height < 8 {
         return Err(ZensimError::ImageTooSmall);
     }
@@ -3449,6 +3404,33 @@ pub(crate) fn combine_scores(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[allow(deprecated)]
+    fn public_configs_preserve_revision_route_invariants() {
+        use crate::feature_defs::FormulaRevision;
+        for profile in [
+            ZensimProfile::PreviewV0_1,
+            ZensimProfile::PreviewV0_2,
+            ZensimProfile::A,
+            ZensimProfile::E,
+            ZensimProfile::ECodec,
+            ZensimProfile::LegacyLinearV0_2,
+        ] {
+            let params = profile.params();
+            let config = config_from_params(params, false);
+            if config.revision() >= FormulaRevision::Rev5 {
+                assert!(params.mlp_bytes.is_some(), "{profile:?}");
+                assert!(crate::fold_engine::is_fold_backable(&config), "{profile:?}");
+            }
+        }
+        let custom = ProfileParams::custom(&[], 3, 3, 2, 1.0, 1.0);
+        assert_eq!(
+            config_from_params(&custom, false).revision(),
+            FormulaRevision::Rev1
+        );
+        assert_eq!(ZensimConfig::default().revision(), FormulaRevision::Rev1);
+    }
 
     /// OOD safety net (2026-07-10): the output-calibration spline's lower
     /// extrapolation is floored one calibrated-dial-range below the bottom

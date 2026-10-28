@@ -76,27 +76,6 @@ pub(crate) fn effective_revision(revision: FormulaRevision) -> FormulaRevision {
     revision
 }
 
-pub(crate) fn check_route(config: &crate::metric::ZensimConfig) -> Result<(), crate::ZensimError> {
-    refuse_rev4_mix(config.revision())?;
-    if config.revision() >= FormulaRevision::Rev5 && config.blur_passes != 1 {
-        return Err(crate::ZensimError::ModelForwardFailed {
-            reason: "formula revision 3 serves blur_passes == 1 only (its stable SSIM moments are one reflect-101 box); use revision 1 or 2 for multi-pass blur profiles",
-        });
-    }
-    Ok(())
-}
-
-/// The reason [`refuse_rev4_mix`] gives.
-// the v2 walk's guard
-pub(crate) const REV4_MIX: &str = "formula revisions 4 and 5 cannot be mixed with another revision in one process: other formula gates follow ZENSIM_FORMULA_REV, so the request and the process must carry the same revision when either is revision 4 or later";
-
-pub(crate) fn refuse_rev4_mix(requested: FormulaRevision) -> Result<(), crate::ZensimError> {
-    if requested >= FormulaRevision::Rev5 {
-        return Err(crate::ZensimError::ModelLoadFailed { reason: REV4_MIX });
-    }
-    Ok(())
-}
-
 #[inline]
 pub(crate) fn active_luma_form() -> SsimLumaForm {
     SsimLumaForm::Ssim2Legacy
@@ -444,7 +423,7 @@ mod tests {
         assert_eq!(
             SsimLumaForm::for_revision(SHIPPED_REVISION),
             SsimLumaForm::Ssim2Legacy,
-            "the active revision is not the shipped one (is ZENSIM_FORMULA_REV set?)"
+            "the default arithmetic must use the shipped revision"
         );
         assert!(
             !SsimLumaForm::Ssim2Legacy.bounds_dissim(),
