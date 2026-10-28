@@ -239,7 +239,6 @@ mod simd_ops;
 pub mod source;
 pub(crate) mod ssim_form;
 mod streaming;
-mod transfer;
 
 // --- Primary API ---
 /// Cooperative-cancellation vocabulary, re-exported from the

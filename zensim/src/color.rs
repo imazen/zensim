@@ -1744,96 +1744,6 @@ fn srgb_to_xyb_planar_inner_v3(
     }
 }
 
-/// sRGB → XYB (no positive shift), shared body of the generic tiers.
-/// The remainder follows [`PaddedTail::PAD_TAIL`].
-#[inline(always)]
-fn srgb_xyb_generic<T: F32x8Convert + PaddedTail>(
-    token: T,
-    pixels: &[[u8; 3]],
-    x_out: &mut [f32],
-    y_out: &mut [f32],
-    b_out: &mut [f32],
-) {
-    /// One 8-pixel chunk: LUT-linearize, transpose to SoA, opsin + cube root,
-    /// X = 0.5*(c0-c1), Y = 0.5*(c0+c1), B = c2.
-    #[inline(always)]
-    fn chunk<T: F32x8Convert>(
-        k: &OpsinChunk<T>,
-        px: &[[u8; 3]; 8],
-    ) -> ([f32; 8], [f32; 8], [f32; 8]) {
-        let (r, g, b) = k.srgb_lanes(px);
-        let (x, y, c2) = k.plain(k.cube_roots(r, g, b));
-        (x.to_array(), y.to_array(), c2.to_array())
-    }
-
-    let k = OpsinChunk::new(token);
-    let n = pixels.len();
-    let chunks = n / 8;
-
-    for chunk_idx in 0..chunks {
-        let base = chunk_idx * 8;
-        // FIXED-SIZE ARRAY PATTERN (CLAUDE.md "Performance Optimization"): ONE
-        // range check at the boundary, zero interior.
-        let px: &[[u8; 3]; 8] = pixels[base..base + 8]
-            .try_into()
-            .expect("8 pixels per chunk");
-        let (xs, ys, bs) = chunk(&k, px);
-        x_out[base..base + 8].copy_from_slice(&xs);
-        y_out[base..base + 8].copy_from_slice(&ys);
-        b_out[base..base + 8].copy_from_slice(&bs);
-    }
-
-    let done = chunks * 8;
-    if T::PAD_TAIL {
-        let rem = n - done;
-        if rem != 0 {
-            let mut padded = [[0u8; 3]; 8];
-            padded[..rem].copy_from_slice(&pixels[done..]);
-            let (xs, ys, bs) = chunk(&k, &padded);
-            x_out[done..n].copy_from_slice(&xs[..rem]);
-            y_out[done..n].copy_from_slice(&ys[..rem]);
-            b_out[done..n].copy_from_slice(&bs[..rem]);
-        }
-    } else {
-        let absorbance_bias = -cbrtf_fast(K_B0);
-        // Scalar remainder
-        for i in done..n {
-            let p = pixels[i];
-            let r = srgb_u8_to_linear(p[0]);
-            let g = srgb_u8_to_linear(p[1]);
-            let b = srgb_u8_to_linear(p[2]);
-
-            let mut mixed0 = K_M00.mul_add(r, K_M01.mul_add(g, K_M02.mul_add(b, K_B0)));
-            let mut mixed1 = K_M10.mul_add(r, K_M11.mul_add(g, K_M12.mul_add(b, K_B0)));
-            let mut mixed2 = K_M20.mul_add(r, K_M21.mul_add(g, K_M22.mul_add(b, K_B0)));
-
-            mixed0 = mixed0.max(0.0);
-            mixed1 = mixed1.max(0.0);
-            mixed2 = mixed2.max(0.0);
-
-            mixed0 = cbrtf_fast(mixed0) + absorbance_bias;
-            mixed1 = cbrtf_fast(mixed1) + absorbance_bias;
-            mixed2 = cbrtf_fast(mixed2);
-
-            x_out[i] = 0.5 * (mixed0 - mixed1);
-            y_out[i] = 0.5 * (mixed0 + mixed1);
-            b_out[i] = mixed2;
-        }
-    }
-}
-
-/// Generic sRGB → XYB (without positive shift) with scalar cube root.
-#[magetypes(neon, wasm128, scalar)]
-fn srgb_to_xyb_planar_inner(
-    token: Token,
-    pixels: &[[u8; 3]],
-    x_out: &mut [f32],
-    y_out: &mut [f32],
-    b_out: &mut [f32],
-) {
-    srgb_xyb_generic(token, pixels, x_out, y_out, b_out);
-}
-
 // ---------------------------------------------------------------------------
 // Linear RGB → positive XYB conversion
 // ---------------------------------------------------------------------------
@@ -2673,11 +2583,7 @@ pub(crate) fn dispatches_scalar() -> bool {
     archmage::Wasm128Token::summon().is_none()
 }
 #[cfg(test)]
-#[cfg(not(any(
-    target_arch = "x86_64",
-    target_arch = "aarch64",
-    target_arch = "wasm32"
-)))]
+#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64", target_arch = "wasm32")))]
 pub(crate) fn dispatches_scalar() -> bool {
     true
 }
@@ -2686,83 +2592,6 @@ pub(crate) fn dispatches_scalar() -> bool {
 mod tests {
     use super::*;
     use crate::source::ColorPrimaries;
-
-    /// Scalar tier: a pixel gets the same bits in a full 8-pixel chunk and in the
-    /// remainder (2026-09-25 fix). Calls the scalar variants directly, so it runs on
-    /// every host, not only where dispatch lands on scalar. `mul_add` is unfused on
-    /// this tier; before the fix the remainder's fused `cbrtf_fast` form disagreed with
-    /// the chunk on ~85 % of colours.
-    #[test]
-    fn scalar_tier_remainder_matches_full_chunk_arithmetic() {
-        use archmage::SimdToken as _;
-        let token = archmage::ScalarToken::summon().expect("scalar token is infallible");
-
-        // Deterministic pixel sets: an sRGB8 sample, and linear values including
-        // out-of-range ones (the linear converter clamps).
-        let mut state = 0x2545_F491_4F6C_DD1Du64;
-        let mut next = || {
-            state ^= state << 13;
-            state ^= state >> 7;
-            state ^= state << 17;
-            state
-        };
-        let mut srgb: Vec<[u8; 3]> = vec![[0, 0, 0], [255, 255, 255], [255, 0, 0], [0, 0, 255]];
-        srgb.extend((0..3000).map(|_| {
-            let v = next();
-            [v as u8, (v >> 8) as u8, (v >> 16) as u8]
-        }));
-        let lin: Vec<[f32; 3]> = (0..3000)
-            .map(|_| {
-                let f = |v: u64| (v & 0xFF_FFFF) as f32 / (1u64 << 24) as f32 * 1.5 - 0.25;
-                let v = next();
-                [f(v), f(v >> 20), f(v.rotate_left(7))]
-            })
-            .collect();
-
-        // Each pixel alone in a full chunk is the reference; every other position and
-        // band length must reproduce it exactly.
-        type Convert<'a, P> = &'a dyn Fn(&[P], &mut [f32], &mut [f32], &mut [f32]);
-        fn check<P: Copy>(what: &str, px: &[P], convert: Convert<'_, P>) {
-            let one = |p: P| {
-                let band = [p; 8];
-                let (mut x, mut y, mut b) = ([0f32; 8], [0f32; 8], [0f32; 8]);
-                convert(&band, &mut x, &mut y, &mut b);
-                for l in 1..8 {
-                    assert_eq!(
-                        (x[0].to_bits(), y[0].to_bits(), b[0].to_bits()),
-                        (x[l].to_bits(), y[l].to_bits(), b[l].to_bits()),
-                        "{what}: lanes of one full chunk disagree"
-                    );
-                }
-                (x[0].to_bits(), y[0].to_bits(), b[0].to_bits())
-            };
-            let reference: Vec<_> = px.iter().map(|&p| one(p)).collect();
-            for n in 1..=20usize {
-                for start in 0..px.len().saturating_sub(n).min(64) {
-                    let band = &px[start..start + n];
-                    let (mut x, mut y, mut b) = (vec![0f32; n], vec![0f32; n], vec![0f32; n]);
-                    convert(band, &mut x, &mut y, &mut b);
-                    for i in 0..n {
-                        assert_eq!(
-                            (x[i].to_bits(), y[i].to_bits(), b[i].to_bits()),
-                            reference[start + i],
-                            "{what}: n={n} band start={start} lane {i} differs from the full-chunk value"
-                        );
-                    }
-                }
-            }
-        }
-
-        check("srgb_to_positive_xyb", &srgb, &|p, x, y, b| {
-            srgb_to_positive_xyb_planar_inner_scalar(token, p, x, y, b)
-        });
-        check("srgb_to_xyb", &srgb, &|p, x, y, b| {
-            srgb_to_xyb_planar_inner_scalar(token, p, x, y, b)
-        });
-        check("linear_to_positive_xyb", &lin, &|p, x, y, b| {
-            linear_to_positive_xyb_planar_inner_scalar(token, p, x, y, b)
-        });
-    }
 
     /// Verify P3→sRGB matrix: sRGB white (1,1,1) should stay (1,1,1).
     #[test]

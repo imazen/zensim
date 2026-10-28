@@ -589,32 +589,6 @@ impl Plan {
         Ok(plan)
     }
 
-    /// A v1-layout plan at an explicit pool mode — the shape every pre-plan
-    /// caller expressed as a bare `Option<V1PoolsMode>`.
-    pub(crate) fn v1(pools: V1PoolsMode, layout_width: usize) -> Plan {
-        let compute = ComputeSet {
-            formula_revision: crate::ssim_form::active_revision(),
-            v1_basic: true,
-            full_res_xb: true,
-            coarse_y_only_scales: 0,
-            local_only: false,
-            omit_edges: false,
-            sampling: None,
-            v1_pools: pools,
-            v1_full_scales: ComputeSet::ALL_SCALES,
-            v1_scales: ComputeSet::ALL_SCALES,
-            v2_scales: ComputeSet::ALL_SCALES,
-            v2_blocks: false,
-            gradient: false,
-            blockiness: false,
-            transducer_bank: false,
-            transducers_luma_only: false,
-            omit_pjnd_fragility: false,
-            free_extras: V1FreeExtras::Off,
-        };
-        Plan::normalized(compute, Layout::identity(layout_width))
-    }
-
     /// The same COMPUTE, re-laid-out as the identity layout of at least
     /// `width`.
     ///
@@ -684,11 +658,6 @@ impl Plan {
     /// scoring path checks this and refuses.
     pub(crate) fn revisions_agree(&self, other: &Plan) -> bool {
         self.compute.formula_revision == other.compute.formula_revision
-    }
-
-    /// Does this plan populate every slot of `want`?
-    pub(crate) fn covers(&self, want: &SlotSet) -> bool {
-        self.emit.covers(want)
     }
 
     /// One past the highest id [`Self::emit`] claims to populate — the
@@ -924,69 +893,6 @@ pub(crate) fn bake_read_slots(model: &crate::mlp::Model) -> Option<SlotSet> {
 #[cfg(test)]
 mod tests {
 
-    #[test]
-    fn fullres_y_subset_plan_restores_chroma_for_any_consumer() {
-        let want = SlotSet::from_slots((0..228).filter(|&id| !ComputeSet::is_full_res_xb(id, 4)));
-        let y = Plan::derive(&want, 228).unwrap();
-        assert!(!y.compute.full_res_xb);
-        assert_eq!(y.emit, want);
-        assert_eq!(Plan::normalized(y.compute, y.layout.clone()), y);
-        assert!(!Plan::widened_to_identity(&y, 372).compute.full_res_xb);
-        for id in [0, 26, 156, 168] {
-            let xb = Plan::derive(&SlotSet::from_slots([id]), 228).unwrap();
-            let union = y.union(&xb);
-            assert!(union.compute.full_res_xb);
-            assert!(union.covers(&want.union(&SlotSet::from_slots([id]))));
-        }
-        // Wider owning families conservatively disable this specialization.
-        for id in [228, 372] {
-            let wider = Plan::derive(&want.union(&SlotSet::from_slots([id])), 944).unwrap();
-            assert!(wider.compute.full_res_xb);
-        }
-    }
-
-    #[test]
-    fn coarse_pool_plan_survives_layout_changes_and_union() {
-        let ids = SlotSet::from_slots(
-            (0..228)
-                .chain(264..300)
-                .chain(336..372)
-                .filter(|&id| !ComputeSet::is_full_res_xb(id, 4)),
-        );
-        let p = Plan::derive(&ids, 372).unwrap();
-        assert_eq!(p.compute.v1_full_scales, 0b1100);
-        assert!(!p.compute.full_res_xb);
-        assert_eq!(p.emit, ids);
-        assert_eq!(Plan::normalized(p.compute, p.layout.clone()), p);
-        assert_eq!(Plan::widened_to_identity(&p, 372).compute, p.compute);
-        let peaks = Plan::v1(V1PoolsMode::Peaks, 372);
-        assert_eq!(p.union(&peaks).compute.v1_full_scales, 0b1100);
-        let fine_y = Plan::derive(&SlotSet::from_slots([234]), 372).unwrap();
-        let union = p.union(&fine_y);
-        assert_eq!(union.compute.v1_full_scales, 0b1101);
-        assert!(!union.compute.full_res_xb);
-        assert!(union.covers(&ids.union(&SlotSet::from_slots([234]))));
-        let fine_x = Plan::derive(&SlotSet::from_slots([228]), 372).unwrap();
-        assert!(p.union(&fine_x).compute.full_res_xb);
-    }
-
-    #[test]
-    fn coarse_channel_union_restores_every_consumers_inputs() {
-        let ids = SlotSet::from_slots((0..156).filter(|id| id / 13 % 3 == 1 && id % 13 < 10));
-        let y = Plan::derive(&ids, 372).unwrap();
-        assert_eq!(y.compute.coarse_y_only_scales, 0b1110);
-        assert_eq!(Plan::normalized(y.compute, y.layout.clone()), y);
-        for id in [39, 78, 117, 372] {
-            let extra = SlotSet::from_slots([id]);
-            let merged = y.union(&Plan::derive(&extra, 944).unwrap());
-            assert!(merged.covers(&ids.union(&extra)), "missing consumer f{id}");
-            assert_eq!(
-                Plan::normalized(merged.compute, merged.layout.clone()),
-                merged
-            );
-        }
-    }
-
     use super::*;
 
     fn slots(r: impl IntoIterator<Item = (usize, usize)>) -> SlotSet {
@@ -1037,30 +943,6 @@ mod tests {
             other => panic!("wrong error: {other:?}"),
         }
         assert!(format!("{err}").contains("5000"), "Display names the slot");
-    }
-
-    /// Union takes the wider of every axis, and never RESTRICTS.
-    #[test]
-    fn union_widens_and_never_restricts() {
-        let a = Plan::derive(&slots([(0, 156)]), 372).expect("plan");
-        let b = Plan::derive(&slots([(0, 372)]), 372).expect("plan");
-        let u = a.union(&b);
-        assert_eq!(u.compute.v1_pools, V1PoolsMode::Full);
-        assert_eq!(u.layout_width(), 372);
-        assert!(u.covers(&slots([(0, 372)])));
-        // A wide cheap plan unioned with a narrow one keeps the wide layout.
-        let ns = crate::NUM_SCALES;
-        let wide = Plan::derive(
-            &slots([(0, 228)]).union(&crate::feature_defs::family_slots(
-                ComputeToken::Moments,
-                ns,
-            )),
-            944,
-        )
-        .expect("plan");
-        let u2 = a.union(&wide);
-        assert_eq!(u2.layout_width(), 944);
-        assert_eq!(u2.compute.free_extras, V1FreeExtras::RawMoments);
     }
 
     /// REV4SERVE review F1: the emit→plan boundary `resize(walk_width, 0.0)`

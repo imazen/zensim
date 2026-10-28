@@ -51,8 +51,6 @@ use crate::det_math::DetRoots;
 use crate::error::ZensimError;
 use crate::source::ImageSource;
 
-mod restore_cuts;
-
 use archmage::incant;
 use archmage::magetypes;
 use magetypes::simd::backends::{F32x8Backend, F32x16Backend};
@@ -1308,71 +1306,9 @@ pub(crate) fn reflect_101(y: isize, height: usize) -> usize {
     m as usize
 }
 
-/// Populate `dst` (`width * h_local` rows) from the FULL `src_full` plane
-/// (`width * height_full`), where local row `i` maps to global row
-/// `reflect_101(y0 as isize - halo as isize + i as isize, height_full)`.
-/// For `i` such that the mapped global row is in-bounds (the common case
-/// for interior strips and the strip's own core rows), this is an exact,
-/// unreflected copy — `reflect_101` is the identity on `[0, height_full)`.
-pub(crate) fn gather_strip_halo(
-    src_full: &[f32],
-    width: usize,
-    height_full: usize,
-    y0: usize,
-    h_local: usize,
-    halo: usize,
-    dst: &mut [f32],
-) {
-    debug_assert_eq!(dst.len(), width * h_local);
-    for i in 0..h_local {
-        let gy = y0 as isize - halo as isize + i as isize;
-        let gy_r = reflect_101(gy, height_full);
-        let src_row = &src_full[gy_r * width..(gy_r + 1) * width];
-        dst[i * width..(i + 1) * width].copy_from_slice(src_row);
-    }
-}
-
 // ============================================================================
 // Bounded per-pixel formulas
 // ============================================================================
-
-/// Per-pixel SSIM-like dissimilarity, C1-bounded (D1 fix). Bounded [0, 2].
-///
-/// Phase-6 (§A.16 lever A step 1): the original form computes
-/// `num_m * (num_s/denom_s)` = `(A/B) * (C/D)` — TWO divisions. Since
-/// `(A/B)*(C/D) == (A*C)/(B*D)` exactly (ordinary fraction algebra, no
-/// approximation), this collapses to ONE division at the cost of two extra
-/// multiplications — a strict win since a multiply is ~3-5x cheaper than a
-/// divide on every target ISA this crate SIMD-dispatches to. Kept for the
-/// scalar tail loop; see `ssim_d_local_v` for the SIMD sibling, which
-/// additionally routes the single division through `.recip()` (step 2).
-///
-/// `direct` (revision 3, issue #61): the fourth plane is the DIRECT error
-/// moment `E[(a-b)²]` rather than `E[ab]` — the H pass accumulates it in the
-/// `sigma12` plane's place — so the covariance subtraction, which cancels
-/// catastrophically on flat content, is replaced through the identity
-/// `2cov = var_sum - err_var`. Then `1 - (a/b)(c/d)` becomes
-/// `(d(b-a) + a·err_var) / (b·d)`: still one division, and the same
-/// bounded-error contract as the v1 signal (`ssim_form::SsimSplats16::direct`).
-#[inline]
-fn ssim_d_local(mu1: f64, mu2: f64, s12: f64, ssq: f64, direct: bool, stable: bool) -> f64 {
-    let a = 2.0 * mu1 * mu2 + C1_V2;
-    let b = mu1 * mu1 + mu2 * mu2 + C1_V2;
-    let d = ssq - mu1 * mu1 - mu2 * mu2 + C2_V2;
-    if direct {
-        let mu_diff = mu1 - mu2;
-        let err_var = (s12 - mu_diff * mu_diff).max(0.0);
-        // Revision 7: `(m1 − m2)²`, the exact value of `b − a`, which
-        // cancels when the means are close (the old form keeps its bits).
-        let lum = if stable { mu_diff * mu_diff } else { b - a };
-        ((d * lum + a * err_var) / (b * d)).max(0.0)
-    } else {
-        let cov = s12 - mu1 * mu2;
-        let c = 2.0 * cov + C2_V2;
-        let local = (a * c) / (b * d);
-        (1.0 - local).max(0.0)
-    }
-}
 
 /// GMSD/FSIM/DISTS canonical bounded-similarity form: `(2ab+c)/(a²+b²+c)`.
 /// Bounded `(0, 1]`, `=1` iff `a == b`. Requires `a, b >= 0`.
@@ -1775,35 +1711,6 @@ struct V1BasicSums {
 }
 
 impl V1BasicSums {
-    fn basic_raw(&self) -> crate::fused::StripChannelAccum {
-        let mut out = crate::fused::StripChannelAccum::zero();
-        out.ssim_d = self.ssim_d.fin();
-        out.ssim_d4 = self.ssim_d4.fin();
-        out.ssim_d2 = self.ssim_d2.fin();
-        out.edge_art = self.edge_art.fin();
-        out.edge_art4 = self.edge_art4.fin();
-        out.edge_art2 = self.edge_art2.fin();
-        out.edge_det = self.edge_det.fin();
-        out.edge_det4 = self.edge_det4.fin();
-        out.edge_det2 = self.edge_det2.fin();
-        out.mse = self.mse.fin();
-        out.hf_sq_src = self.hf_sq_src.fin();
-        out.hf_sq_dst = self.hf_sq_dst.fin();
-        out.hf_abs_src = self.hf_abs_src.fin();
-        out.hf_abs_dst = self.hf_abs_dst.fin();
-        out.ssim_d8 = self.ssim_d8.fin();
-        out.edge_art8 = self.edge_art8.fin();
-        out.edge_det8 = self.edge_det8.fin();
-        out.ssim_max = self.ssim_max as f32;
-        out.edge_art_max = self.edge_art_max as f32;
-        out.edge_det_max = self.edge_det_max as f32;
-        out
-    }
-
-    /// Merge-level accumulator fed by `accumulate` (f64 strip partials).
-    fn meas_f64() -> Self {
-        Self::at_revision(crate::ssim_form::active_revision())
-    }
 
     fn at_revision(revision: FormulaRevision) -> Self {
         use crate::featcanon::SumVar;
@@ -1854,13 +1761,6 @@ impl V1BasicSums {
         }
     }
 
-    /// Term-level accumulator fed f32-native block terms (`accumulate_block`
-    /// in the z1max side pass) — `c32` takes the f32-lane form.
-    fn meas_f32() -> Self {
-        #[allow(unused_mut)] // the per-field overrides exist only under `oracle`
-        let mut s = Self::meas_f64();
-        s
-    }
 }
 
 impl V1BasicSums {
@@ -3041,97 +2941,6 @@ struct V2RefMoments {
 
 impl V2PreparedReference {}
 
-/// Build a [`V2PreparedReference`]: validate, reflect-pad if sub-64px
-/// (identity-skip otherwise — the pad is a pure copy at ≥64px and is NOT
-/// performed), convert to XYB once, and materialize all
-/// [`crate::NUM_SCALES`] pyramid levels.
-pub(crate) fn prepare_v2_reference_impl(
-    source: &impl ImageSource,
-    max_pixels: Option<usize>,
-    parallel: bool,
-    cache_moments: bool,
-) -> Result<V2PreparedReference, ZensimError> {
-    prepare_v2_reference_impl_inner(source, max_pixels, parallel, cache_moments)
-}
-
-fn prepare_v2_reference_impl_inner(
-    source: &impl ImageSource,
-    max_pixels: Option<usize>,
-    parallel: bool,
-    cache_moments: bool,
-) -> Result<V2PreparedReference, ZensimError> {
-    if source.width() == 0 || source.height() == 0 {
-        return Err(ZensimError::ImageTooSmall);
-    }
-    crate::metric::check_within_max_pixels(source.width(), source.height(), max_pixels)?;
-
-    let (orig_width, orig_height) = (source.width(), source.height());
-    let scales = if orig_width < crate::metric::MIN_PYRAMID_DIM
-        || orig_height < crate::metric::MIN_PYRAMID_DIM
-    {
-        build_v2_ref_scales(&crate::metric::reflect_pad_to_min(source), parallel)
-    } else {
-        build_v2_ref_scales(source, parallel)
-    };
-    let moments = cache_moments.then(|| fill_ref_moments(&scales));
-    Ok(V2PreparedReference {
-        scales,
-        moments,
-        orig_width,
-        orig_height,
-    })
-}
-
-/// Materialize the reference XYB pyramid: scale 0 from
-/// `convert_source_to_xyb`, each further level via `downscale_2x_into`
-/// (bit-identical arithmetic to the pair path's `downscale_2x_inplace` —
-/// both compute `(a + b + c + d) * 0.25` per output element in the same
-/// order; the in-place/out-of-place split changes only where the result
-/// is stored).
-fn build_v2_ref_scales(
-    img: &impl ImageSource,
-    parallel: bool,
-) -> Vec<([Vec<f32>; 3], usize, usize)> {
-    assert!(
-        !crate::feature_v2_stream::linear_pyramid(),
-        "ZENSIM_PYRAMID=linear covers only the streaming and block producers"
-    );
-    let mut width = img.width();
-    let mut height = img.height();
-    let mut scales: Vec<([Vec<f32>; 3], usize, usize)> = Vec::with_capacity(crate::NUM_SCALES);
-    scales.push((
-        crate::streaming::convert_source_to_xyb(
-            img,
-            width,
-            parallel,
-            crate::ssim_form::active_revision(),
-        ),
-        width,
-        height,
-    ));
-    for _ in 1..crate::NUM_SCALES {
-        let new_w = width / 2;
-        let new_h = height / 2;
-        let mut next: [Vec<f32>; 3] = std::array::from_fn(|_| vec![0.0f32; new_w * new_h]);
-        {
-            let (prev_planes, _, _) = scales.last().expect("scale 0 pushed above");
-            for ch in 0..3 {
-                crate::blur::downscale_2x_into(
-                    &prev_planes[ch],
-                    width,
-                    &mut next[ch],
-                    new_w,
-                    new_h,
-                );
-            }
-        }
-        scales.push((next, new_w, new_h));
-        width = new_w;
-        height = new_h;
-    }
-    scales
-}
-
 // ============================================================================
 // STREAMING folded-720[+append] walk (C2 of
 // docs/STREAMING_FOLDAPP_C0_DESIGN_2026-07-26.md).
@@ -3167,8 +2976,6 @@ struct Append2Params {
 /// Per-channel accumulator state for the streaming walk: per-scale totals
 /// for every family the walk pools, merged strictly in kernel-strip order.
 struct StreamChannelAccums {
-    /// Rev5 retaining walks keep the exact coarse strip kernel results.
-    retained_strips: Option<Vec<Vec<(DenseAccum, GradientAccum)>>>,
     dense: Vec<DenseAccum>,
     grad: Vec<GradientAccum>,
     app: Vec<AppendAccum>,
@@ -3231,8 +3038,7 @@ fn rev5_job_bytes(max_n: usize) -> Option<usize> {
         + crate::NUM_SCALES * cell
         + size_of::<FoldPoolScratch>()
         + crate::NUM_SCALES * size_of::<Vec<(DenseAccum, GradientAccum)>>()
-        + 3 * size_of::<(DenseAccum, GradientAccum)>()
-        + size_of::<Option<RetainedRows<'static>>>();
+        + 3 * size_of::<(DenseAccum, GradientAccum)>();
     max_n
         .checked_mul(11)?
         .checked_mul(size_of::<f32>())?
@@ -3483,11 +3289,9 @@ fn rev5_job_blur(
 #[allow(clippy::too_many_arguments)]
 fn rev5_execute_job(
     job: &mut Rev5StripJob,
-    mut output: Option<RetainedRows<'_>>,
     compute: &ComputeSet,
     toggles: V2NewFeatureToggles,
     fold_v1: bool,
-    retain: bool,
     reference: Option<&[crate::streaming::XybPyramidLevel]>,
 ) {
     let info = &job.info;
@@ -3503,18 +3307,6 @@ fn rev5_execute_job(
     };
     job.result.dense[scale] = DenseAccum::default();
     job.result.grad[scale] = GradientAccum::default();
-    if retain && (1..=3).contains(&scale) {
-        let strips = job
-            .result
-            .retained_strips
-            .get_or_insert_with(|| (0..crate::NUM_SCALES).map(|_| Vec::new()).collect());
-        strips[scale].clear();
-        if strips[scale].capacity() == 0 {
-            strips[scale].reserve_exact(1);
-        }
-    } else if !retain {
-        job.result.retained_strips = None;
-    }
     let cached_source = rev5_cached_window(reference, info, job.ch);
     // Revision 7: the strip's blockiness lane partials, here in the
     // parallel job (both branches below); the merge after the batch adds
@@ -3537,26 +3329,6 @@ fn rev5_execute_job(
             h,
         );
     }
-    if let Some(output) = output.as_mut()
-        && retained_core_admits(&local)
-    {
-        rev5_blur_into_retained(info, &mut job.scratch, [cached_source, None], output);
-        let n = info.plane_w * info.wide_h();
-        let src = cached_source.unwrap_or(&job.scratch.src_wide[..n]);
-        rev5_retained_phase_b(
-            info,
-            [src, &job.scratch.dst_wide[..n]],
-            output.moment_rows(),
-            RetainedCoreWork {
-                toggles,
-                fold_v1,
-                free: local.free_work(job.ch, scale),
-            },
-            &mut job.result,
-            &mut job.bands,
-        );
-        return;
-    }
     rev5_job_blur(
         info,
         &mut job.scratch,
@@ -3565,9 +3337,6 @@ fn rev5_execute_job(
     );
     let n = info.plane_w * info.wide_h();
     let src = cached_source.unwrap_or(&job.scratch.src_wide[..n]);
-    if let Some(output) = &mut output {
-        output.copy(info, &job.scratch, src, &job.scratch.dst_wide[..n], false);
-    }
     stream_phase_b(
         &job.scratch,
         src,
@@ -3631,11 +3400,6 @@ fn rev5_merge_job(
     let total = &mut totals[job.ch];
     total.dense[scale].accumulate(&job.result.dense[scale]);
     total.grad[scale].accumulate(&job.result.grad[scale]);
-    if let Some(target) = &mut total.retained_strips
-        && let Some(strips) = &job.result.retained_strips
-    {
-        target[scale].extend_from_slice(&strips[scale]);
-    }
     if fold_v1 {
         // Preserve each canonical 32-row band addition, never merge a
         // pre-reduced strip sum into the running basic accumulator.
@@ -3732,7 +3496,7 @@ impl Rev5Pipeline {
         self.in_flight += 1;
         rayon::spawn(move || {
             let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                rev5_execute_job(&mut job, None, &compute, toggles, fold_v1, false, None);
+                rev5_execute_job(&mut job, &compute, toggles, fold_v1, None);
             }));
             // The walk owns the receiver until every spawned job reports.
             let _ = tx.send((seq, run.map(|()| job)));
@@ -4024,11 +3788,9 @@ fn rev5_block_walk<S: ImageSource, D: ImageSource, const ALL_CHANNELS: bool>(
                                     drop((src_blocks, dst_blocks));
                                     rev5_execute_job(
                                         &mut job,
-                                        None,
                                         &compute,
                                         strip_toggles,
                                         fold_v1,
-                                        false,
                                         None,
                                     );
                                 }));
@@ -4149,22 +3911,11 @@ fn rev5_run_jobs(
     toggles: V2NewFeatureToggles,
     fold_v1: bool,
     totals: &mut [StreamChannelAccums; 3],
-    retention: Option<&mut FoldRetention>,
     reference: Option<&[crate::streaming::XybPyramidLevel]>,
 ) {
     use rayon::prelude::*;
-    let retain = retention.is_some();
-    let outputs = retention.map(|r| r.job_sinks(jobs));
-    let execute = |job: &mut Rev5StripJob, output: Option<RetainedRows<'_>>| {
-        rev5_execute_job(job, output, compute, toggles, fold_v1, retain, reference)
-    };
-    if let Some(outputs) = outputs {
-        jobs.par_iter_mut()
-            .zip(outputs.into_par_iter())
-            .for_each(|(job, output)| execute(job, output));
-    } else {
-        jobs.par_iter_mut().for_each(|job| execute(job, None));
-    }
+    jobs.par_iter_mut()
+        .for_each(|job| rev5_execute_job(job, compute, toggles, fold_v1, reference));
     // Every cell's kernel partial is merged once, in the producer's order.
     // Do not replace this loop with a parallel/tree reduction.
     for job in jobs.iter() {
@@ -4179,7 +3930,6 @@ impl StreamChannelAccums {
     /// count in `1..=V1_BANDS_PER_STRIP` computes the same bytes.
     fn at_revision(n_scales: usize, n_band_slots: usize, revision: FormulaRevision) -> Self {
         Self {
-            retained_strips: None,
             dense: vec![DenseAccum::default(); n_scales],
             grad: vec![GradientAccum::default(); n_scales],
             app: vec![AppendAccum::default(); n_scales],
@@ -4242,303 +3992,6 @@ fn band_slots_for(band_parallel: bool) -> usize {
 #[inline]
 fn append_cell_active(append_on: bool, ch: usize, scale: usize) -> bool {
     append_on && !(APPEND_SKIP_B_SCALE0 && ch == 2 && scale == 0)
-}
-
-/// Retained per-(scale, channel) state from ONE streaming folded walk —
-/// the extractor-side hooks of the fused folded-944 score+attribution
-/// compare (campaign appendix N). Holds full-image copies of the pyramid
-/// core rows and the phase-A V-blur planes — BITWISE the values the walk
-/// computed (the C1 producer gate holds strip windows byte-equal to the
-/// materialized pyramids, and phase A is the same blur chain
-/// `attr_blur_cache_channel` replicates) — plus the EXACT per-cell pooled
-/// accumulators and mean-gradients captured at finalize. Buffers are
-/// reused across calls (`ensure`); every retained row a fused compare
-/// later reads is written each walk, and the only conditionally-computed
-/// plane (`bs2` where the append kernel is inactive — the
-/// `APPEND_SKIP_B_SCALE0` cell) is zero-filled explicitly so session
-/// reuse is deterministic. Memory: 8 planes × 3 ch × Σ scale sizes
-/// (~42 MB at 576²) — the same class the standalone attribution's
-/// materialized pyramids + plane sets pay.
-pub(crate) struct FoldRetention {
-    pub(crate) dims: Vec<(usize, usize)>,
-    /// `[scale][ch]` source-side pyramid planes (core rows).
-    pub(crate) pyr_src: Vec<[Vec<f32>; 3]>,
-    /// `[scale][ch]` distorted-side pyramid planes (core rows).
-    pub(crate) pyr_dst: Vec<[Vec<f32>; 3]>,
-    /// `[scale][ch]` phase-A V-blur planes (mu1/mu2/ssq/s12/act/bs2).
-    pub(crate) planes: Vec<[AttrChPlanes; 3]>,
-    /// `[scale][ch]` exact pooled cells (walk accumulators + blockiness).
-    pub(crate) cells: Vec<[AttrCellSums; 3]>,
-    /// `[scale][ch]` (mean grad src, mean grad dst) from finalize.
-    pub(crate) mg: Vec<[(f64, f64); 3]>,
-    /// Production strip partials, in walk order, for exact coarse refinement.
-    pub(crate) strips: Vec<[Vec<(DenseAccum, GradientAccum)>; 3]>,
-    /// Prepared finite-query snapshots can move all distorted scale-0 channels.
-    pub(crate) complete_distorted0: bool,
-    pub(crate) basic_stats: Vec<crate::metric::ScaleStats>,
-    pub(crate) basic_hf: Vec<[(f64, f64); 3]>,
-    pub(crate) basic_sd: Vec<[Vec<f32>; 3]>,
-    retain_basic: bool,
-    rev5: bool,
-    /// The revision the retaining walk computed its planes at (the plan's, not the process's).
-    pub(crate) revision: FormulaRevision,
-    channels: [[bool; 3]; crate::NUM_SCALES],
-}
-
-impl Default for FoldRetention {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl FoldRetention {
-    pub(crate) fn new() -> Self {
-        Self {
-            dims: Vec::new(),
-            pyr_src: Vec::new(),
-            pyr_dst: Vec::new(),
-            planes: Vec::new(),
-            cells: Vec::new(),
-            mg: Vec::new(),
-            strips: Vec::new(),
-            complete_distorted0: false,
-            basic_stats: Vec::new(),
-            basic_hf: Vec::new(),
-            basic_sd: Vec::new(),
-            retain_basic: false,
-            rev5: false,
-            revision: crate::ssim_form::SHIPPED_REVISION,
-            channels: [[false; 3]; crate::NUM_SCALES],
-        }
-    }
-
-    /// Size every buffer for the walk's scale dims (no-op when unchanged;
-    /// cells/mg/planes are fully rewritten by each retaining walk).
-    fn ensure(
-        &mut self,
-        dims: &[(usize, usize)],
-        compute: &ComputeSet,
-        retain_basic: bool,
-        complete_distorted0: bool,
-    ) {
-        self.strips.clear();
-        self.strips
-            .resize_with(dims.len(), || core::array::from_fn(|_| Vec::new()));
-        let rev5 = compute.formula_revision >= FormulaRevision::Rev5;
-        self.revision = compute.formula_revision;
-        let channels = core::array::from_fn(|scale| {
-            core::array::from_fn(|ch| {
-                scale < dims.len() && (!rev5 || compute.channel_active(scale, ch))
-            })
-        });
-        if self.dims.as_slice() == dims
-            && self.retain_basic == retain_basic
-            && self.channels == channels
-            && self.rev5 == rev5
-            && self.complete_distorted0 == complete_distorted0
-        {
-            // A steering snapshot may have moved planes out
-            // (`LocalRefineSnapshot::capture_taking`); re-create exactly those.
-            // Every retaining walk rewrites each element before any read.
-            for (scale, &(w, h)) in dims.iter().enumerate() {
-                for (ch, &active) in channels[scale].iter().enumerate() {
-                    let n = if active { w * h } else { 0 };
-                    if self.pyr_src[scale][ch].len() != n {
-                        if n == 0 {
-                            // Keep retired snapshot storage for the next cached
-                            // source-plane copy; unserved channels stay empty.
-                            self.pyr_src[scale][ch].clear();
-                        } else {
-                            self.pyr_src[scale][ch] = vec![0.0; n];
-                        }
-                    }
-                    let dn = if scale == 0 && complete_distorted0 {
-                        w * h
-                    } else {
-                        n
-                    };
-                    if self.pyr_dst[scale][ch].len() != dn {
-                        self.pyr_dst[scale][ch] = vec![0.0; dn];
-                    }
-                    let p = &self.planes[scale][ch];
-                    if [&p.mu1, &p.mu2, &p.ssq, &p.s12, &p.act]
-                        .iter()
-                        .any(|v| v.len() != n)
-                    {
-                        self.planes[scale][ch] = AttrChPlanes::new_for(n, !rev5);
-                    }
-                }
-            }
-            return;
-        }
-        self.dims = dims.to_vec();
-        let mk = |scale: usize, n: usize| -> [Vec<f32>; 3] {
-            core::array::from_fn(|ch| vec![0.0; if channels[scale][ch] { n } else { 0 }])
-        };
-        self.pyr_src = dims
-            .iter()
-            .enumerate()
-            .map(|(scale, &(w, h))| mk(scale, w * h))
-            .collect();
-        self.pyr_dst = dims
-            .iter()
-            .enumerate()
-            .map(|(scale, &(w, h))| {
-                if scale == 0 && complete_distorted0 {
-                    core::array::from_fn(|_| vec![0.0; w * h])
-                } else {
-                    mk(scale, w * h)
-                }
-            })
-            .collect();
-        self.planes = dims
-            .iter()
-            .enumerate()
-            .map(|(scale, &(w, h))| {
-                core::array::from_fn(|ch| {
-                    AttrChPlanes::new_for(if channels[scale][ch] { w * h } else { 0 }, !rev5)
-                })
-            })
-            .collect();
-        self.cells = vec![[AttrCellSums::default(); 3]; dims.len()];
-        self.mg = vec![[(0.0, 0.0); 3]; dims.len()];
-        self.complete_distorted0 = complete_distorted0;
-        self.retain_basic = retain_basic;
-        self.rev5 = rev5;
-        self.basic_stats = if retain_basic {
-            vec![crate::metric::ScaleStats::default(); dims.len()]
-        } else {
-            Vec::new()
-        };
-        self.basic_hf = if retain_basic {
-            vec![[(0.0, 0.0); 3]; dims.len()]
-        } else {
-            Vec::new()
-        };
-        self.basic_sd = if retain_basic {
-            dims.iter()
-                .enumerate()
-                .map(|(scale, &(w, h))| mk(scale, w * h))
-                .collect()
-        } else {
-            Vec::new()
-        };
-        self.channels = channels;
-    }
-
-    /// Copy one (strip, channel)'s core rows out of the walk: pyramid
-    /// windows + phase-A planes. Pure copies — the walk's own accumulation
-    /// is untouched (G-N1 rests on this).
-    fn copy_strip(
-        &mut self,
-        info: &crate::feature_v2_stream::StripInfo,
-        ch: usize,
-        scr: &ScratchV2Strip,
-        src_win: &[f32],
-        dst_win: &[f32],
-        want_bs2: bool,
-    ) {
-        let w = info.plane_w;
-        let off = HALO_P * w;
-        let n = w * info.strip_h;
-        let out = info.y0 * w;
-        let scale = info.scale;
-        self.pyr_src[scale][ch][out..out + n].copy_from_slice(&src_win[off..off + n]);
-        self.pyr_dst[scale][ch][out..out + n].copy_from_slice(&dst_win[off..off + n]);
-        let p = &mut self.planes[scale][ch];
-        p.mu1[out..out + n].copy_from_slice(&scr.mu1[off..off + n]);
-        p.mu2[out..out + n].copy_from_slice(&scr.mu2[off..off + n]);
-        p.ssq[out..out + n].copy_from_slice(&scr.ssq[off..off + n]);
-        p.s12[out..out + n].copy_from_slice(&scr.s12[off..off + n]);
-        p.act[out..out + n].copy_from_slice(&scr.activity[off..off + n]);
-        if self.retain_basic {
-            let sd = &mut self.basic_sd[scale][ch][out..out + n];
-            incant!(
-                retain_basic_sd(
-                    &p.mu1[out..out + n],
-                    &p.mu2[out..out + n],
-                    &p.ssq[out..out + n],
-                    &p.s12[out..out + n],
-                    sd
-                ),
-                [v4x, v4, v3, scalar]
-            );
-        }
-        if want_bs2 {
-            p.bs2[out..out + n].copy_from_slice(&scr.bs2[off..off + n]);
-        } else if !self.rev5 {
-            // Never computed for this cell (`APPEND_SKIP_B_SCALE0`) — its
-            // pass-B terms carry zero coefficients, but zero the plane so
-            // reuse across pairs is deterministic.
-            p.bs2[out..out + n].fill(0.0);
-        }
-    }
-}
-
-#[cfg(feature = "threads")]
-include!("feature_v2_retained_rows.rs");
-#[cfg(feature = "threads")]
-#[path = "feature_v2_retained_core.rs"]
-mod retained_core;
-#[cfg(feature = "threads")]
-use retained_core::{
-    RetainedCoreWork, retained_core_admits, rev5_blur_into_retained, rev5_retained_phase_b,
-    rev5_retained_single_channel,
-};
-
-// Retain the basic direct-error plane with the same fused expression as its
-// fold owner. Setup and correctly rounded scalar tails remain outside SIMD.
-fn retain_basic_sd_scalar(
-    _token: archmage::ScalarToken,
-    mu1: &[f32],
-    mu2: &[f32],
-    ssq: &[f32],
-    err: &[f32],
-    sd: &mut [f32],
-) {
-    for (i, value) in sd.iter_mut().enumerate() {
-        *value = crate::ssim_form::ssim_direct_raw_scalar(
-            crate::ssim_form::SsimLumaForm::Clamp,
-            mu1[i],
-            mu2[i],
-            ssq[i],
-            err[i],
-        )
-        .max(0.0);
-    }
-}
-#[magetypes(define(f32x8), v4x, v4, v3, -scalar)]
-fn retain_basic_sd(
-    token: Token,
-    mu1: &[f32],
-    mu2: &[f32],
-    ssq: &[f32],
-    err: &[f32],
-    sd: &mut [f32],
-) {
-    let form = crate::ssim_form::SsimLumaForm::Clamp;
-    let splats = crate::ssim_form::SsimSplats8::new(token, form);
-    let zero = f32x8::zero_t(token);
-    let mut i = 0;
-    while i + 8 <= sd.len() {
-        let m1 = f32x8::load_t(token, mu1[i..i + 8].try_into().unwrap());
-        let m2 = f32x8::load_t(token, mu2[i..i + 8].try_into().unwrap());
-        let sq = f32x8::load_t(token, ssq[i..i + 8].try_into().unwrap());
-        let er = f32x8::load_t(token, err[i..i + 8].try_into().unwrap());
-        splats
-            .direct(m1, m2, sq, er)
-            .max(zero)
-            .store((&mut sd[i..i + 8]).try_into().unwrap());
-        i += 8;
-    }
-    retain_basic_sd_scalar(
-        archmage::ScalarToken,
-        &mu1[i..],
-        &mu2[i..],
-        &ssq[i..],
-        &err[i..],
-        &mut sd[i..],
-    );
 }
 
 /// One (strip, channel)'s wide input windows: zero-copy slices of the
@@ -4862,11 +4315,6 @@ fn stream_phase_b(
             if toggles.gradient_features {
                 retained_grad = g;
             }
-        }
-        if let Some(strips) = &mut acc.retained_strips
-            && (1..=3).contains(&scale)
-        {
-            strips[scale].push((d, retained_grad));
         }
 
         // REV4 C1 — the full-boundary pass over the wide window (the
@@ -5788,8 +5236,6 @@ pub(crate) struct FoldWalkExtras<'a> {
     pub(crate) stop: Option<&'a dyn enough::Stop>,
     /// Resolved model/research plan; raw public extraction keeps all channels.
     pub(crate) compute: Option<ComputeSet>,
-    /// Appendix-N retention hooks (the fused-944 attribution session).
-    pub(crate) retention: Option<&'a mut FoldRetention>,
     /// Per-scale-0-row `Σ_x (src − dst)` sums, for the fold-backed engine's
     /// bit-exact `mean_offset` (see [`MeanOffsetRows`]).
     pub(crate) mean_offset: Option<&'a mut MeanOffsetRows>,
@@ -5833,7 +5279,6 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
 ) -> ZensimV2Result {
     let FoldWalkExtras {
         stop,
-        mut retention,
         mut mean_offset,
         ref_planes,
         compute,
@@ -5958,7 +5403,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
     let fuse_channels = parallel && !append_on;
     #[cfg(not(feature = "threads"))]
     let fuse_channels = false;
-    let self_blur = fuse_channels && retention.is_none() && compute.self_blur_eligible();
+    let self_blur = fuse_channels && compute.self_blur_eligible();
     // Phase A is skipped WHOLE under self-blur bands, so its four fused-H
     // outputs are never written — `plane_needs` is where that is decided.
     // Bounded strip queue: independent v2 cells retain their original 128-row
@@ -6036,10 +5481,6 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
     // Finite queries need the omitted raw scale-0 distorted channels too.
     // Keep them during the prepared walk instead of converting the image again.
     // This changes storage only; channel_active still controls every feature.
-    let complete_distorted0 = ref_planes.is_some()
-        && retention.is_some()
-        && compute.formula_revision >= FormulaRevision::Rev5
-        && compute.v2_blocks;
     let mut accums: [StreamChannelAccums; 3] = std::array::from_fn(|_| {
         StreamChannelAccums::at_revision(
             n_scales,
@@ -6050,39 +5491,10 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
     // REV4 C4's strip scratch — sized for the largest plane width; the
     // per-strip build slices it down to `info.plane_w`.
     let mut bleed_work = false.then(|| BleedMaskWork::sized(dims[0].0, STRIP_ROWS));
-    if let Some(ret) = retention.as_deref_mut() {
-        ret.ensure(
-            &dims,
-            &compute,
-            compute.formula_revision >= FormulaRevision::Rev5 && fold_v1,
-            complete_distorted0,
-        );
-        if compute.formula_revision >= FormulaRevision::Rev5 {
-            for (ch, acc) in accums.iter_mut().enumerate() {
-                acc.retained_strips = Some(
-                    dims.iter()
-                        .enumerate()
-                        .map(|(scale, &(_, h))| {
-                            let active = (1..=3).contains(&scale)
-                                && compute.at_scale(scale).v2_blocks
-                                && compute.channel_active(scale, ch);
-                            Vec::with_capacity(if active { h.div_ceil(STRIP_ROWS) } else { 0 })
-                        })
-                        .collect(),
-                );
-            }
-        }
-    }
     // BANDVIS dst self-mask live: phase A additionally produces the Y
     // channel's dst-activity plane (and ONLY the Y channel's — the block
     // is Y-only, so X/B never pay the chain).
     let act_dst_on = append2.map(|p| p.dst_activity).unwrap_or(false);
-    // The restored-cut side passes (mapdev / z1max) rebuild both pyramids from
-    // the pair, so they cannot serve a ref-fed walk (no source pixels), a
-    // sampled walk, or the HDR front end.
-    let restore_side_ok = ref_planes.is_none()
-        && compute.sampling.is_none()
-        && matches!(front_end, crate::feature_v2_stream::FrontEnd::Sdr);
     let mut producer = StripPlaneProducer::new_with_ref_feed(
         source,
         distorted,
@@ -6094,7 +5506,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
         toggles.formula_revision,
         // `globaff` reads every channel's rows at every scale, so the
         // scale-zero chroma rows stay in the rolling planes.
-        !compute.full_res_xb && !complete_distorted0,
+        !compute.full_res_xb,
     );
     let mut globaff: Vec<[crate::globaff::GlobAffAccum; 3]> = { Vec::new() };
 
@@ -6106,10 +5518,8 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
     #[cfg(feature = "threads")]
     let block_walk = {
         let omit_xb = !compute.full_res_xb
-            && !complete_distorted0
             && !crate::feature_v2_stream::linear_pyramid();
         batch_limit > 0
-            && retention.is_none()
             && ref_planes.is_none()
             && compute.sampling.is_none()
             && matches!(front_end, crate::feature_v2_stream::FrontEnd::Sdr)
@@ -6121,7 +5531,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
     // no barrier between batches, production overlapped with the jobs.
     #[cfg(feature = "threads")]
     let mut pipeline =
-        (batch_limit > 0 && retention.is_none() && ref_planes.is_none() && !block_walk)
+        (batch_limit > 0 && ref_planes.is_none() && !block_walk)
             .then(|| Rev5Pipeline::new(compute, fold_v1, batch_limit, core::mem::take(rev5_jobs)));
 
     #[cfg(feature = "threads")]
@@ -6135,7 +5545,6 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
             fold_v1,
             batch_limit,
             !compute.full_res_xb
-                && !complete_distorted0
                 && !crate::feature_v2_stream::linear_pyramid(),
             rev5_jobs,
             block_pool,
@@ -6157,23 +5566,6 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
             break;
         };
         let scale = info.scale;
-        if complete_distorted0 && scale == 0 {
-            let y1 = info.y0 + info.strip_h;
-            let range = info.y0 * info.plane_w..y1 * info.plane_w;
-            let ret = retention.as_deref_mut().expect("prepared retaining walk");
-            for ch in 0..3 {
-                if !compute.channel_active(0, ch) {
-                    let rows = producer.rows(
-                        crate::feature_v2_stream::Side::Distorted,
-                        ch,
-                        0,
-                        info.y0,
-                        y1,
-                    );
-                    ret.pyr_dst[0][ch][range.clone()].copy_from_slice(rows);
-                }
-            }
-        }
         // `globaff`: every strip of every scale, all three channels, in
         // strip order — before the dead-scale skip, which knows nothing of it.
         let local = compute.at_scale(scale);
@@ -6229,7 +5621,6 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                     toggles,
                     fold_v1,
                     &mut accums,
-                    retention.as_deref_mut(),
                     ref_planes.filter(|_| compute.sampling.is_none()),
                 );
                 queued = 0;
@@ -6258,7 +5649,6 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                             toggles,
                             fold_v1,
                             &mut accums,
-                            retention.as_deref_mut(),
                             ref_planes.filter(|_| compute.sampling.is_none()),
                         );
                         queued = 0;
@@ -6366,96 +5756,8 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
         // `fuse_channels` conjunct stays because it is a runtime parallelism
         // fact the compute set does not model.
         #[cfg(feature = "threads")]
-        let self_blur = fuse_channels && retention.is_none() && local.self_blur_eligible();
+        let self_blur = fuse_channels && local.self_blur_eligible();
         #[cfg(feature = "threads")]
-        if fuse_channels && retention.is_some() {
-            use rayon::prelude::*;
-            let outputs: [Option<RetainedRows<'_>>; 3] = if let Some(ret) = retention.as_deref_mut()
-            {
-                let sinks = ret.row_sinks().nth(scale).unwrap();
-                let mut sinks = sinks.into_iter().enumerate();
-                core::array::from_fn(|_| {
-                    let (ch, mut sink) = sinks.next().unwrap();
-                    if !ALL_CHANNELS && !compute.channel_active(scale, ch) {
-                        return None;
-                    }
-                    sink.take_prefix(info.y0 * info.plane_w);
-                    Some(sink.take_prefix(info.strip_h * info.plane_w))
-                })
-            } else {
-                core::array::from_fn(|_| None)
-            };
-            scratch_strips
-                .par_iter_mut()
-                .zip(accums.par_iter_mut())
-                .zip(outputs.into_par_iter())
-                .enumerate()
-                .for_each(|(ch, ((scr, acc), mut output))| {
-                    if !ALL_CHANNELS && !compute.channel_active(scale, ch) {
-                        return;
-                    }
-                    if rayon::current_num_threads() == 1
-                        && retained_core_admits(&local)
-                        && let Some(output) = output.as_mut()
-                    {
-                        rev5_retained_single_channel(
-                            &producer,
-                            &info,
-                            ch,
-                            (scr, acc),
-                            output,
-                            &local,
-                            RetainedCoreWork {
-                                toggles,
-                                fold_v1,
-                                free: local.free_work(ch, scale),
-                            },
-                        );
-                        return;
-                    }
-                    if self_blur {
-                        // Phase A is skipped whole; only the wide-window
-                        // gather it also performs is still needed.
-                        stream_gather_windows(&producer, &info, ch, scr);
-                    } else {
-                        stream_phase_a(
-                            &producer,
-                            &info,
-                            ch,
-                            false,
-                            false,
-                            v2_blocks,
-                            true,
-                            scr,
-                            compute.formula_revision,
-                        );
-                    }
-                    let (src_win, dst_win) = stream_windows_shared(&producer, &info, ch, scr);
-                    if let Some(output) = &mut output {
-                        output.copy(&info, scr, src_win, dst_win, false);
-                    }
-                    stream_phase_b(
-                        scr,
-                        src_win,
-                        dst_win,
-                        &info,
-                        toggles,
-                        fold_v1,
-                        v2_blocks,
-                        band_parallel,
-                        self_blur,
-                        false,
-                        &[][..],
-                        None,
-                        append2,
-                        csfw,
-                        local.free_work(ch, scale),
-                        local.rev4_work(scale, ch, bleed_mask, chroma_strip),
-                        acc,
-                    );
-                });
-            continue;
-        }
 
         #[cfg(feature = "threads")]
         if fuse_channels {
@@ -6539,22 +5841,6 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
             let scratches: &[ScratchV2Strip; 3] = scratch_strips;
             // Retention hooks (appendix N): serial copies between the two
             // fan-outs — pure reads of the phase-A scratches + windows.
-            if let Some(ret) = retention.as_deref_mut() {
-                for (ch, scr) in scratches.iter().enumerate() {
-                    if !ALL_CHANNELS && !compute.channel_active(scale, ch) {
-                        continue;
-                    }
-                    let (src_win, dst_win) = stream_windows_shared(&producer, &info, ch, scr);
-                    ret.copy_strip(
-                        &info,
-                        ch,
-                        scr,
-                        src_win,
-                        dst_win,
-                        append_cell_active(false, ch, scale),
-                    );
-                }
-            }
             accums.par_iter_mut().enumerate().for_each(|(ch, acc)| {
                 if !ALL_CHANNELS && !compute.channel_active(scale, ch) {
                     return;
@@ -6642,9 +5928,6 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                     stash[..strip_n].copy_from_slice(&scr.activity[off..off + strip_n]);
                 }
                 let (src_win, dst_win) = stream_windows_shared(&producer, &info, ch, scr);
-                if let Some(ret) = retention.as_deref_mut() {
-                    ret.copy_strip(&info, ch, scr, src_win, dst_win, active);
-                }
                 stream_phase_b(
                     scr,
                     src_win,
@@ -6686,9 +5969,6 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                     None
                 };
                 let (src_win, dst_win) = stream_windows_shared(&producer, &info, 1, scr);
-                if let Some(ret) = retention.as_deref_mut() {
-                    ret.copy_strip(&info, 1, scr, src_win, dst_win, y_active);
-                }
                 stream_phase_b(
                     scr,
                     src_win,
@@ -6720,7 +6000,6 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
             toggles,
             fold_v1,
             &mut accums,
-            retention.as_deref_mut(),
             ref_planes.filter(|_| compute.sampling.is_none()),
         );
     }
@@ -6731,15 +6010,6 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
     }
 
     producer.recycle(stream_pool);
-    if let Some(ret) = retention.as_deref_mut() {
-        for (ch, acc) in accums.iter_mut().enumerate() {
-            if let Some(strips) = acc.retained_strips.take() {
-                for (scale, values) in strips.into_iter().enumerate() {
-                    ret.strips[scale][ch] = values;
-                }
-            }
-        }
-    }
 
     // --- Finalize: the materialized walk's per-scale epilogue, replayed
     //     on the merged accumulators (identical f64 ops on identical
@@ -6852,45 +6122,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
         // mean-gradients this finalize just derived — the fused compare's
         // coefficient inputs (the standalone derives them from its own
         // 1e-9-parity pass-A replication instead).
-        if let Some(ret) = retention.as_deref_mut() {
-            for (ch, acc) in accums.iter().enumerate() {
-                if !ALL_CHANNELS && !compute.channel_active(scale, ch) {
-                    continue;
-                }
-                ret.cells[scale][ch] = AttrCellSums {
-                    dense: acc.dense[scale],
-                    grad: acc.grad[scale],
-                    app: acc.app[scale],
-                    blockiness: if toggles.blockiness {
-                        acc.block[scale].0.fin() + acc.block[scale].1.fin()
-                    } else {
-                        0.0
-                    },
-                    n,
-                };
-                ret.mg[scale][ch] = grads[ch];
-            }
-        }
 
-        if let Some(ret) = retention.as_deref_mut()
-            && ret.retain_basic
-        {
-            let channels = core::array::from_fn(|ch| {
-                if ALL_CHANNELS || compute.channel_active(scale, ch) {
-                    accums[ch].v1[scale].basic_raw()
-                } else {
-                    crate::fused::StripChannelAccum::zero()
-                }
-            });
-            ret.basic_hf[scale] = channels
-                .each_ref()
-                .map(|value| (value.hf_sq_src, value.hf_abs_src));
-            ret.basic_stats[scale] = crate::streaming::ScaleAccumulators::from_basic(
-                channels,
-                n,
-                compute.formula_revision,
-            );
-        }
         if fold_v1 {
             for (ch, acc) in accums.iter().enumerate() {
                 if !ALL_CHANNELS && !compute.channel_active(scale, ch) {
@@ -7026,27 +6258,6 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
     //     already-emitted EWC_Y × HF_LOSS_Y — final only after the scale
     //     loop's cross-scale EWC fill, which is why this sits after it.
 
-    let restore_work = restore_cuts::Work {
-        mapdev: false,
-        z1max: false,
-    };
-    // --- globaff finalize: `(share, explained)` per (scale, channel), in the
-    //     registry's `2·(3·scale + channel) + signal` order. ---
-    if restore_work.any() {
-        assert!(
-            restore_side_ok,
-            "mapdev/z1max need the SDR pair path (no ref-fed, sampled or HDR walk)"
-        );
-        restore_cuts::run(
-            source,
-            distorted,
-            parallel,
-            compute.formula_revision,
-            restore_work,
-            features_mapdev,
-            features_z1max,
-        );
-    }
     ZensimV2Result { features }
 }
 
@@ -7134,16 +6345,6 @@ pub(crate) struct AttrChPlanes {
 }
 
 impl AttrChPlanes {
-    fn new_for(n: usize, want_bs2: bool) -> Self {
-        Self {
-            mu1: vec![0.0; n],
-            mu2: vec![0.0; n],
-            ssq: vec![0.0; n],
-            s12: vec![0.0; n],
-            act: vec![0.0; n],
-            bs2: vec![0.0; if want_bs2 { n } else { 0 }],
-        }
-    }
 }
 
 // ============================================================================

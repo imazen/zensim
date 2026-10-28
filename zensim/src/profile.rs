@@ -109,14 +109,7 @@ impl ProfileParams {
     /// take the UNION of what the profile actually reads — missing one would
     /// silently skip a family a live consumer still looks at.
     pub(crate) fn scoring_bake_bytes(&self) -> impl Iterator<Item = &'static [u8]> + '_ {
-        [
-            self.mlp_bytes,
-            self.mlp_bytes_b3,
-            self.ensemble_classifier_bytes,
-        ]
-        .into_iter()
-        .flatten()
-        .map(|f| f())
+        self.mlp_bytes.into_iter().map(|f| f())
     }
 }
 
@@ -167,28 +160,6 @@ pub struct ProfileParams {
     /// to a `static` byte array once the training pipeline lands).
     pub(crate) mlp_bytes: Option<fn() -> &'static [u8]>,
 
-    /// Optional **secondary** MLP bake for D2-style multi-output ensembles
-    /// (V_20 input-shaping B3 specialist). When `Some`, the runtime forwards
-    /// both `mlp_bytes` and `mlp_bytes_b3` and mixes their RAW outputs at
-    /// `mlp_primary_mix` weight before the score-mapping step. The secondary
-    /// bake MUST be affine-calibrated to the primary's output scale (use
-    /// `zensim-validate/bin/affine_calibrate`). Both bakes MUST share
-    /// `n_inputs` — their forward path runs over the same 228-feature
-    /// vector; `feature_transforms` metadata is per-bake so the primary
-    /// can be untransformed while the secondary applies V_20-style
-    /// per-feature shaping.
-    ///
-    /// `None` (default for V_18 ship and earlier) keeps the single-bake
-    /// path with zero overhead.
-    pub(crate) mlp_bytes_b3: Option<fn() -> &'static [u8]>,
-
-    /// Mix weight on the **primary** bake (`mlp_bytes`). The secondary
-    /// gets `1.0 - mlp_primary_mix`. Only used when `mlp_bytes_b3` is
-    /// `Some`. Per the D2 design doc, α = 0.7 gives CID22 B3 +0.080
-    /// at aggregate −0.004 vs V_18 ship alone. α = 0.8 gives B3 +0.052
-    /// at aggregate match.
-    pub(crate) mlp_primary_mix: f32,
-
     /// When `true`, the runtime computes the **extended-features**
     /// block (228 → 300 features — adds 72 masked features) per pair
     /// via `Zensim::compute_extended_features`. Required when the
@@ -217,30 +188,6 @@ pub struct ProfileParams {
     /// scoring through the standard runtime.
     pub(crate) compute_iw_features: bool,
 
-    /// When `true`, the final score is wrapped through a logistic
-    /// soft-clamp `100 / (1 + exp(-(raw - 50) / 20))` instead of the
-    /// hard `raw.clamp(0, 100)`. Preserves rank ordering at the
-    /// extremes (no ties → SROCC stays defined when V_20+ multi-bake
-    /// mixes extrapolate below 0 or above 100).
-    ///
-    /// The soft-clamp is a no-op in the `[5, 95]` range (output differs
-    /// from input by less than 1.5 units at the band centers); it only
-    /// reshapes the tails. Cost: one `exp` per score (~1 ns).
-    ///
-    /// Use on profiles that mix bakes of different shapes or that
-    /// extrapolate outside training distribution. PreviewV0_4 (V_18 +
-    /// V_20 IS multi-bake) ships with this `true` — the V_20 IS B3
-    /// specialist's raw output extends past 100 on some pairs after
-    /// the linear mix, and the hard clamp was creating tie blocks
-    /// that collapsed SROCC to 0 on TID B0/B1 pairs.
-    ///
-    /// Default `false` keeps the hard-clamp legacy semantics for
-    /// the V_18 ship lineage and earlier profiles.
-    ///
-    /// Added 2026-05-16 (T3.2). See zensim/CLAUDE.md `V_20 input-shaping
-    /// learnings > Soft-clamp the multi-bake output` for the design rationale.
-    pub(crate) soft_clamp_score: bool,
-
     /// EXP-CROSS-CODEC-V10 (2026-05-20): when `true`, the final score
     /// is returned **without clamping or soft-clamping** — the
     /// PCHIP spline's linear extrapolation past the knot endpoints
@@ -249,72 +196,9 @@ pub struct ProfileParams {
     /// unreasonable" codec output (worst codec at q=0, butter > 12)
     /// rather than collapsing into a tie block at 0.
     ///
-    /// When set, `soft_clamp_score` is ignored. Default `false`
-    /// preserves legacy [0, 100] semantics for V9 and earlier
-    /// profiles whose splines/anchors only span [0, 100].
+    /// Default `false` preserves legacy [0, 100] semantics for V9 and
+    /// earlier profiles whose splines/anchors only span [0, 100].
     pub(crate) extrapolate_score: bool,
-
-    /// **Correct-by-construction bounded squash** for *linear*
-    /// (`mlp_bytes == None`) profiles. When `true`, the final score is
-    /// `100 · exp(−(a/100) · d^b)` of the non-negative-weight feature
-    /// distance `d = Σ wᵢ fᵢ` (with `a = score_mapping_a`, `b =
-    /// score_mapping_b`), instead of the legacy `100 − a·d^b`.
-    ///
-    /// Because every feature is a non-negative dissimilarity
-    /// (`fᵢ ≥ 0`, `= 0` iff locally identical) and the V0_2 weights are
-    /// all non-negative, `d ≥ 0` with `d = 0` iff identical. The squash
-    /// `S(d) = exp(−k·d^b)` is strictly decreasing on `[0, ∞)`,
-    /// `S(0) = 1`, `S → 0`. Composing them gives a score that is
-    /// **bounded `[0, 100]`, equal to 100 iff identical (its unique
-    /// global maximum), and monotone non-increasing in every error
-    /// feature — all by construction, on the entire input domain**
-    /// (including content far off the training manifold). It is a
-    /// strictly-monotone transform of `d`, so SROCC is identical to the
-    /// legacy `100 − a·d^b` mapping; only the unbounded-below tail and
-    /// mid-range scale differ. See
-    /// `docs/METRIC_INVARIANTS_MECHANISM_AND_REDESIGN_2026-05-26.md` §4.
-    ///
-    /// Ignored on MLP profiles (`mlp_bytes.is_some()`), whose
-    /// correct-by-construction form requires a monotone architecture
-    /// (the larger follow-on in §5 of that doc). Default `false`.
-    pub(crate) bounded_squash: bool,
-
-    /// **Ensemble routing classifier** — when `Some`, the runtime
-    /// loads the classifier bake, forwards the feature vector through
-    /// it, and routes to either `mlp_bytes` (the balanced/primary
-    /// bake) or `mlp_bytes_compression` (the alternative bake) based
-    /// on the classifier's sign.
-    ///
-    /// The classifier is a small (372 → 64 → 1 or 300 → 64 → 1) MLP
-    /// trained to predict `is_compression_corpus` on the canonical
-    /// 5-corpus held-out set. Its output is a pre-sigmoid logit;
-    /// `logit > 0` (i.e. `sigmoid(logit) > 0.5`) routes the pair to
-    /// the compression bake.
-    ///
-    /// `None` (default) keeps the single-bake (`mlp_bytes`) forward
-    /// path; `mlp_bytes_compression` is ignored.
-    ///
-    /// Added 2026-05-18 for PreviewV0_5Ensemble. The ensemble bake +
-    /// classifier together produce per-corpus SROCC at or near
-    /// `max(balanced, compression)` on every canonical corpus while
-    /// staying within the compression-trail § A.10 gate's −0.10
-    /// synthetic tolerance vs the balanced ship. See
-    /// `benchmarks/exp_ensemble_v05_eval_2026-05-18.md`.
-    pub(crate) ensemble_classifier_bytes: Option<fn() -> &'static [u8]>,
-
-    /// Alternative MLP bake routed to when the classifier (see
-    /// `ensemble_classifier_bytes`) outputs a positive logit. The
-    /// "compression-trail" bake in the production setup; called
-    /// secondary here to avoid name conflicts with the existing
-    /// `mlp_bytes_b3` D2-style ensemble slot (which mixes RAW
-    /// outputs linearly rather than routing).
-    ///
-    /// Ignored when `ensemble_classifier_bytes` is `None`. Both
-    /// bakes MUST accept the same input-feature shape (typically
-    /// 300 features in the V0_5 generation).
-    ///
-    /// Added 2026-05-18.
-    pub(crate) mlp_bytes_compression: Option<fn() -> &'static [u8]>,
 }
 
 #[cfg(feature = "training")]
@@ -344,15 +228,9 @@ impl ProfileParams {
             // their static `ProfileParams` definitions.
             skip_score_mapping: false,
             mlp_bytes: None,
-            mlp_bytes_b3: None,
-            mlp_primary_mix: 1.0,
             extended_features: false,
             compute_iw_features: false,
-            soft_clamp_score: false,
             extrapolate_score: false,
-            bounded_squash: false,
-            ensemble_classifier_bytes: None,
-            mlp_bytes_compression: None,
         }
     }
 }
@@ -367,19 +245,13 @@ static PROFILE_PREVIEW_V0_1: ProfileParams = ProfileParams {
     blur_radius: 5,
     blur_passes: 1,
     num_scales: 4,
-    bounded_squash: false,
     score_mapping_a: 18.0,
     score_mapping_b: 0.7,
     skip_score_mapping: false,
     mlp_bytes: None,
-    mlp_bytes_b3: None,
-    mlp_primary_mix: 1.0,
     extended_features: false,
     compute_iw_features: false,
-    soft_clamp_score: false,
     extrapolate_score: false,
-    ensemble_classifier_bytes: None,
-    mlp_bytes_compression: None,
 };
 
 /// `ZensimProfile::PreviewV0_2` params — the plain 228-weight linear V0_2
@@ -393,19 +265,13 @@ static PROFILE_PREVIEW_V0_2: ProfileParams = ProfileParams {
     blur_radius: 5,
     blur_passes: 1,
     num_scales: 4,
-    bounded_squash: false,
     score_mapping_a: 18.0,
     score_mapping_b: 0.7,
     skip_score_mapping: false,
     mlp_bytes: None,
-    mlp_bytes_b3: None,
-    mlp_primary_mix: 1.0,
     extended_features: false,
     compute_iw_features: false,
-    soft_clamp_score: false,
     extrapolate_score: false,
-    ensemble_classifier_bytes: None,
-    mlp_bytes_compression: None,
 };
 
 /// `ZensimProfile::A` bake bytes — **rotated 2026-05-27 to
@@ -458,7 +324,6 @@ static PROFILE_A: ProfileParams = ProfileParams {
     blur_radius: 5,
     blur_passes: 1,
     num_scales: 4,
-    bounded_squash: false,
     // v47-strict-QAT bake carries its own monotone PCHIP spline calibration
     // via the `zentrain.output_calibration_spline` metadata — the raw MLP
     // output is dial-honest after the spline applies. No legacy
@@ -467,17 +332,12 @@ static PROFILE_A: ProfileParams = ProfileParams {
     score_mapping_b: 0.7,
     skip_score_mapping: true,
     mlp_bytes: Some(mlp_bake_a_v47_qat),
-    mlp_bytes_b3: None,
-    mlp_primary_mix: 1.0,
     // v47-strict is a 372-feature bake (extended + IW-pool features).
     extended_features: true,
     compute_iw_features: true,
     // Hard clamp at [0, 100] post-spline (spline output is already
     // calibrated into the dial range; clamp catches numerical drift).
-    soft_clamp_score: false,
     extrapolate_score: true,
-    ensemble_classifier_bytes: None,
-    mlp_bytes_compression: None,
 };
 
 /// `ZensimProfile::LegacyLinearV0_2` params — the plain 228-weight linear
@@ -493,19 +353,13 @@ static PROFILE_LEGACY_LINEAR_V0_2: ProfileParams = ProfileParams {
     blur_radius: 5,
     blur_passes: 1,
     num_scales: 4,
-    bounded_squash: false,
     score_mapping_a: 18.0,
     score_mapping_b: 0.7,
     skip_score_mapping: false,
     mlp_bytes: None,
-    mlp_bytes_b3: None,
-    mlp_primary_mix: 1.0,
     extended_features: false,
     compute_iw_features: false,
-    soft_clamp_score: false,
     extrapolate_score: false,
-    ensemble_classifier_bytes: None,
-    mlp_bytes_compression: None,
 };
 
 /// `ZensimProfile::E` bake: the general revision-7 model (H128 monotone MLP,
@@ -530,19 +384,13 @@ const fn rev7_params(bake: fn() -> &'static [u8]) -> ProfileParams {
         blur_radius: 5,
         blur_passes: 1,
         num_scales: 4,
-        bounded_squash: false,
         score_mapping_a: 18.0,
         score_mapping_b: 0.7,
         skip_score_mapping: true,
         mlp_bytes: Some(bake),
-        mlp_bytes_b3: None,
-        mlp_primary_mix: 1.0,
         extended_features: true,
         compute_iw_features: true,
-        soft_clamp_score: false,
         extrapolate_score: true,
-        ensemble_classifier_bytes: None,
-        mlp_bytes_compression: None,
     }
 }
 

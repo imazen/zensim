@@ -59,12 +59,6 @@ impl Mode {
         !matches!(self, Mode::Off)
     }
 
-    /// Product-build sibling of the oracle `exact()`: never true, so
-    /// `if mode.exact()` folds away wherever it is written unconditionally.
-    #[inline(always)]
-    pub(crate) const fn exact(self) -> bool {
-        false
-    }
 }
 
 /// The canonical-leaf arithmetic for a computation at `revision`.

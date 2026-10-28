@@ -231,44 +231,6 @@ impl Sampling {
         levels
     }
 
-    /// Compose nonnegative, normalized squared-tap ownership back to original
-    /// coordinates. This is a removal-mass model, not the resizer's derivative.
-    fn axis(self, logical: usize, level: usize) -> Vec<Vec<(usize, f64)>> {
-        let extended = logical.max(self.min_dim());
-        let mut map: Vec<Vec<(usize, f64)>> = (0..extended)
-            .map(|i| vec![(crate::metric::reflect_index(i, logical), 1.0)])
-            .collect();
-        let dims = self.dims(logical, logical);
-        for (i, &(len, _)) in dims.iter().enumerate().take(level + 1) {
-            if (i == 0 && (self.keep_y || self.is_direct())) || (self.is_direct() && i != level) {
-                continue;
-            }
-            let table = F32WeightTable::new(
-                map.len() as u32,
-                len as u32,
-                &InterpolationDetails::create(self.filter()),
-            );
-            let next = (0..len)
-                .map(|o| {
-                    let weights = table.weights(o);
-                    let norm: f64 = weights.iter().map(|&w| f64::from(w).powi(2)).sum();
-                    let mut sums = std::collections::BTreeMap::<usize, f64>::new();
-                    for (j, &weight) in weights.iter().enumerate() {
-                        if weight == 0.0 {
-                            continue;
-                        }
-                        let a = f64::from(weight).powi(2) / norm;
-                        for &(x, mass) in &map[table.left[o] as usize + j] {
-                            *sums.entry(x).or_default() += a * mass;
-                        }
-                    }
-                    sums.into_iter().collect()
-                })
-                .collect();
-            map = next;
-        }
-        map
-    }
 }
 
 type Axis = Vec<Vec<(usize, f64)>>;
@@ -280,128 +242,11 @@ pub(crate) struct Geometry {
     axes: Vec<[Axis; 2]>,
 }
 impl Geometry {
-    pub(crate) fn footprints(&self, axis: usize, level: usize) -> Vec<(usize, usize)> {
-        self.axes[level][axis]
-            .iter()
-            .map(|a| (a.first().unwrap().0, a.last().unwrap().0))
-            .collect()
-    }
-    pub(crate) fn project(&self, plane: &[f32], level: usize) -> Vec<f32> {
-        let (width, height) = (self.width, self.height);
-        let xs = &self.axes[level][0];
-        let ys = &self.axes[level][1];
-        assert_eq!(plane.len(), xs.len() * ys.len());
-        // Separable transpose keeps work linear in axis tap counts rather
-        // than expanding every 2D footprint into a Cartesian product.
-        let mut tmp = vec![0.0f64; width * ys.len()];
-        for y in 0..ys.len() {
-            for (sx, weights) in xs.iter().enumerate() {
-                let v = f64::from(plane[y * xs.len() + sx]);
-                for &(x, weight) in weights {
-                    tmp[y * width + x] += v * weight;
-                }
-            }
-        }
-        let mut out = vec![0.0f64; width * height];
-        for (sy, weights) in ys.iter().enumerate() {
-            for &(y, weight) in weights {
-                for x in 0..width {
-                    out[y * width + x] += tmp[sy * width + x] * weight;
-                }
-            }
-        }
-        out.into_iter().map(|v| v as f32).collect()
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn direct_scales_match_quantized_separable_f64_tap_algebra() {
-        for divisors in [[1, 2, 4, 8], [1, 3, 5, 7], [1, 2, 3, 5]] {
-            for kernel in 0..3 {
-                let sampling = Sampling {
-                    keep_y: false,
-                    kernel,
-                    num: 1,
-                    den: 1,
-                    divisors: Some(divisors),
-                };
-                let (w, h) = (97usize, 131usize);
-                let pixels: Vec<_> = (0..w * h)
-                    .map(|i| [(i % 251) as u8, (i * 7 % 239) as u8, (i * 13 % 233) as u8])
-                    .collect();
-                let source = crate::RgbSlice::new(&pixels, w, h);
-                let levels = sampling.pyramid(&source, false, crate::ssim_form::active_revision());
-                let mut max_unquantized_delta = 0f64;
-                for (level, (planes, ow, oh)) in levels.iter().enumerate() {
-                    assert_eq!((*ow, *oh), (w / divisors[level], h / divisors[level]));
-                    let xs = sampling.axis(w, level);
-                    let ys = sampling.axis(h, level);
-                    for a in xs.iter().chain(&ys) {
-                        assert!((a.iter().map(|p| p.1).sum::<f64>() - 1.).abs() < 1e-12);
-                    }
-                    if level == 0 {
-                        continue;
-                    }
-                    let tx = F32WeightTable::new(
-                        w as u32,
-                        *ow as u32,
-                        &InterpolationDetails::create(sampling.filter()),
-                    );
-                    let ty = F32WeightTable::new(
-                        h as u32,
-                        *oh as u32,
-                        &InterpolationDetails::create(sampling.filter()),
-                    );
-                    for (ch, plane) in planes.iter().enumerate() {
-                        for y in 0..*oh {
-                            for x in 0..*ow {
-                                let mut reference = 0f64;
-                                let mut unquantized = 0f64;
-                                for (dy, &wy) in ty.weights(y).iter().enumerate() {
-                                    for (dx, &wx) in tx.weights(x).iter().enumerate() {
-                                        if wx == 0.0 || wy == 0.0 {
-                                            continue;
-                                        }
-                                        let index = (ty.left[y] as usize + dy) * w
-                                            + tx.left[x] as usize
-                                            + dx;
-                                        let value = f64::from(levels[0].0[ch][index]);
-                                        // Independently round to binary16: 10 fraction bits,
-                                        // with constant 2^-24 spacing in the subnormal range.
-                                        let exponent = if value == 0.0 {
-                                            -24
-                                        } else {
-                                            (value.abs().log2().floor() as i32 - 10).max(-24)
-                                        };
-                                        let step = 2f64.powi(exponent);
-                                        let quantized = (value / step).round_ties_even() * step;
-                                        reference += f64::from(wy) * f64::from(wx) * quantized;
-                                        unquantized += f64::from(wy) * f64::from(wx) * value;
-                                    }
-                                }
-                                max_unquantized_delta = max_unquantized_delta
-                                    .max((unquantized - f64::from(plane[y * ow + x])).abs());
-                                assert!(
-                                    (reference - f64::from(plane[y * ow + x])).abs() < 2e-6,
-                                    "{sampling:?} level={level} ({x},{y}) actual={} reference={reference} unquantized={unquantized}",
-                                    plane[y * ow + x]
-                                );
-                            }
-                        }
-                    }
-                }
-                assert!(
-                    max_unquantized_delta > 1e-6,
-                    "unquantized negative control must fail"
-                );
-                eprintln!("{sampling:?}: max error vs unquantized f64={max_unquantized_delta:e}");
-            }
-        }
-    }
 
     #[cfg(feature = "threads")]
     #[test]
@@ -465,54 +310,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn spatial_ownership_conserves_signed_mass_and_contains_all_taps() {
-        for keep_y in [false, true] {
-            for kernel in 0..3 {
-                for (num, den) in [(3, 2), (2, 1), (3, 1)] {
-                    let sampling = Sampling {
-                        keep_y,
-                        kernel,
-                        num,
-                        den,
-                        divisors: None,
-                    };
-                    for (width, height) in [(7, 11), (97, 131)] {
-                        let geometry = Geometry {
-                            width,
-                            height,
-                            axes: (0..4)
-                                .map(|level| {
-                                    [sampling.axis(width, level), sampling.axis(height, level)]
-                                })
-                                .collect(),
-                        };
-                        for level in 0..4 {
-                            for axis in 0..2 {
-                                let bounds = geometry.footprints(axis, level);
-                                for (i, weights) in geometry.axes[level][axis].iter().enumerate() {
-                                    assert!(
-                                        (weights.iter().map(|p| p.1).sum::<f64>() - 1.0).abs()
-                                            < 1e-12
-                                    );
-                                    assert!(weights.iter().all(|&(x, weight)| weight > 0.0
-                                        && x >= bounds[i].0
-                                        && x <= bounds[i].1));
-                                }
-                            }
-                            let n = geometry.axes[level][0].len() * geometry.axes[level][1].len();
-                            let plane: Vec<f32> = (0..n).map(|i| (i % 17) as f32 - 6.0).collect();
-                            let sum = plane.iter().map(|&v| f64::from(v)).sum::<f64>();
-                            let projected = geometry.project(&plane, level);
-                            let total = projected.iter().map(|&v| f64::from(v)).sum::<f64>();
-                            assert!(
-                                (sum - total).abs() < n as f64 * 2e-6,
-                                "{sampling:?} {width}x{height} level {level}: {sum} != {total}"
-                            );
-                        }
-                    }
-                }
-            }
-        }
-    }
 }

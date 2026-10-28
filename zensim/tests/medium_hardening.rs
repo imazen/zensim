@@ -17,23 +17,6 @@ fn z() -> Zensim {
     Zensim::new(ZensimProfile::A)
 }
 
-// The two tests that assert *score values* (identical → ~100, bounded
-// [0,100]) need a linear-bounded profile: profile `A`'s MLP squash has
-// identity ≈ 97.69 and can extrapolate outside [0,100], so it does not
-// satisfy those invariants. Rebuild the `LinearBounded` profile via the
-// `custom-profiles` extension point (CI's `test-all-features` job runs it).
-#[cfg(feature = "custom-profiles")]
-fn z_linear_bounded() -> Zensim {
-    use std::sync::OnceLock;
-    use zensim::profile::ProfileParams;
-    static P: OnceLock<ProfileParams> = OnceLock::new();
-    let params = P.get_or_init(|| ProfileParams::builder().bounded_squash(true).build());
-    Zensim::new(ZensimProfile::Custom {
-        params,
-        name: "zensim-linear-bounded",
-    })
-}
-
 // ─── M1: cross-image dim mismatch in compute_with_ref* ─────────────────────
 
 #[test]
@@ -67,18 +50,6 @@ fn m1_compute_with_ref_into_dim_mismatch_returns_err() {
         .compute_with_ref_into(&pre, &small, &mut scratch)
         .unwrap_err();
     assert_eq!(err, ZensimError::DimensionMismatch);
-}
-
-#[cfg(feature = "custom-profiles")]
-#[test]
-fn m1_compute_with_ref_matching_dims_succeeds() {
-    let pixels = vec![[100u8, 100, 100]; 16 * 16];
-    let img = RgbSlice::new(&pixels, 16, 16);
-    let zensim = z_linear_bounded();
-    let pre = zensim.precompute_reference(&img).unwrap();
-    let result = zensim.compute_with_ref(&pre, &img).unwrap();
-    // Identical input → score must round to ~100 (linear-bounded profile).
-    assert!(result.score() > 99.0, "score {}", result.score());
 }
 
 #[test]
@@ -126,48 +97,6 @@ fn m1_diffmap_with_ref_linear_planar_dim_mismatch_returns_err() {
         Ok(_) => panic!("expected DimensionMismatch"),
         Err(e) => assert_eq!(e, ZensimError::DimensionMismatch),
     }
-}
-
-// Gated on `custom-profiles`: asserts the score lands in [0,100], which
-// only holds for the linear-bounded profile (`A` may extrapolate outside
-// [0,100] by design). The no-panic reflect-pad path for `A` is covered by
-// the diffmap tests in `src/diffmap.rs` and `small_images_score_via_reflect_pad`.
-#[cfg(feature = "custom-profiles")]
-#[test]
-fn m1_diffmap_with_ref_linear_planar_sub64_scores() {
-    use zensim::DiffmapOptions;
-    // A sub-64px reference + a matching sub-64px planar-f32 distorted must now
-    // score (both reflect-padded to the pyramid minimum), not panic — the
-    // diffmap is trimmed back to the original size.
-    let (w, h) = (16usize, 16usize);
-    let ref_pixels = vec![[10u8, 20, 30]; w * h];
-    let zensim = z_linear_bounded();
-    let pre = zensim
-        .precompute_reference(&RgbSlice::new(&ref_pixels, w, h))
-        .unwrap();
-    let r = vec![0.04f32; w * h];
-    let g = vec![0.08f32; w * h];
-    let b = vec![0.12f32; w * h];
-    let res = zensim
-        .compute_with_ref_and_diffmap_linear_planar(
-            &pre,
-            [&r, &g, &b],
-            w,
-            h,
-            w,
-            DiffmapOptions::default(),
-        )
-        .expect("sub-64 planar diffmap must score");
-    let s = res.score();
-    assert!(
-        s.is_finite() && (0.0..=100.0).contains(&s),
-        "sub-64 planar score {s}"
-    );
-    assert_eq!(
-        res.diffmap().len(),
-        w * h,
-        "diffmap trimmed to original dims"
-    );
 }
 
 // ─── M2: integer overflow rejection ────────────────────────────────────────

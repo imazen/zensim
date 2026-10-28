@@ -35,13 +35,6 @@ use archmage::autoversion;
 /// Signals per (scale, channel) cell: `share`, `explained`.
 pub(crate) const GLOBAFF_PER_CELL: usize = 2;
 
-/// The family's first feature id; its slots follow in
-/// `2·(3·scale + channel) + {share, explained}` order.
-pub(crate) const FIRST_ID: usize = 1867;
-
-/// The family's slot count over the four scales.
-pub(crate) const SLOTS: usize = crate::NUM_SCALES * 3 * GLOBAFF_PER_CELL;
-
 /// The five running sums of one (scale, channel) cell: `s`, `e = s − d`,
 /// `s²`, `e²` and `s·e`.
 #[derive(Clone, Copy, Debug, Default)]
@@ -106,18 +99,6 @@ impl GlobAffAccum {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// The family's id range is the registry's.
-    #[test]
-    fn first_id_and_slots_match_the_registry() {
-        let ids: Vec<usize> = crate::feature_defs::family_slots(
-            crate::feature_set_id::ComputeToken::GlobAff,
-            crate::NUM_SCALES,
-        )
-        .iter_slots()
-        .collect();
-        assert_eq!(ids, (FIRST_ID..FIRST_ID + SLOTS).collect::<Vec<_>>());
-    }
 
     fn plane(w: usize, h: usize, seed: u32) -> Vec<f32> {
         let mut state = seed.wrapping_mul(2654435761).wrapping_add(1);

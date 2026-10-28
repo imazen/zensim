@@ -224,43 +224,6 @@ impl HfGainForm {
         )
     }
 
-    /// Whether the arm is strictly increasing in `var_dst` **at a fixed
-    /// `var_src`** — the LOCAL ordering, within one cell's sweep.
-    ///
-    /// Only [`Self::CappedExcess`] is not, and it is not by construction.
-    ///
-    /// ⚠ This is NOT gate H5, and the difference cost a wrong prediction: H5
-    /// is the GLOBAL ordering, across cells with different `var_src`, and an
-    /// arm can be locally monotone and still re-rank the population. See
-    /// [`Self::depends_only_on_ratio`].
-    ///
-    /// Read by [`tests::order_preservation_matches_the_declared_flag`], which
-    /// holds the flag equal to the arm's actual behaviour.
-    pub(crate) const fn preserves_order(self) -> bool {
-        !matches!(self, Self::CappedExcess)
-    }
-
-    /// Whether the arm is a function of the RATIO `g` alone — the property
-    /// gate **H5** actually measures, and the one that decides whether the arm
-    /// preserves the shipped slot's ordering over a whole corpus.
-    ///
-    /// [`Self::BoundedExcess`] is the exception, and it is worth stating why
-    /// rather than merely flagging: `max(0, a−b)/(a+b+C)` depends on the
-    /// MAGNITUDE of `b`, not only on `a/b`. Two cells with the same `g` and
-    /// different `var_src` get different values, so it does not merely bound
-    /// the shipped statistic — it replaces it with a scale-dependent one.
-    /// MEASURED on CID22 alone: 2,895 adjacent-pair inversions against the
-    /// revision-1 order. Predicted the opposite before measuring; the
-    /// prediction was made from `d/da` at fixed `b`, which is
-    /// [`Self::preserves_order`]'s question, not this one.
-    ///
-    /// Mirrored by `scripts/r6b_arm_delta.py`'s `ARM_RATIO_ONLY`, and pinned
-    /// against the arithmetic by
-    /// [`tests::only_bounded_excess_depends_on_the_magnitude`].
-    pub(crate) const fn depends_only_on_ratio(self) -> bool {
-        !matches!(self, Self::BoundedExcess)
-    }
-
     /// The arm's least upper bound, or `None` when it has none.
     pub(crate) const fn upper_bound(self) -> Option<f64> {
         match self {
@@ -369,69 +332,6 @@ pub(crate) fn hf_mag_loss(mad_src: f64, mad_dst: f64) -> f64 {
         (1.0 - mad_dst / mad_src).max(0.0)
     } else {
         0.0
-    }
-}
-
-/// `∂ hf_energy_gain / ∂ var_dst`, for the attribution density's integrand.
-///
-/// The map has to differentiate the form the SCORE uses or it describes a
-/// metric nobody is running, so the derivative lives beside the form and
-/// switches with it. Zero wherever the value is pinned at 0 (`var_dst <=
-/// var_src`), matching `AttrCoeffs`'s existing branch, and zero above the cap
-/// for [`HfGainForm::CappedExcess`], which is flat there.
-// Used by `attribution`'s density integrand, which is `custom-profiles`-gated;
-// on a build without that feature it is reachable only from this module's
-// finite-difference tests.
-#[inline]
-pub(crate) fn hf_energy_gain_d_var_dst(form: HfGainForm, var_src: f64, var_dst: f64) -> f64 {
-    // Same NaN-preserving negation as `hf_energy_gain`; see its comment.
-    #[allow(clippy::neg_cmp_op_on_partial_ord)]
-    if !(var_src > VAR_SRC_FLOOR) || var_dst <= var_src {
-        return 0.0;
-    }
-    match form {
-        HfGainForm::RatioExcess => 1.0 / var_src,
-        HfGainForm::BoundedExcess => {
-            let den = var_dst + var_src + C_HF_V1;
-            (2.0 * var_src + C_HF_V1) / (den * den)
-        }
-        // d/da ln(a/b) = 1/a.
-        HfGainForm::Log1pExcess => 1.0 / var_dst,
-        // g/(g+1) = 1 - b/a  ⇒  d/da = b/a².
-        HfGainForm::SaturatingExcess => var_src / (var_dst * var_dst),
-        HfGainForm::CappedExcess => {
-            if var_dst / var_src - 1.0 < GAIN_CAP {
-                1.0 / var_src
-            } else {
-                0.0
-            }
-        }
-    }
-}
-
-/// The attribution integrand's coefficient, in the ACCUMULATOR's units:
-/// `∂ hf_energy_gain / ∂ Σ(dst − μ2)²`.
-///
-/// [`hf_energy_gain_d_var_dst`] is the mathematical owner; this is the wrapper
-/// the density's call site uses, and it exists so the shipped arm keeps its
-/// exact spelling. `var_x = Σx·inv_n`, so the chain rule gives
-/// `inv_n · ∂f/∂var_dst`, which for [`HfGainForm::RatioExcess`] is
-/// `inv_n / var_src` — mathematically `1/Σsrc²`, but not the same f64 rounding.
-/// Spelling that arm as the division the site already performed keeps revision
-/// 1's density BIT-identical; every other arm goes through the chain rule.
-// Used by `attribution`'s density integrand, which is `custom-profiles`-gated;
-// on a build without that feature it is reachable only from this module's
-// finite-difference tests.
-#[inline]
-pub(crate) fn hf_energy_gain_d_sum_dst_sq(
-    form: HfGainForm,
-    hf_sq_src: f64,
-    hf_sq_dst: f64,
-    inv_n: f64,
-) -> f64 {
-    match form {
-        HfGainForm::RatioExcess => 1.0 / hf_sq_src,
-        _ => inv_n * hf_energy_gain_d_var_dst(form, hf_sq_src * inv_n, hf_sq_dst * inv_n),
     }
 }
 
@@ -566,72 +466,6 @@ mod tests {
         }
     }
 
-    /// **H5 — order preservation.** Each arm that claims it is strictly
-    /// increasing in `var_dst` above `var_src`; `CappedExcess` claims it is not
-    /// and must actually tie above the cap, so the flag is not decorative.
-    #[test]
-    fn order_preservation_matches_the_declared_flag() {
-        let b = 0.25;
-        let ratios: Vec<f64> = (0..400).map(|i| 1.0 + (i as f64) * 0.05).collect();
-        for form in ARMS {
-            let vals: Vec<f64> = ratios
-                .iter()
-                .map(|r| hf_energy_gain(form, b, b * r))
-                .collect();
-            let strict = vals.windows(2).all(|w| w[1] > w[0]);
-            assert_eq!(
-                strict,
-                form.preserves_order(),
-                "{form:?} declares preserves_order = {} but strict = {strict}",
-                form.preserves_order()
-            );
-        }
-        // And the cap actually ties, rather than merely failing strictness for
-        // some floating-point reason.
-        let hi1 = hf_energy_gain(HfGainForm::CappedExcess, b, b * 5.0);
-        let hi2 = hf_energy_gain(HfGainForm::CappedExcess, b, b * 5000.0);
-        assert_eq!(hi1, hi2);
-        assert_eq!(hi1, GAIN_CAP);
-    }
-
-    /// H5's actual subject: which arms are functions of the RATIO alone.
-    ///
-    /// The arm that is not re-ranks the population even though it is monotone
-    /// in `var_dst` at fixed `var_src` — the distinction the first draft of
-    /// this module got wrong.
-    #[test]
-    fn only_bounded_excess_depends_on_the_magnitude() {
-        // Same ratio g = 1 (a = 2b), three magnitudes three orders apart.
-        let pairs = [(1e-6f64, 2e-6f64), (1e-3, 2e-3), (1.0, 2.0)];
-        for form in ARMS {
-            let vals: Vec<f64> = pairs
-                .iter()
-                .map(|&(b, a)| hf_energy_gain(form, b, a))
-                .collect();
-            let same = vals.windows(2).all(|w| w[0] == w[1]);
-            assert_eq!(
-                same,
-                form.depends_only_on_ratio(),
-                "{form:?} declares depends_only_on_ratio = {} but values are {vals:?}",
-                form.depends_only_on_ratio()
-            );
-        }
-        // And the magnitude-dependent arm really does invert an order the
-        // shipped form fixes: a SMALLER `g` at a larger magnitude outranks a
-        // larger `g` at a tiny one.
-        let (lo_b, lo_a) = (1.0f64, 1.5f64); //  g = 0.5, large magnitude
-        let (hi_b, hi_a) = (1e-5f64, 3e-5f64); // g = 2.0, tiny magnitude
-        assert!(
-            hf_energy_gain(HfGainForm::RatioExcess, lo_b, lo_a)
-                < hf_energy_gain(HfGainForm::RatioExcess, hi_b, hi_a)
-        );
-        assert!(
-            hf_energy_gain(HfGainForm::BoundedExcess, lo_b, lo_a)
-                > hf_energy_gain(HfGainForm::BoundedExcess, hi_b, hi_a),
-            "BoundedExcess should invert this pair — that IS the H5 failure"
-        );
-    }
-
     /// The two derivations that make `SaturatingExcess` constant-free, checked
     /// rather than argued: it is the src↔dst reflection of `hf_energy_loss`,
     /// and it agrees with the shipped form to first order in `g`.
@@ -664,67 +498,6 @@ mod tests {
             (be / g - 0.5).abs() < 1e-3,
             "expected ~g/2, got {be} vs {g}"
         );
-    }
-
-    /// The attribution integrand differentiates the form the score uses.
-    /// Central differences against each arm, so a future arm cannot land with
-    /// a copied derivative.
-    #[test]
-    fn gain_derivative_matches_a_central_difference_for_every_arm() {
-        for form in ARMS {
-            for &(b, a) in &[
-                (0.25, 0.5),
-                (1e-4, 3e-4),
-                (2.0, 2.5),
-                (1.0, 1.2),
-                (1.0, 50.0),
-            ] {
-                // Skip the cap's own kink, where a derivative is not defined.
-                if form == HfGainForm::CappedExcess && ((a / b - 1.0) - GAIN_CAP).abs() < 1e-6 {
-                    continue;
-                }
-                let h = a * 1e-6;
-                let fd =
-                    (hf_energy_gain(form, b, a + h) - hf_energy_gain(form, b, a - h)) / (2.0 * h);
-                let an = hf_energy_gain_d_var_dst(form, b, a);
-                let scale = an.abs().max(fd.abs()).max(1e-12);
-                assert!(
-                    (an - fd).abs() / scale < 1e-4,
-                    "{form:?} d/d(var_dst) at ({b}, {a}): analytic {an} vs FD {fd}"
-                );
-            }
-            // Pinned-at-zero region: the value is flat, so the coefficient is 0.
-            assert_eq!(hf_energy_gain_d_var_dst(form, 1.0, 0.5), 0.0);
-            assert_eq!(hf_energy_gain_d_var_dst(form, 1e-12, 5.0), 0.0);
-        }
-    }
-
-    /// The density wrapper reproduces the shipped site's spelling BIT-exactly
-    /// at revision 1, and is the chain rule at every other arm.
-    #[test]
-    fn density_coefficient_is_bit_identical_at_rev1_and_chain_rule_elsewhere() {
-        for &(sum_src, sum_dst, n) in &[
-            (12.5f64, 30.0f64, 4096.0f64),
-            (1e-6, 1.0, 65536.0),
-            (3.25, 3.26, 1024.0),
-        ] {
-            let inv_n = 1.0 / n;
-            let got = hf_energy_gain_d_sum_dst_sq(HfGainForm::RatioExcess, sum_src, sum_dst, inv_n);
-            assert_eq!(
-                got.to_bits(),
-                (1.0f64 / sum_src).to_bits(),
-                "rev1 density coefficient changed spelling"
-            );
-            for form in ARMS
-                .iter()
-                .copied()
-                .filter(|f| *f != HfGainForm::RatioExcess)
-            {
-                let want = inv_n * hf_energy_gain_d_var_dst(form, sum_src * inv_n, sum_dst * inv_n);
-                let got = hf_energy_gain_d_sum_dst_sq(form, sum_src, sum_dst, inv_n);
-                assert_eq!(got.to_bits(), want.to_bits(), "{form:?}");
-            }
-        }
     }
 
     /// The `loss` members' bound is a property of the algebra, not a clamp —

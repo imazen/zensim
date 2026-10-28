@@ -276,12 +276,6 @@ pub struct ZensimConfig {
     /// Enable multi-threaded computation via rayon (default: true).
     pub allow_multithreading: bool,
 
-    /// Correct-by-construction bounded squash for the linear score
-    /// (mirrors [`ProfileParams::bounded_squash`](crate::profile::ProfileParams)).
-    /// When `true`, `combine_scores` maps the non-negative feature
-    /// distance through `100·exp(−(a/100)·d^b)` instead of `100 − a·d^b`,
-    /// guaranteeing a bounded `[0, 100]` output. Default `false`.
-    pub(crate) bounded_squash: bool,
 }
 
 impl ZensimConfig {
@@ -315,7 +309,6 @@ impl Default for ZensimConfig {
             score_mapping_a: 18.0,
             score_mapping_b: 0.7,
             allow_multithreading: true,
-            bounded_squash: false,
         }
     }
 }
@@ -329,40 +322,6 @@ impl Default for ZensimConfig {
 /// `score_mapping_a` and `score_mapping_b` automatically.
 pub(crate) fn distance_to_score(raw_distance: f64) -> f64 {
     distance_to_score_mapped(raw_distance, 18.0, 0.7)
-}
-
-/// Map a raw weighted distance to the quality score with custom parameters.
-///
-/// `score = 100 - a * d^b`. Nominally 0–100 but can go negative for
-/// extreme distortions (the magnitude below zero is informative —
-/// it distinguishes "slightly wrong" from "completely wrong").
-/// Correct-by-construction bounded squash: `score = 100 · exp(−(a/100) · d^b)`.
-///
-/// For a non-negative distance `d ≥ 0` (guaranteed when the profile's
-/// weights are non-negative and every feature is a non-negative
-/// dissimilarity), this maps `d → (0, 100]` strictly-decreasingly, with
-/// `score = 100` iff `d = 0` (its unique maximum) and `score → 0` as
-/// `d → ∞`. It is a strictly-monotone transform of `d`, so it preserves
-/// the *rank* of [`distance_to_score_mapped`] (identical SROCC) while
-/// being **bounded `[0, 100]` by construction** — unlike `100 − a·d^b`,
-/// which is unbounded below.
-///
-/// The `a/100` scaling makes the squash agree with `100 − a·d^b` to
-/// first order at `d = 0` (`100·e^{−(a/100)·d^b} ≈ 100 − a·d^b` for
-/// small `d^b`), so the near-identical regime matches the legacy dial.
-/// See `docs/METRIC_INVARIANTS_MECHANISM_AND_REDESIGN_2026-05-26.md` §4.
-fn bounded_score_squash(raw_distance: f64, a: f64, b: f64) -> f64 {
-    if raw_distance <= 0.0 {
-        return 100.0;
-    }
-    // F19: one form read for the whole mapping, so the `powf` and the `exp`
-    // can never be evaluated under two different arms.
-    let form = active_pow_form();
-    let exponent = (a / 100.0) * raw_distance.det_powf(b, form);
-    // exp(−x) ∈ (0, 1]; ×100 ∈ (0, 100]. Finite for all finite x ≥ 0;
-    // for x = +inf, exp(−inf) = 0. Defensive clamp catches NaN only.
-    let s = 100.0 * (-exponent).det_exp(form);
-    if s.is_finite() { s } else { 0.0 }
 }
 
 /// Map a raw weighted distance to the quality score with custom parameters.
@@ -2359,52 +2318,7 @@ pub(crate) fn config_from_params(params: &ProfileParams, parallel: bool) -> Zens
         score_mapping_a: params.score_mapping_a,
         score_mapping_b: params.score_mapping_b,
         allow_multithreading: parallel,
-        bounded_squash: params.bounded_squash,
     }
-}
-
-/// Logistic soft-clamp from raw score into the `[0, 100]` range.
-///
-/// `f(x) = 100 / (1 + exp(-(x - 50) / 20))`.
-///
-/// The scale parameter `20` gives a gentle squash centered at 50; at
-/// the band centers the deviation from `x` is small but NON-ZERO:
-///
-/// | raw | f(raw) | Δ |
-/// |---:|---:|---:|
-/// | -1000 | 0.0     | -1000 |
-/// |    0  | 7.586   | +7.6 |
-/// |   25  | 28.110  | +3.1 |
-/// |   50  | 50.0    | 0 |
-/// |   75  | 71.890  | -3.1 |
-/// |  100  | 92.414  | -7.6 |
-/// | 1000  | 100.0   | -900 |
-///
-/// The interior shift is the cost of the formula: a profile that
-/// enables `soft_clamp_score = true` ships a recalibration alongside
-/// the rank-preservation fix. Downstream consumers that read a fixed
-/// score-to-codec-parameter table will see a few-percentage-point
-/// shift in the mapped codec settings.
-///
-/// **The function strictly preserves rank order globally** (monotone
-/// increasing for all finite `x`), so SROCC / KROCC / PWRC are
-/// invariant under the transform. PLCC and Z-RMSE shift modestly
-/// because they're calibration-sensitive.
-///
-/// **Why the transform helps**: hard `raw.clamp(0, 100)` creates tie
-/// blocks at exactly 0 or 100 when many out-of-range raw values
-/// collapse to the boundary. The PreviewV0_4 multi-bake at α=0.4
-/// raw-space sees this on heavy-distortion pairs (V_20 IS B3
-/// specialist extrapolates past 100) and the resulting tie block
-/// collapses SROCC to 0 on the affected band (observed on TID B0/B1
-/// 2026-05-15). Soft-clamp distributes those raw values uniquely
-/// into the high tail, so SROCC stays defined.
-///
-/// Cost: one `exp` call (~1 ns on modern hardware). Used when
-/// `ProfileParams::soft_clamp_score` is `true`.
-#[inline]
-fn soft_clamp_score(raw: f64) -> f64 {
-    100.0 / (1.0 + (-(raw - 50.0) / 20.0).det_exp(active_pow_form()))
 }
 
 /// Replace `result.raw_distance` and `result.score` with the MLP forward
@@ -2486,68 +2400,13 @@ pub(crate) fn apply_mlp_scoring_with_codec(
         return Ok(());
     }
     {
-        // **Ensemble routing path** (PreviewV0_5Ensemble) — when an
-        // `ensemble_classifier_bytes` is present, run the classifier
-        // first and route to either the primary (`mlp_bytes`,
-        // balanced) or the alternative (`mlp_bytes_compression`)
-        // based on the classifier's sign. The classifier output is a
-        // pre-sigmoid logit; `logit > 0` ⇔ `sigmoid(logit) > 0.5` →
-        // compression.
-        //
-        // Both target bakes MUST accept the same input feature
-        // shape; the classifier runs over the same vector (its own
-        // `n_inputs` selects the prefix). Documented in
-        // `benchmarks/exp_ensemble_v05_eval_2026-05-18.md`.
-        let raw = if let (Some(clf_loader), Some(cmp_loader)) = (
-            params.ensemble_classifier_bytes,
-            params.mlp_bytes_compression,
-        ) {
-            // Classifier dispatch — classifier bake is a router; it
-            // does NOT receive the per-codec hint (its output is a
-            // pre-sigmoid logit, not a score). The routed target bake
-            // (primary or compression) receives the hint and may apply
-            // the per-codec affine if its metadata is present.
-            let logit = forward_one_bake(clf_loader(), result.features(), width, height)?;
-            if logit > 0.0 {
-                forward_one_bake_with_codec(
-                    cmp_loader(),
-                    result.features(),
-                    width,
-                    height,
-                    codec_hint,
-                )?
-            } else {
-                forward_one_bake_with_codec(loader(), result.features(), width, height, codec_hint)?
-            }
-        } else {
-            let raw_primary = forward_one_bake_with_codec(
-                loader(),
-                result.features(),
-                width,
-                height,
-                codec_hint,
-            )?;
-            // Optional secondary bake (D2 multi-output ensemble, e.g.
-            // V_20 IS B3 specialist) — its forward path runs over the
-            // SAME 228-feature vector but applies its own
-            // `feature_transforms` metadata. Both bakes' raw outputs
-            // are mixed linearly at `mlp_primary_mix` weight on the
-            // primary. The codec hint is passed identically to both.
-            if let Some(b3_loader) = params.mlp_bytes_b3 {
-                let raw_b3 = forward_one_bake_with_codec(
-                    b3_loader(),
-                    result.features(),
-                    width,
-                    height,
-                    codec_hint,
-                )?;
-                let a = params.mlp_primary_mix as f64;
-                a * raw_primary + (1.0 - a) * raw_b3
-            } else {
-                raw_primary
-            }
-        };
-
+        let raw = forward_one_bake_with_codec(
+            loader(),
+            result.features(),
+            width,
+            height,
+            codec_hint,
+        )?;
         let score = dispose_mlp_raw(raw, params);
         result.set_mlp_score(raw, score);
     }
@@ -2593,8 +2452,6 @@ pub(crate) fn dispose_mlp_raw(raw: f64, params: &crate::profile::ProfileParams) 
     // V10 profiles (BalancedV3 / CompressionV3 / TunerV4) set this.
     if params.extrapolate_score {
         pre_bound
-    } else if params.soft_clamp_score {
-        soft_clamp_score(pre_bound)
     } else {
         pre_bound.clamp(0.0, 100.0)
     }
@@ -2877,30 +2734,12 @@ fn check_score_disposition(
          virtually every score to exactly 0 — set .skip_score_mapping(true), \
          and .extrapolate_score(true) to keep the negative tail";
 
-    for loader in [
-        Some(primary),
-        params.mlp_bytes_b3,
-        params.mlp_bytes_compression,
-    ]
-    .into_iter()
-    .flatten()
-    {
-        if bake_carries_output_spline(loader()) {
-            return Err(ZensimError::ModelForwardFailed {
-                reason: MISCONFIGURED,
-            });
-        }
+    if bake_carries_output_spline(primary()) {
+        return Err(ZensimError::ModelForwardFailed {
+            reason: MISCONFIGURED,
+        });
     }
     Ok(())
-}
-
-fn forward_one_bake(
-    bytes: &'static [u8],
-    features: &[f64],
-    width: u32,
-    height: u32,
-) -> Result<f64, ZensimError> {
-    forward_one_bake_with_codec(bytes, features, width, height, None)
 }
 
 /// The parsed [`crate::mlp::Model`] of a `&'static` profile bake, interned by
@@ -3813,11 +3652,8 @@ pub(crate) fn score_v1_layout_features(
     }
     raw_distance /= n_scales.max(1) as f64;
 
-    let score = if config.bounded_squash {
-        bounded_score_squash(raw_distance, config.score_mapping_a, config.score_mapping_b)
-    } else {
-        distance_to_score_mapped(raw_distance, config.score_mapping_a, config.score_mapping_b)
-    };
+    let score =
+        distance_to_score_mapped(raw_distance, config.score_mapping_a, config.score_mapping_b);
     (score, raw_distance)
 }
 
@@ -3936,19 +3772,6 @@ pub(crate) fn combine_scores(
 mod tests {
     use super::*;
 
-    /// `soft_clamp_score` matches its documented boundary values and
-    /// stays monotone strictly increasing — the rank-preservation
-    /// property that the V_20+ multi-bake regime relies on.
-    #[test]
-    fn soft_clamp_score_boundary_values() {
-        // Documented anchor values in the function docstring.
-        assert!((soft_clamp_score(-1000.0) - 0.0).abs() < 1e-9);
-        assert!((soft_clamp_score(0.0) - 7.585818002124355).abs() < 1e-9);
-        assert!((soft_clamp_score(50.0) - 50.0).abs() < 1e-9);
-        assert!((soft_clamp_score(100.0) - 92.41418199787566).abs() < 1e-9);
-        assert!((soft_clamp_score(1000.0) - 100.0).abs() < 1e-9);
-    }
-
     /// OOD safety net (2026-07-10): the output-calibration spline's lower
     /// extrapolation is floored one calibrated-dial-range below the bottom
     /// knot, so a pathological out-of-distribution raw that slips past the
@@ -3981,51 +3804,6 @@ mod tests {
             let y = apply_output_calibration_spline(x, &spline);
             assert!(y >= prev - 1e-9, "non-monotone at x={x}");
             prev = y;
-        }
-    }
-
-    /// Soft-clamp is strictly monotone — adjacent raw scores keep
-    /// their order, so SROCC (rank-based) is preserved through the
-    /// transform. The hard-clamp pathology (tie blocks at 0/100)
-    /// disappears: out-of-range raw values stay distinct.
-    #[test]
-    fn soft_clamp_score_monotone_across_full_range() {
-        let mut prev = f64::NEG_INFINITY;
-        // Sweep a wide grid: deep below 0, through the saturation band,
-        // and far above 100. 1e6 raw is plausible for accidentally
-        // distance-shaped bakes wired in by mistake — must still rank.
-        for &raw in &[
-            -1e6, -1000.0, -100.0, -50.0, -10.0, 0.0, 1.0, 25.0, 49.999, 50.0, 50.001, 75.0, 90.0,
-            99.999, 100.0, 100.001, 110.0, 200.0, 1000.0, 1e6,
-        ] {
-            let s = soft_clamp_score(raw);
-            assert!(
-                s > prev || (s.is_finite() && prev.is_finite() && (s - prev).abs() < 1e-12),
-                "soft_clamp not monotone: f({raw}) = {s}, prev = {prev}"
-            );
-            assert!(
-                (0.0..=100.0).contains(&s),
-                "soft_clamp out of [0, 100]: f({raw}) = {s}"
-            );
-            prev = s;
-        }
-    }
-
-    /// The interior shift is non-zero but bounded. Inside `[25, 75]`
-    /// the soft-clamp shift stays under ±3.2 units; at the boundary
-    /// it grows to ±7.6 (raw = 0 → 7.586, raw = 100 → 92.414).
-    /// Profiles that enable `soft_clamp_score` accept this
-    /// recalibration as the price of rank preservation at the tails.
-    #[test]
-    fn soft_clamp_score_interior_shift_bounded() {
-        for tenths in 250..=750 {
-            let raw = tenths as f64 / 10.0;
-            let s = soft_clamp_score(raw);
-            assert!(
-                (s - raw).abs() <= 3.2,
-                "soft_clamp shift >3.2 in [25,75]: f({raw}) = {s} (Δ={})",
-                (s - raw).abs()
-            );
         }
     }
 
