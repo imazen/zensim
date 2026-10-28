@@ -64,7 +64,9 @@ including fixture and reference setup; timings exclude that setup and fingerprin
 
 For revision 7, the serial compute mode exercises the streaming fold with rolling
 planes. Cached-reference setup is intentionally absent from that mode. The matrix
-is not a claim about every thread count, architecture or image distribution.
+is not a claim about every thread count, architecture or image distribution. Runtime
+measurements cover this x86 CPU only; ARM/WASM/i686 compilation does not establish
+runtime performance on those architectures.
 
 The timing matrix uses all five shipped profiles, 65×63 and 1024×768 checkerboard
 pairs, and nine execution modes. Each cell interleaves fresh candidate, pre-refactor
@@ -111,4 +113,3 @@ The confirmation launcher registers verified ancestor task IDs using zenbench's
 existing launcher environment. Version 0.1.11 excludes ancestor process leaders
 but can mistake their threads for rival benchmarks. An initial invalid probe is
 retained; no resource gate or timing acceptance criterion was disabled.
-

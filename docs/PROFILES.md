@@ -86,17 +86,24 @@ measurement.
 
 Peak memory at 4096², one thread: `E` 158 MiB, fast-ssim2 2,468 MiB, butteraugli 2,646 MiB.
 
-This crate runs the same code at the same speed. A paired timing on an Intel Core Ultra 7 265K
+An initial paired timing on an Intel Core Ultra 7 265K
 (2026-10-28; 1024×768, one pinned thread, the two crates' `split_timing` examples alternating
 for 12 rounds of 10 calls) gave median ratios of slim to research of 1.003 (`E`), 1.006
 (`ECodec`), 0.998 (`A`) and 1.008 (`PreviewV0_2`); `E` took 12.75 ms per call there.
 Reusing a reference with `precompute_reference` saves 8–11% per call at one thread; at eight
-threads the uncached path is faster from 1024² up.
+threads the uncached path was faster from 1024² up in that research measurement.
+These observations do not establish parity for every route. The broader
+[cross-path audit](CROSS_PATH_AUDIT.md) records scalar, streaming, cached, threaded
+and map measurements, including inconclusive comparisons and RSS differences.
 
 ## Parity with the research crate
 
 The crate was cut from imazen/zensimx on 2026-10-28. `examples/split_parity_check.rs` prints the
 score, raw distance and a hash of the features and diffmaps for 231 generated image pairs,
 every profile and every scoring entry point; zensimx's `split_parity_golden` example prints the
-same lines. The two outputs were identical (6,930 rows) on an Intel Core Ultra 7 265K, and
-`tests/profiles.rs` keeps 56 of those scores as golden values.
+same lines. The expanded gate on 2026-10-28 checked 25,179 rows: 25,175 were
+identical, four had prelisted score differences, and none had unexpected differences
+or missing golden rows. The four exceptions are E/ECodec `compute_all_features`
+scores whose research reference used a process-wide revision pin; their feature
+hashes match. The exception list and golden data were unchanged by this audit.
+`tests/profiles.rs` retains profile score goldens.
