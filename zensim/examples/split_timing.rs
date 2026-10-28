@@ -23,7 +23,10 @@ fn main() {
         "PreviewV0_2" => ZensimProfile::PreviewV0_2,
         other => panic!("unknown profile {other}"),
     };
-    let pair = split_parity_pairs().into_iter().find(|p| p.id == a[1]).expect("pair id");
+    let pair = split_parity_pairs()
+        .into_iter()
+        .find(|p| p.id == a[1])
+        .expect("pair id");
     let (warmup, calls): (usize, usize) = (a[2].parse().unwrap(), a[3].parse().unwrap());
     let src = RgbSlice::new(bytemuck::cast_slice(&pair.src), pair.width, pair.height);
     let dst = RgbSlice::new(bytemuck::cast_slice(&pair.dst), pair.width, pair.height);

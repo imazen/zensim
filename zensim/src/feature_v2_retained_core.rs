@@ -24,17 +24,6 @@ pub(super) fn retained_core_admits(local: &ComputeSet) -> bool {
             crate::featcanon::BlurMode::Local
         )
         && local.v2_blocks
-        && !(local.append
-            || local.append2
-            || local.csfw
-            || local.gridblk
-            || local.ringbasis
-            || local.tailhist
-            || local.arttype
-            || local.gmsbank
-            || local.gmsnative
-            || local.mapdev
-            || local.z1max)
 }
 
 impl RetainedRows<'_> {

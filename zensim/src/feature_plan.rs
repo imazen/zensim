@@ -342,19 +342,6 @@ impl Plan {
                         d.signal.family == ComputeToken::V2 && d.signal.name == "pjnd_fragility"
                     })
                 }),
-            append,
-            append2,
-            append2_dst_activity: false,
-            csfw,
-            gridblk,
-            ringbasis,
-            tailhist,
-            arttype,
-            gmsbank,
-            mapdev,
-            z1max,
-            gmsnative,
-            globaff,
             free_extras,
         };
         let mut requested = requested;
@@ -483,7 +470,6 @@ impl Plan {
         compute.omit_pjnd_fragility = requested.omit_pjnd_fragility;
         // The globaff LAYOUT flag follows the width; the computation follows
         // the request (it is cheap, but a wide layout must not imply it).
-        compute.globaff = requested.globaff;
         compute.full_res_xb = requested.full_res_xb || !compute.allows_full_res_y_subset();
         compute.sampling = requested.sampling;
         compute.coarse_y_only_scales = if (!compute.v2_blocks || compute.chroma_local_families())
@@ -624,19 +610,6 @@ impl Plan {
             transducer_bank: false,
             transducers_luma_only: false,
             omit_pjnd_fragility: false,
-            append: false,
-            append2: false,
-            append2_dst_activity: false,
-            csfw: false,
-            gridblk: false,
-            ringbasis: false,
-            tailhist: false,
-            arttype: false,
-            gmsbank: false,
-            mapdev: false,
-            z1max: false,
-            gmsnative: false,
-            globaff: false,
             free_extras: V1FreeExtras::Off,
         };
         Plan::normalized(compute, Layout::identity(layout_width))
@@ -687,26 +660,13 @@ impl Plan {
             // one necessarily reaches the ones below it. Written as a chain
             // rather than four `>` tests so a future non-contiguous width
             // cannot violate the assertion.
-            append_block: layout.append,
-            append2_block: layout.append2,
-            csfw_block: layout.csfw,
             // The Rev4 feature bank extends the nested chain: each family's
             // layout flag is on when the declared width reaches its base.
-            rev4_gridblk: layout.gridblk,
-            rev4_ringbasis: layout.ringbasis,
-            rev4_tailhist: layout.tailhist,
-            rev4_arttype: layout.arttype,
-            gmsbank: layout.gmsbank,
-            mapdev: layout.mapdev,
-            z1max: layout.z1max,
-            gmsnative: layout.gmsnative,
-            globaff: layout.globaff,
             // A sub-toggle that REFINES a block cannot outlive it: the walk
             // asserts `append2_dst_activity => append2_block`. `everything`
             // (the fallback compute set for a wide bake) turns it on
             // unconditionally, so a 720- or 924-wide bake reached that
             // assertion — found by the board census, not by reading.
-            append2_dst_activity: c.append2_dst_activity && layout.append2,
             v1_pools: c.v1_pools,
             // COMPUTE: `v1_only` turns every v2-era kernel off while leaving
             // the layout flags — and therefore the width — untouched.
@@ -824,19 +784,6 @@ impl Plan {
             // restrict, so it is on only when both sides ask for it.
             transducers_luma_only: a.transducers_luma_only && b.transducers_luma_only,
             omit_pjnd_fragility: a.omit_pjnd_fragility && b.omit_pjnd_fragility,
-            append: a.append || b.append,
-            append2: a.append2 || b.append2,
-            append2_dst_activity: a.append2_dst_activity || b.append2_dst_activity,
-            csfw: a.csfw || b.csfw,
-            gridblk: a.gridblk || b.gridblk,
-            ringbasis: a.ringbasis || b.ringbasis,
-            tailhist: a.tailhist || b.tailhist,
-            arttype: a.arttype || b.arttype,
-            gmsbank: a.gmsbank || b.gmsbank,
-            mapdev: a.mapdev || b.mapdev,
-            z1max: a.z1max || b.z1max,
-            gmsnative: a.gmsnative || b.gmsnative,
-            globaff: a.globaff || b.globaff,
             free_extras: free_union(a.free_extras, b.free_extras),
         };
         let _ = ns;
@@ -1105,90 +1052,12 @@ mod tests {
         println!("in iw range: {in300_372:?}");
     }
 
-    /// **G1.7** — the v1 request plans to exactly today's v1 walk.
-    #[test]
-    fn a_v1_request_plans_the_v1_only_walk() {
-        let p = Plan::derive(&slots([(0, 372)]), 372).expect("plan");
-        assert!(p.compute.v1_basic);
-        assert_eq!(p.compute.v1_pools, V1PoolsMode::Full);
-        assert!(!p.compute.v2_blocks);
-        assert!(!p.compute.append);
-        assert_eq!(p.compute.free_extras, V1FreeExtras::Off);
-        assert_eq!(p.layout_width(), 372);
-        assert_eq!(p.emit, slots([(0, 372)]));
-    }
-
-    #[test]
-    fn gmsbank_full_width_plan_populates_all_registered_slots() {
-        let want = slots([(0, 956), (986, 1502)]);
-        assert!(Plan::derive(&slots([(956, 986)]), 1502).is_err());
-        let plan = Plan::derive(&want, 1502).expect("C8 plan");
-        assert!(plan.compute.gmsbank);
-        assert!(plan.toggles().gmsbank);
-        assert_eq!(plan.emit, want);
-    }
-
     /// A basic-only request skips the pool block entirely.
     #[test]
     fn a_basic_only_request_skips_the_pools() {
         let p = Plan::derive(&slots([(0, 156)]), 372).expect("plan");
         assert_eq!(p.compute.v1_pools, V1PoolsMode::Off);
         assert_eq!(p.emit, slots([(0, 156)]));
-    }
-
-    /// **THE cheap wide plan.** A 944-layout request that touches the append
-    /// block only at raw-moment slots must NOT schedule the append kernel.
-    #[test]
-    fn a_free_set_request_plans_the_cheap_walk_not_the_944_walk() {
-        let ns = crate::NUM_SCALES;
-        let want = slots([(0, 228)]).union(&crate::feature_defs::family_slots(
-            ComputeToken::Moments,
-            ns,
-        ));
-        let p = Plan::derive(&want, 944).expect("plan");
-        assert!(!p.compute.v2_blocks, "v2 blocks must stay off");
-        assert!(!p.compute.append, "the append kernel must not run");
-        assert_eq!(p.compute.free_extras, V1FreeExtras::RawMoments);
-        assert_eq!(p.compute.v1_pools, V1PoolsMode::Peaks);
-        assert_eq!(p.layout_width(), 944);
-        assert!(p.covers(&want), "plan must cover what was asked for");
-        // 156 basic + 72 peaks + 37 raw-moment slots.
-        assert_eq!(p.emit.len(), 265);
-    }
-
-    /// The class-C arm adds its 24 slots without waking the append kernel.
-    #[test]
-    fn a_class_c_request_plans_the_bounded_error_accumulator() {
-        let ns = crate::NUM_SCALES;
-        let want = slots([(0, 228)])
-            .union(&crate::feature_defs::family_slots(
-                ComputeToken::Moments,
-                ns,
-            ))
-            .union(&crate::feature_defs::family_slots(ComputeToken::ClassC, ns));
-        let p = Plan::derive(&want, 944).expect("plan");
-        assert!(!p.compute.append);
-        assert!(!p.compute.v2_blocks);
-        assert_eq!(
-            p.compute.free_extras,
-            V1FreeExtras::RawMomentsPlusBoundedErr
-        );
-        assert_eq!(p.emit.len(), 289);
-        assert!(p.covers(&want));
-    }
-
-    /// A request touching the append block OUTSIDE its tranche schedules the
-    /// real kernel — the negative control for the cheap-plan rule.
-    #[test]
-    fn an_append_request_outside_the_tranche_schedules_the_kernel() {
-        // `xmask_transducer` at (scale 0, X) — append block, not in a tranche.
-        let slot = crate::feature_defs::slot_id(ComputeToken::Append, 0, 0, 0, crate::NUM_SCALES)
-            .expect("slot");
-        let want = slots([(0, 156)]).union(&SlotSet::from_slots([slot]));
-        let p = Plan::derive(&want, 944).expect("plan");
-        assert!(p.compute.append, "the append kernel must run");
-        assert!(p.compute.v2_blocks);
-        assert!(p.covers(&want));
     }
 
     /// A request for a slot past every registered block is REFUSED, loudly,
@@ -1329,30 +1198,6 @@ mod toggle_gates {
         }
     }
 
-    /// A wide layout computes every block it reaches — the honest statement
-    /// of the capability the toggles do NOT have.
-    ///
-    /// This is a NEGATIVE gate: it pins a limitation so that the day a
-    /// per-block layout-only flag lands, this test fails and forces the plan
-    /// to stop over-claiming.
-    #[test]
-    fn a_wide_layout_computes_every_block_it_reaches() {
-        let ns = crate::NUM_SCALES;
-        let csfw = crate::feature_defs::family_slots(ComputeToken::Csfw, ns);
-        let want = SlotSet::from_slots((0..956).filter(|s| !csfw.contains(*s)));
-        let p = Plan::derive(&want, 956).expect("plan");
-        assert!(
-            p.compute.csfw,
-            "at layout 956 with the v2 blocks on, the walk computes CSFW \
-             whether or not it was asked for — `csfw_block` is both the \
-             layout flag and the compute flag"
-        );
-        assert!(
-            p.emit.covers(&csfw),
-            "and the plan must SAY those slots are populated"
-        );
-    }
-
     /// The plan's toggles must round-trip through `ComputeSet::from_toggles`
     /// to the plan's own compute set — otherwise the walk would run something
     /// other than what was planned, silently.
@@ -1395,22 +1240,5 @@ mod toggle_gates {
                 "toggles for width {width} populate a different slot set"
             );
         }
-    }
-
-    /// A wide LAYOUT with a v1-only COMPUTE is expressible — the shape the
-    /// runtime could not ask for.
-    #[test]
-    fn a_944_layout_with_a_v1_only_compute_is_expressible() {
-        let ns = crate::NUM_SCALES;
-        let want = SlotSet::from_ranges([(0, 228)]).union(&crate::feature_defs::family_slots(
-            ComputeToken::Moments,
-            ns,
-        ));
-        let t = Plan::derive(&want, 944).expect("plan").toggles();
-        assert!(t.v1_only, "compute stays v1-only");
-        assert!(t.append_block, "layout reaches the append block");
-        assert!(t.append2_block, "layout reaches append2");
-        assert!(!t.csfw_block, "944 does not reach csfw");
-        assert_eq!(t.free_extras, V1FreeExtras::RawMoments);
     }
 }

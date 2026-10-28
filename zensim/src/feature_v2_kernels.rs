@@ -561,63 +561,6 @@ pub struct V2NewFeatureToggles {
     /// opt-in until the ship recipe fixes the operating point.
     /// See `benchmarks/v2_trainability_ab_2026-07-19.md`.
     pub transducers_luma_only: bool,
-    /// Emit the f720+ append block (17/ch/scale — see [`idx_append`] and
-    /// the module-level "f720+ APPEND block" section). Default OFF: with
-    /// this false every existing path, layout, and byte is unchanged.
-    /// When on, the feature vector grows by `n_scales × 3 × 17` slots
-    /// appended AFTER the existing layout, and the per-strip append
-    /// kernel + the `d2` (blur(dst²)) σ-split chain run.
-    pub append_block: bool,
-    /// Emit the f924+ append2 block ([`idx_append2`]: BANDVIS gain/loss,
-    /// the free luminance conditioner, HDR-gated highlight bins —
-    /// `APPEND2_PER_SCALE` Y-only slots per scale). Default OFF: with
-    /// this false every existing path, layout, and byte — SDR and HDR
-    /// routes — is unchanged. Requires `append_block` (asserted): the
-    /// block sits at f924+ and reuses append accumulators. Additive-only;
-    /// joins the NEXT extraction regime wave (the HDR backfill).
-    pub append2_block: bool,
-    /// Emit the f944+ CSFW block ([`idx_csfw`]: chunk-3 tier-1 —
-    /// luminance-CSF-weighted GLOBAL_* pooling twins, `CSFW_PER_SCALE`
-    /// Y-only slots per scale, both routes with route-local derived φ
-    /// constants). Default OFF: with this false the CSFW pass never runs
-    /// and every existing path, layout, and byte — SDR and HDR routes —
-    /// is unchanged. Requires `append2_block` (asserted): the block sits
-    /// at f944+ after append2. Additive-only; joins the NEXT extraction
-    /// regime wave (the HDR backfill).
-    pub csfw_block: bool,
-    /// BANDVIS dst-activity plane (the recorded V3(b)/(c) cross-fire fix
-    /// from `benchmarks/append2_bandvis_gates_2026-07-27.md` REMAINDERS
-    /// #3, implemented + adjudicated 2026-08-02 for the SOTA-944 P1.5
-    /// sequencing decision): compute a distorted-side activity plane
-    /// (`box_blur(|dst − mu2|)` — the exact dst twin of the existing
-    /// ref-side `activity` chain, Y channel only, ≈+5%-class cost) and
-    /// re-weight the BANDVIS **GAIN** polarity by the dst's own local
-    /// flatness as a per-pixel POOLING weight:
-    /// `gain_px = excess(band_dst, band_src)·(1 − sat(act_dst, C_ACTIVITY))`.
-    /// The weight sits OUTSIDE the FR ratio — the adjudication measured
-    /// that a flatness mask INSIDE `bounded_excess` is ratio-cancelled
-    /// (scale-invariance) and suppresses real banding MORE than the
-    /// dither it targets. **LOSS stays bit-identical to the OFF math**:
-    /// the dst/src-side weights both measured direction-inverting on the
-    /// deband credit, and LOSS is the LYB-validated workhorse polarity.
-    /// Identity pairs stay exactly 0 either way.
-    ///
-    /// ADJUDICATION VERDICT (2026-08-02): both pre-registered masking
-    /// arms FAILED their suppression gates at the resonant scale (banding
-    /// contours ARE local activity — the plane cannot separate sparse
-    /// contours from dense texture); production extraction (bigcodec +
-    /// every P1 backfill) runs with this OFF. The toggle is retained as
-    /// the P3/LOO research surface: the shipped GAIN combine is the
-    /// strongest candidate measured (geometry cross-fire 0.33×, deband
-    /// margin 2.2× OFF's). Default OFF: no dst-activity plane is
-    /// computed and every path/byte — both routes, all regimes — is
-    /// unchanged (const-split kernel; the OFF instantiations emit
-    /// today's exact operation sequences). When ON, ONLY the four
-    /// per-scale `idx_append2::BANDVIS_GAIN` slots change; every other
-    /// slot INCLUDING `BANDVIS_LOSS` stays bit-identical. Requires
-    /// `append2_block` (asserted).
-    /// Record: `benchmarks/bandvis_dst_activity_2026-08-02.md`.
-    pub append2_dst_activity: bool,
     /// Emit v1's peak / masked / IW pool blocks (`f156..372`) LIVE inside
     /// the folded walk instead of the structural zeros (2026-08-30, the
     /// carrier lane: `benchmarks/balance_campaign_2026-08-28.md` "carriers
@@ -702,58 +645,6 @@ pub struct V2NewFeatureToggles {
     /// to be visible.
     #[doc(hidden)]
     pub free_extras: V1FreeExtras,
-    /// REV4 CANDIDATE BANK (2026-09-23, `benchmarks/rev4_featbank_impl_
-    /// 2026-09-23.md`): the f986+ grid-phase blocking block
-    /// ([`crate::feature_defs::BLOCKS`] `gridblk` — 8 signals per
-    /// (scale, channel): 6 signed log-magnitude bins of the
-    /// activity-normalised lattice-boundary step excess at the estimated
-    /// grid phase, plus on-grid mean and on/off ratio). Default OFF: with
-    /// this false every existing path, layout, and byte is unchanged.
-    /// Independent of the other rev4 families — the emit tail is
-    /// absolute-positioned, so any subset stays index-stable; requires
-    #[doc(hidden)]
-    pub rev4_gridblk: bool,
-    /// REV4 C2 ringing-magnitude basis (f1082+ — 6 triangular
-    /// log-magnitude bins of the gradient kernel's own per-pixel RINGING
-    /// term, per (scale, channel)). Independent of the other rev4
-    #[doc(hidden)]
-    pub rev4_ringbasis: bool,
-    /// REV4 C3 tail pooling (f1154+ — per (scale, channel): p95/p99/max
-    /// of the SSIM/ART/DET/MSE per-pixel maps from the family's fixed
-    /// 32-bin log-edged histogram). Independent of the other rev4
-    #[doc(hidden)]
-    pub rev4_tailhist: bool,
-    /// REV4 C4 artifact-type descriptors (f1298+ — per scale: Y
-    /// EDGE_WIDTH_CHANGE×HF_LOSS blur, flat-region HF_GAIN noise per
-    /// channel, dst-chroma gradient excess outside a ±1-px dilated
-    /// dst-luma-edge mask for X/B bleeding). Independent of the other
-    #[doc(hidden)]
-    pub rev4_arttype: bool,
-    /// Experimental C8 GMSBANK f1322..f1501, default off. The 2026-09-24
-    /// revision carries native Y and coarse X/Y/B gradient loss/gain/deviation,
-    /// plus coarse joint X/B chromaticity loss/deviation, each at five pinned
-    /// stabilizers. Earlier C8 sidecars are incompatible despite equal width.
-    #[doc(hidden)]
-    pub gmsbank: bool,
-    /// Restored cut A1 `mapdev` f1502..1561: per-(scale, channel) population
-    /// std of the raw squared-error and the four HF maps. Default OFF. The
-    /// layout requires the full C8 prefix (f0..f1501).
-    #[doc(hidden)]
-    pub mapdev: bool,
-    /// Restored cut B2 `z1max` f1562..1789: the basic+peaks surface pooled
-    /// over ungated 5x5 block maxima. Default OFF. Requires `mapdev`'s layout.
-    #[doc(hidden)]
-    pub z1max: bool,
-    /// Restored cut `gmsnative` f1790..1819: C8's X/B gradient bank at native
-    /// scale. Default OFF. Requires `z1max`'s layout.
-    #[doc(hidden)]
-    pub gmsnative: bool,
-    /// `globaff` f1867..1890 ([`crate::globaff`]): the global affine-change
-    /// descriptor, formula revision 6 only. Default OFF. Requires
-    /// `gmsnative`'s layout; f1820..1866 (reserved and the research palette)
-    /// are emitted as structural zeros before it.
-    #[doc(hidden)]
-    pub globaff: bool,
 }
 
 /// Which of v1's pool slots (`f156..372`) the folded walk emits live.
@@ -939,23 +830,10 @@ impl Default for V2NewFeatureToggles {
             transducer_bank: true,
             blockiness: true,
             transducers_luma_only: false,
-            append_block: false,
-            append2_block: false,
-            csfw_block: false,
-            append2_dst_activity: false,
             formula_revision: crate::ssim_form::active_revision(),
             v1_pools: V1PoolsMode::Off,
             v1_only: false,
             free_extras: V1FreeExtras::Off,
-            rev4_gridblk: false,
-            rev4_ringbasis: false,
-            rev4_tailhist: false,
-            rev4_arttype: false,
-            gmsbank: false,
-            mapdev: false,
-            z1max: false,
-            gmsnative: false,
-            globaff: false,
         }
     }
 }
@@ -1110,35 +988,6 @@ pub(crate) struct ComputeSet {
     pub transducers_luma_only: bool,
     /// Declared plans may omit the reference-only PJND fragility finalizer.
     pub omit_pjnd_fragility: bool,
-    pub append: bool,
-    pub append2: bool,
-    pub append2_dst_activity: bool,
-    pub csfw: bool,
-    /// REV4 C1 grid-phase blocking (f986+, `gridblk`): the strip kernel
-    /// over the wide src/dst/activity windows. Independent compute gate —
-    /// the emit tail is absolute-positioned, so each family can run alone.
-    pub gridblk: bool,
-    /// REV4 C2 ringing-magnitude bins (f1082+): the gradient kernel's
-    /// per-pixel RINGING term folded into 6 triangular log-magnitude bins.
-    pub ringbasis: bool,
-    /// REV4 C3 tail pooling (f1154+): the dense kernel's d/art/det/mse
-    /// per-pixel values folded into the family's 32-bin log histograms.
-    pub tailhist: bool,
-    /// REV4 C4 artifact-type descriptors (f1298+): flat-region HF_GAIN
-    /// noise in the dense kernel, dst-chroma bleed outside the dilated
-    /// dst-luma-edge mask in the gradient kernel, and the finalize-time
-    /// EWC×HF_LOSS blur product.
-    pub arttype: bool,
-    pub gmsbank: bool,
-    /// Restored cut A1 (`mapdev`): the per-band map side pass runs.
-    pub mapdev: bool,
-    /// Restored cut B2 (`z1max`): the block-max pooled side pass runs.
-    pub z1max: bool,
-    /// Restored cut `gmsnative`: C8's native-scale X/B gradient bank runs.
-    pub gmsnative: bool,
-    /// The `globaff` strip moment sums run (formula revision 6). Independent
-    /// of the v2 kernels: it reads the planes of every channel at every scale.
-    pub globaff: bool,
     /// The free v2-era slots a v1-only walk emits ([`V1FreeExtras`]). Held
     /// here rather than re-read from the toggles at each site, so
     /// `raw_moments` has ONE derivation.
@@ -1169,17 +1018,6 @@ impl ComputeSet {
             v2_blocks: self.v2_blocks && live,
             gradient: self.gradient && live,
             blockiness: self.blockiness && live,
-            append: self.append && live,
-            append2: self.append2 && live,
-            csfw: self.csfw && live,
-            gridblk: self.gridblk && live,
-            ringbasis: self.ringbasis && live,
-            tailhist: self.tailhist && live,
-            arttype: self.arttype && live,
-            gmsbank: self.gmsbank && live,
-            mapdev: self.mapdev && live,
-            z1max: self.z1max && live,
-            gmsnative: self.gmsnative && live,
             ..self
         }
     }
@@ -1209,8 +1047,6 @@ impl ComputeSet {
     /// with any toggle set (which is what makes it a drop-in bench A/B).
     pub(crate) fn from_toggles(t: V2NewFeatureToggles) -> Self {
         let v2_blocks = !t.v1_only;
-        let append = t.append_block && v2_blocks;
-        let append2 = t.append2_block && v2_blocks;
         let mut set = Self {
             formula_revision: t.formula_revision,
             v1_basic: true,
@@ -1229,19 +1065,6 @@ impl ComputeSet {
             transducer_bank: t.transducer_bank,
             transducers_luma_only: t.transducers_luma_only,
             omit_pjnd_fragility: false,
-            append,
-            append2,
-            append2_dst_activity: t.append2_dst_activity && append2,
-            csfw: t.csfw_block && v2_blocks,
-            gridblk: t.rev4_gridblk && v2_blocks,
-            ringbasis: t.rev4_ringbasis && v2_blocks,
-            tailhist: t.rev4_tailhist && v2_blocks,
-            arttype: t.rev4_arttype && v2_blocks,
-            gmsbank: t.gmsbank && v2_blocks,
-            mapdev: t.mapdev && v2_blocks,
-            z1max: t.z1max && v2_blocks,
-            gmsnative: t.gmsnative && v2_blocks,
-            globaff: t.globaff,
             free_extras: t.free_extras,
         };
         set.rev5_scope();
@@ -1277,20 +1100,7 @@ impl ComputeSet {
             self.v1_pools = V1PoolsMode::Peaks;
         }
         self.v1_full_scales = Self::ALL_SCALES;
-        self.append = false;
-        self.append2 = false;
-        self.append2_dst_activity = false;
-        self.csfw = false;
-        self.gridblk = false;
-        self.ringbasis = false;
-        self.tailhist = false;
-        self.arttype = false;
-        self.gmsbank = false;
-        self.mapdev = false;
-        self.z1max = false;
-        self.gmsnative = false;
         if !self.formula_revision.computes_globaff() {
-            self.globaff = false;
         }
         self.free_extras = V1FreeExtras::Off;
     }
@@ -1302,7 +1112,7 @@ impl ComputeSet {
     /// owns `GLOBAL_*`; with `append2` on it owns `LUMA_MEAN_REF`). So a full
     /// 944 walk never pays for this however the toggle is set.
     pub(crate) fn raw_moments(&self) -> bool {
-        self.free_extras != V1FreeExtras::Off && !(self.append && self.append2)
+        self.free_extras != V1FreeExtras::Off
     }
 
     /// Does the v1 fused kernel need to carry the class-C bounded per-pixel
@@ -1316,7 +1126,6 @@ impl ComputeSet {
     /// [`Self::raw_moments`].
     pub(crate) fn bounded_err(&self) -> bool {
         self.free_extras == V1FreeExtras::RawMomentsPlusBoundedErr
-            && (!self.v2_blocks || !self.append)
     }
 
     /// The per-channel free-extras work order handed to the fused kernel.
@@ -1338,7 +1147,7 @@ impl ComputeSet {
             omit_edges: self.omit_edges,
             raw_moments: self.raw_moments(),
             bounded_err,
-            lum_bins: bounded_err && !self.append && ch == APPEND2_CHANNEL,
+            lum_bins: bounded_err && ch == APPEND2_CHANNEL,
         }
     }
 
@@ -1446,39 +1255,6 @@ impl ComputeSet {
         if self.v2_blocks {
             ranges.push((v1_total, v2_end));
         }
-        if self.append {
-            ranges.push((v2_end, append_end));
-        }
-        if self.append2 {
-            ranges.push((append_end, append2_end));
-        }
-        if self.csfw {
-            ranges.push((append2_end, csfw_end));
-        }
-        if self.gridblk {
-            ranges.push((reserved_end, gridblk_end));
-        }
-        if self.ringbasis {
-            ranges.push((gridblk_end, ringbasis_end));
-        }
-        if self.tailhist {
-            ranges.push((ringbasis_end, tailhist_end));
-        }
-        if self.arttype {
-            ranges.push((tailhist_end, arttype_end));
-        }
-        if self.gmsbank {
-            ranges.push((arttype_end, gmsbank_end));
-        }
-        if self.mapdev {
-            ranges.push((gmsbank_end, mapdev_end));
-        }
-        if self.z1max {
-            ranges.push((mapdev_end, z1max_end));
-        }
-        if self.gmsnative {
-            ranges.push((z1max_end, gmsnative_end));
-        }
         // Registered base (after the reserved slots and the research palette
         // block), so the range follows the registry rather than a re-typed
         // offset. Every channel at every scale: the channel masks below are
@@ -1489,14 +1265,9 @@ impl ComputeSet {
         )
         .expect("globaff is a registered block")
         .0;
-        let globaff_range = if self.globaff {
-            globaff_base..globaff_base + n_scales * 3 * crate::globaff::GLOBAFF_PER_CELL
-        } else {
+        let globaff_range = {
             0..0
         };
-        if self.globaff {
-            ranges.push((globaff_range.start, globaff_range.end));
-        }
         if self.raw_moments() {
             scattered.extend(free_slot_indices(n_scales));
         }
@@ -1546,17 +1317,7 @@ impl ComputeSet {
     /// channel-local (each channel's slots read only that channel's planes), so X/B work may be skipped
     /// families keep the complete walk until they have their own channel plan.
     pub(crate) fn chroma_local_families(&self) -> bool {
-        !(self.append
-            || self.append2
-            || self.csfw
-            || self.gridblk
-            || self.ringbasis
-            || self.tailhist
-            || self.arttype
-            || self.gmsbank
-            || self.mapdev
-            || self.z1max
-            || self.gmsnative)
+        true
     }
 
     #[inline]
@@ -1598,17 +1359,15 @@ impl ComputeSet {
             2 * BLOCK_LATTICE
         }) >> scale;
         Rev4Work {
-            gridblk_period: if self.gridblk && period >= 2 {
-                period
-            } else {
+            gridblk_period: {
                 0
             },
-            ringbasis: self.ringbasis,
-            tailhist: self.tailhist,
-            flat: self.arttype,
-            bleed_mask: mask.filter(|_| self.arttype && ch != 1),
+            ringbasis: false,
+            tailhist: false,
+            flat: false,
+            bleed_mask: mask.filter(|_| false && ch != 1),
             gmsbank: gmsbank_cell_live(self, scale, ch),
-            bank: GmsBankWork::new(ch, chroma.filter(|_| self.gmsbank && scale > 0 && ch == 0)),
+            bank: GmsBankWork::new(ch, chroma.filter(|_| false && scale > 0 && ch == 0)),
         }
     }
 
@@ -3210,26 +2969,6 @@ impl GradientAccum {
         for (mine, next) in self.chroma.iter_mut().zip(&other.chroma) {
             mine.merge(next);
         }
-    }
-}
-
-fn finish_gmsbank_cell(bank: &[GmsBankCell; 5], n_px: usize, out: &mut [f64]) {
-    debug_assert_eq!(out.len(), GMSBANK_PER_CELL);
-    for (k, cell) in bank.iter().enumerate() {
-        assert_eq!(cell.n as usize, n_px, "C8 gradient sample count");
-        let base = k * 3;
-        out[base] = cell.loss / n_px as f64;
-        out[base + 1] = cell.gain / n_px as f64;
-        out[base + 2] = (cell.m2.max(0.0) / n_px as f64).sqrt();
-    }
-}
-
-fn finish_chroma_cell(cells: &[GmsBankCell; 5], n: usize, out: &mut [f64]) {
-    assert_eq!(out.len(), 10);
-    for (k, cell) in cells.iter().enumerate() {
-        assert_eq!(cell.n as usize, n, "C8 chromaticity sample count");
-        out[2 * k] = cell.loss / n as f64;
-        out[2 * k + 1] = (cell.m2.max(0.0) / n as f64).sqrt();
     }
 }
 
@@ -5233,9 +4972,8 @@ fn gradient_block_kernel_at_revision(
     // Revision 6 owns the high-pass ringing form; `ZENSIM_RING_FORM=hpm` is
     // the per-process research arm of the same arithmetic at Rev4/Rev5.
     let hp = revision.ring_high_pass() || active_ring_form() == RingForm::HighPassMu;
-    let exact = false;
     assert!(
-        !hp || ((matches!(mode, crate::featcanon::Mode::Canon64) || exact) && mu.is_some()),
+        !hp || ((matches!(mode, crate::featcanon::Mode::Canon64)) && mu.is_some()),
         "the high-pass ringing form (revision 6 or ZENSIM_RING_FORM=hpm) is implemented on \
          the canonical gradient kernel (formula revision 4 or later, default ZENSIM_FEATCANON, \
          or the exact oracle) with local-mean planes only"
@@ -6478,29 +6216,6 @@ fn csfw_row_canon<P: crate::featcanon::Pool>(
     acc.sum_wd += p_wd.fin();
     acc.sum_ws2 += p_ws2.fin();
     acc.sum_wd2 += p_wd2.fin();
-}
-
-/// Finalize one scale's CSFW block into its 3 output slots — the weighted
-/// twins of [`finish_append`]'s GLOBAL_* trio, same constants, same
-/// clamps. `Σw ≥ w_min·n > 0` structurally; the [`WeightedSum`]-class
-/// 1e-12 denominator floor is kept as defense in depth.
-fn finish_csfw(csfw: &CsfwAccum, out: &mut [f64]) {
-    debug_assert_eq!(out.len(), CSFW_PER_SCALE);
-    if csfw.sum_w < 1e-12 {
-        out[idx_csfw::W_GLOBAL_DMEAN] = 0.0;
-        out[idx_csfw::W_GLOBAL_CGAIN] = 0.0;
-        out[idx_csfw::W_GLOBAL_CLOSS] = 0.0;
-        return;
-    }
-    out[idx_csfw::W_GLOBAL_DMEAN] =
-        saturate((csfw.sum_ws - csfw.sum_wd).abs() / csfw.sum_w, C_GDMEAN);
-    let wmean_s = csfw.sum_ws / csfw.sum_w;
-    let wmean_d = csfw.sum_wd / csfw.sum_w;
-    let gvar1_w = (csfw.sum_ws2 / csfw.sum_w - wmean_s * wmean_s).max(0.0);
-    let gvar2_w = (csfw.sum_wd2 / csfw.sum_w - wmean_d * wmean_d).max(0.0);
-    let (g_cgain, g_closs) = bounded_excess_pair(gvar2_w, gvar1_w, C_GCONTRAST);
-    out[idx_csfw::W_GLOBAL_CGAIN] = g_cgain.clamp(0.0, 1.0);
-    out[idx_csfw::W_GLOBAL_CLOSS] = g_closs.clamp(0.0, 1.0);
 }
 
 /// Finalize one channel-scale's append block into its 17 output slots.
