@@ -465,39 +465,6 @@ impl SumVar {
     }
 }
 
-/// Welford `(n, mean, m2)` state whose update arithmetic follows the
-/// measurement mode — for `mapdev` (row Welford + Chan merge) and
-/// `gmsbank`'s per-cell deviation state.
-///
-/// There is no meaningful f32-Welford-lane candidate — Welford's value is
-/// precisely that it is already a stable f64 sequential update — so
-/// `c32` maps to [`WelfordVar::Seq`], i.e. the c32 column for the Welford
-/// kernels IS the production accumulation. `c64` gives the 8-lane form
-/// (each lane an independent Welford over the `x ≡ lane (mod 8)` substream,
-/// pairwise Chan-merged), `neum`/`exact` the compensated form.
-///
-/// rev4canon: `Lanes` is the Rev4 canon; `Neum` stays measurement-only.
-#[derive(Clone, Copy)]
-pub(crate) enum WelfordVar {
-    /// Production: sequential Welford in f64.
-    Seq(WelfordCell),
-    /// 8 independent Welford lanes, pairwise-merged at [`Self::stats`].
-    Lanes([WelfordCell; 8]),
-}
-
-/// Plain f64 Welford triple — the production cell shape.
-#[derive(Clone, Copy, Default)]
-pub(crate) struct WelfordCell {
-}
-
-impl WelfordCell {
-
-}
-
-impl WelfordVar {
-
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

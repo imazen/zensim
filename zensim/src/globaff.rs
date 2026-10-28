@@ -32,9 +32,6 @@
 
 use archmage::autoversion;
 
-/// Signals per (scale, channel) cell: `share`, `explained`.
-pub(crate) const GLOBAFF_PER_CELL: usize = 2;
-
 /// The five running sums of one (scale, channel) cell: `s`, `e = s − d`,
 /// `s²`, `e²` and `s·e`.
 #[derive(Clone, Copy, Debug, Default)]

@@ -341,13 +341,6 @@ pub mod idx_append2 {
 // table` pattern that keeps them honest.
 // ============================================================================
 
-/// CSFW slots per scale (Y-only tier-1 block — no channel axis, same
-/// documented layout deviation as append2; layout
-/// `f944 + scale*CSFW_PER_SCALE + local`, 4 scales × 3 = 12 slots, full
-/// vector = 956). The chroma tiers (X/B weighted twins, design §8.1)
-/// keep the f956..f979 claim and are NOT emitted by this wave.
-pub const CSFW_PER_SCALE: usize = 3;
-
 /// Named local offsets within one scale's CSFW block (all Y-only).
 ///
 /// Each lane is the luminance-CSF-weighted twin of the same scale's
@@ -374,33 +367,6 @@ pub mod idx_csfw {
 // local`), arttype is PerScale (`scale*ARTTYPE_PER_SCALE + local`).
 // ============================================================================
 
-/// mapdev slots per (scale, channel) cell (`feature_defs::MAPDEV_SIGNALS`).
-pub(crate) const MAPDEV_PER_CELL: usize = 5;
-/// z1max slots per (scale, channel) cell: 13 basic + 6 peaks.
-pub(crate) const Z1MAX_PER_CELL: usize = 19;
-/// gmsnative slots in total: X then B, 15 each, at scale 0.
-pub(crate) const GMSNATIVE_WIDTH: usize = 30;
-
-fn gmsbank_width(n_scales: usize) -> usize {
-    crate::feature_defs::block_base(crate::feature_set_id::ComputeToken::Gmsbank, n_scales)
-        .expect("registered C8")
-        .1
-        .width(n_scales)
-}
-
-/// gridblk slots per (scale, channel) cell: 6 signed log-magnitude bins
-/// of the on-grid boundary step excess + on-grid mean + on/off ratio.
-pub(crate) const GRIDBLK_PER_CELL: usize = 8;
-/// ringbasis slots per (scale, channel) cell: 6 triangular
-/// log-magnitude bins of the RINGING per-pixel term.
-pub(crate) const RINGBASIS_PER_CELL: usize = 6;
-/// tailhist slots per (scale, channel) cell: p95/p99/max for each of the
-/// SSIM/ART/DET/MSE per-pixel maps (4 maps × 3).
-pub(crate) const TAILHIST_PER_CELL: usize = 12;
-/// arttype slots per scale (no channel axis — like append2/CSFW, each
-/// signal names its channel): blur(Y), noise_x/y/b, bleed_x/b.
-pub(crate) const ARTTYPE_PER_SCALE: usize = 6;
-
 /// Named local offsets within one scale's arttype block.
 pub(crate) mod idx_arttype {}
 
@@ -421,90 +387,6 @@ pub(crate) mod idx_arttype {}
 // partial would reassociate"), so serial, parallel-channel and
 // streaming-vs-materialized paths all produce identical f64 op sequences.
 // ---------------------------------------------------------------------------
-
-/// C3: 32-bin log histograms + exact maxima of the four dense per-pixel
-/// maps (`d`, `art`, `det`, `mse` — in emitted order). Integer counts are
-/// merge- and order-invariant; the max is order-free.
-#[derive(Clone)]
-struct TailAccum {
-}
-
-impl Default for TailAccum {
-    fn default() -> Self {
-        Self {
-        }
-    }
-}
-
-impl TailAccum {
-}
-
-/// C4-noise: flat-reference-region HF-gain mass for one cell.
-/// featacc: `hfg` is a `SumVar` (f64-native terms) — `Seq` under production.
-#[derive(Clone, Copy)]
-struct FlatAccum {
-}
-
-impl Default for FlatAccum {
-    fn default() -> Self {
-        Self {
-        }
-    }
-}
-
-/// C2: the 6 triangular `u`-domain bins of the per-pixel RINGING term —
-/// `bins[k] = Σ_px ring·m_k(u(ring))` in scan order.
-/// featacc: `SumVar` bins — `Seq` under production.
-#[derive(Clone, Copy)]
-struct RingAccum {
-}
-
-impl Default for RingAccum {
-    fn default() -> Self {
-        Self {
-        }
-    }
-}
-
-/// C4-bleed: gradient magnitudes summed OUTSIDE the dilated dst-luma-edge
-/// mask (scan order). featacc: `SumVar` — `Seq` under production.
-#[derive(Clone, Copy)]
-struct BleedAccum {
-}
-
-impl Default for BleedAccum {
-    fn default() -> Self {
-        Self {
-        }
-    }
-}
-
-/// C1: the stored `ẽ` boundary planes plus the per-phase profiles that
-/// pick the winning phase at finalize (design note §C1 "Accumulation" —
-/// the winning phase gates the emitted bins but is only known after the
-/// whole plane is walked, so the kernel stores `ẽ` per boundary and the
-/// rescan touches only on-grid positions: `2n/P` hat evaluations instead
-/// of membership work on all `2n` boundaries).
-///
-/// `plane_v[y*w + x]` holds `ẽ` of the vertical boundary between columns
-/// `x−1` and `x` (x ∈ 1..w); `plane_h[y*w + x]` holds the horizontal
-/// boundary between rows `y−1` and `y` (y ∈ 1..h). Both are written by
-/// `gridblk_strip_wide` in the SAME f32 arithmetic on every engine, so
-/// the rescan reads bitwise-identical values in the streaming and
-/// materialized walks. `abs_*`/`signed_*` are the per-phase `Σ|ẽ|`/`Σẽ`
-/// profiles — f64 running totals fed by the kernel's lane-folded V8
-/// accumulators (the lane map `(x−1, chunk parity) → phase` is fixed by
-/// construction, so the accumulation order is identical on every tier,
-/// engine and thread count — this family's determinism contract).
-struct GridblkAccum {
-}
-
-impl Default for GridblkAccum {
-    fn default() -> Self {
-        Self {
-        }
-    }
-}
 
 /// All rev4 state for one (scale, channel) cell. Untouched when every
 /// rev4 compute flag is off.
@@ -1292,9 +1174,6 @@ enum BandPoolWork {
     /// No pool arithmetic at all. The scratch is present only so a
     /// [`FoldHSource::SelfBlur`] band can own its four H planes.
     HOnly,
-    /// Activity chain + `edge_diff_channel_inline_both` (the carrier slots'
-    /// `art_4th`); no sigma store, no MSE, no masked/IW SSIM.
-    Carriers,
     /// Every pool slot: activity chain, sigma store, and all three
     /// `*_inline_both` kernels.
     Full,

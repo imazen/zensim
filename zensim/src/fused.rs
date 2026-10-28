@@ -4592,14 +4592,6 @@ impl VWinPlanes<'_> {
 }
 
 enum VWin {
-    /// Production: per-column f32 sliding sums.
-    Rec {
-        m1: Vec<f32>,
-        m2: Vec<f32>,
-        sq: Vec<f32>,
-        s12: Vec<f32>,
-        act: Vec<f32>,
-    },
     /// The same sliding recurrence in f64 — THE REV4 CANON's window state
     /// (rev4canon: `BlurMode::Rec64`).
     F64 {
@@ -4683,21 +4675,6 @@ impl VWin {
             }
         };
         match self {
-            Self::Rec {
-                m1,
-                m2,
-                sq,
-                s12,
-                act,
-            } => {
-                let ab = vblur_add_idx(y, p.r, p.height) * p.width;
-                let rb = vblur_rem_idx(y, p.r, p.height) * p.width;
-                slide32(p.m1, m1, ab, rb);
-                slide32(p.m2, m2, ab, rb);
-                slide32(p.sq, sq, ab, rb);
-                slide32(p.s12, s12, ab, rb);
-                slide32(p.act, act, ab, rb);
-            }
             Self::F64 {
                 m1,
                 m2,
@@ -4737,17 +4714,6 @@ impl VWin {
     #[inline(always)]
     fn at32(&self, x: usize, y: usize, p: &VWinPlanes<'_>) -> (f32, f32, f32, f32, f32) {
         match self {
-            Self::Rec {
-                m1,
-                m2,
-                sq,
-                s12,
-                act,
-            } => {
-                let inv = p.inv32();
-                let a = if act.is_empty() { 0.0 } else { act[x] * inv };
-                (m1[x] * inv, m2[x] * inv, sq[x] * inv, s12[x] * inv, a)
-            }
             Self::F64 {
                 m1,
                 m2,

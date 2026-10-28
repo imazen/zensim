@@ -94,45 +94,15 @@ pub(crate) enum Statistic {
     L4,
     /// `(Σx⁸/n)^⅛`.
     L8,
-    /// `(Σm⁴/n)^¼` pooled over per-BLOCK maxima (the restored `z1max` family).
-    /// Distinct from [`Statistic::L4`] on purpose: it shares v1's `RootForm`
-    /// handling but is NOT attached to the `v1detroot`/F18 registry gates,
-    /// whose pinned counts are measurements over the v1/v2 slots
-    /// (`registered_defects_cover_exactly_the_audited_slots`).
-    BlockL4,
-    /// `(Σm⁸/n)^⅛` over per-block maxima; see [`Statistic::BlockL4`].
-    BlockL8,
     /// Plane maximum.
     Max,
     /// `Σw·v / Σw` — the canonical weighted pooling the masked/IW blocks use.
     WeightedMean,
     /// A ratio of two pooled quantities (the HF gain/loss/mag family).
     Ratio,
-    /// A mean restricted to a luminance bin.
-    Bin,
-    /// A whole-plane scalar that is not a pooled per-pixel term (the
-    /// `GLOBAL_*` / `W_GLOBAL_*` families, computed from raw moments).
-    Global,
 }
 
 impl Statistic {
-}
-
-/// What a slot costs when its OWNING BLOCK runs.
-///
-/// This is the signal's base cost. It is NOT the whole cost story: a slot can
-/// also be [`Tranche`]-harvestable, i.e. obtainable for free by a walk that
-/// never runs its owning block at all. See [`cost_of`], which is the honest
-/// per-SLOT answer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum CostClass {
-    /// Shares an existing sweep; no new pass over the plane.
-    Cheap,
-    /// Needs its own pass, plane, or kernel.
-    Expensive,
-}
-
-impl CostClass {
 }
 
 /// Whether a slot can be harvested by a v1-only walk that never runs the
@@ -170,10 +140,6 @@ impl Tranche {
 pub(crate) enum Placement {
     /// Every cell the block occupies.
     AllCells,
-    /// Every cell except the append block's `(B, scale 0)`.
-    SkipBScale0,
-    /// The Y channel only, and only where the append cell is computed.
-    YOnlyActive,
 }
 
 /// Whether a slot is a difference between reference and distorted, and so
@@ -196,16 +162,6 @@ pub(crate) enum Form {
     Difference,
     /// Computed from the reference alone; an identity pair does not zero it.
     ReferenceOnly,
-    /// Not yet established. Never treated as any of the above.
-    ///
-    /// Declared by the restored-cut families (2026-09-25), the only committed
-    /// uses: the `mapdev` distorted-side deviations (`hfsq_dst_dev`,
-    /// `hfabs_dst_dev`: a property of one image, no reference/distorted
-    /// relation to zero) and the SSIM-derived `z1max` slots (block-locals 0, 1,
-    /// 2, 13, 16), whose identity value depends on the formula revision —
-    /// exactly 0 at Rev3 (direct-error form), nonzero at Rev1 — and which are
-    /// not attached to the F4 defect gate (see [`Statistic::BlockL4`]).
-    Undeclared,
 }
 
 impl Form {
@@ -218,12 +174,6 @@ pub(crate) enum Direction {
     HigherIsWorse,
     /// No signed expectation (reference-only conditioners, raw statistics).
     Unsigned,
-    /// Not yet established.
-    ///
-    /// Reserved for the Phase-2 research engine's provenance output
-    /// (`docs/PLAN_FEATURE_SYSTEM_2026-09-05.md`); no signal in the committed
-    /// registry currently declares it, so nothing constructs it yet.
-    Undeclared,
 }
 
 impl Direction {
@@ -244,26 +194,6 @@ pub(crate) enum KernelId {
     V2Dense,
     /// The v2 gradient kernel (GMS, ringing, banding, edge width).
     V2Gradient,
-    /// The append-204 kernel.
-    Append,
-    /// The append2 / BANDVIS kernel.
-    Append2,
-    /// The CSFW tier-1 kernel.
-    Csfw,
-    /// The free raw-moment accumulator a v1-only walk finalizes.
-    FreeRawMoments,
-    /// The free bounded-error (class C) accumulator.
-    FreeBoundedErr,
-    /// The Rev4 gridblk boundary-excess pass (C1's own kernel).
-    Gridblk,
-    /// The restored-cut per-band error-map side pass (`feature_v2::restore_cuts`):
-    /// the v1 fused kernel's own per-pixel maps consumed by deviation and
-    /// block-max pooling.
-    RestoreMaps,
-    /// Research palette signature and population transport.
-    Palette,
-    /// The walk's per-strip global-affine moment sums (`crate::globaff`).
-    GlobAff,
 }
 
 impl KernelId {
@@ -528,57 +458,6 @@ impl FeatureDef {
 // The signal table
 // ============================================================================
 
-const NO_REV: &[Revision] = &[];
-
-/// The commit that introduced the Rev4 feature bank — recorded so
-/// `Revision::commit` names a real hash rather than a placeholder (a landed
-/// revision must name the byte-changing commit; the registry test enforces
-/// `!= "-"`). Pinned by the follow-up commit once the landing commit exists.
-const REV4BANK_COMMIT: &str = "adef35be";
-
-/// The Rev4 feature-bank introduction era. Every slot of the four appended
-/// families (f986..1321 at 4 scales) is born carrying it, so
-/// `era_moved_slots("rev4bank", …)` enumerates exactly the appended range —
-/// the same machine-checkable answer the `v1ssimcap`/`v1hfgain` entries give
-/// for their eras.
-const REV4BANK: &[Revision] = &[Revision {
-    era: "rev4bank",
-    commit: REV4BANK_COMMIT,
-    status: RevisionStatus::Landed,
-    note: "append-only introduction of the four Rev4 candidate families \
-           (gridblk, ringbasis, tailhist, arttype) at f986..1321. No existing \
-           slot's value moves; disabled families emit nothing and cost \
-           nothing. Spec: docs/REV4_FEATURE_BANK_PLAN_2026-09-23.md; design: \
-           benchmarks/rev4_featbank_impl_2026-09-23.md.",
-}];
-
-/// C3 fix: the tailhist histogram's bin lookup read `f64::to_bits` directly,
-/// so any value with the sign bit set (tiny negatives from f32 rounding in
-/// `edge_dissim`, NaN) sorted above every positive edge and landed in the
-/// top bin — REVIEW_PARTB (2026-09-25) measured 2.01-3.36% top-bin cells on
-/// KADID/TID `art`/`det` in the pre-fix bank; on TRAIN data with the fold
-/// the top-edge saturation is <= 0.81% (benchmarks/rev4canon_WORKLOG.md).
-/// The corrected lookup folds non-positive and NaN values into bin 0. The
-/// exact maxima never changed, so the era attaches to the eight `Bin`
-/// (`*_p95`/`*_p99`) signals only.
-///
-/// **Scoped to [`FormulaRevision::Rev4`].** The tailhist family is the
-/// landed `rev4bank` era and is computed at EVERY formula revision, so the
-/// fold is gated on the computation's revision: Rev1-Rev3 research
-/// extractions keep the legacy bins byte for byte (Known Bugs, zensim
-/// `CLAUDE.md`).
-const REV_C3NEGFOLD: Revision = Revision {
-    era: "c3negfold",
-    commit: "-",
-    status: RevisionStatus::Proposed,
-    note: "tailhist bins sign-bit-set and NaN values into bin 0 instead of \
-           the top bin, at FormulaRevision::Rev4 only (`TailAccum::fold`); \
-           Rev1-Rev3 keep the legacy bins byte for byte. Moves only the Bin \
-           signals; `*_max` is exact and unchanged. Root cause of the \
-           phantom C3 top-bin saturation measured in REVIEW_PARTB \
-           2026-09-25; record in benchmarks/rev4canon_WORKLOG.md.",
-};
-
 /// The defect behind the `ringhpm` era: the ringing error is the raw pixel
 /// error, so a global edit reads as ringing.
 const DEFECT_RING_GLOBAL: Defect = Defect {
@@ -607,10 +486,6 @@ const REV_RINGHPM: Revision = Revision {
            benchmarks/byconstruction_2026-10-22.md.",
 };
 const RINGING_REVS: &[Revision] = &[REV_RINGHPM];
-
-/// The tailhist `Bin` signals carry `rev4bank` plus the C3 binning fix;
-/// `Max` signals keep `REV4BANK` alone (exact maxima are unaffected).
-const TAILHIST_BIN_REVS: &[Revision] = &[REV4BANK[0], REV_C3NEGFOLD];
 
 /// **F4** — the one LIVE arithmetic defect
 /// (`docs/FEATURE_DEFECTS_AUDIT_2026-09-05.md`).
@@ -790,29 +665,6 @@ const REV_F4_ENTRY: Revision = Revision {
            recalculation and refit land, and Proposed is what `shipped \
            bytes are unchanged` means.",
 };
-
-/// **F5** — the free-40 raw-moment route-parity skew.
-const DEFECT_F5: Defect = Defect {
-    id: "F5",
-    note: "`global_stats_from_raw_moments` uses the catastrophic-cancellation \
-           form `sum(s^2)/n - (sum(s)/n)^2`, and the two routes reduce at \
-           different granularities (append kernel per ROW, fused kernel per \
-           BAND). 2,607 of 28,601 cells (9.12 %) exceed the 2e-5 parity bar on \
-           real pairs, worst 3.63e-3. The class-C 24 slots are clean (0/18,552).",
-};
-
-/// The PROPOSED fix for [`DEFECT_F5`] — the CHEAPEST window, because no
-/// shipped bake reads these slots yet.
-const REV_F5_PROPOSED: &[Revision] = &[Revision {
-    era: "freecomp",
-    commit: "-",
-    status: RevisionStatus::Proposed,
-    note: "F5 fix: compensated (or two-pass) accumulation for the raw second \
-           moment, so the free route and the append kernel agree. Migration \
-           cost is ZERO shipped bytes TODAY — no shipped bake reads the \
-           raw-moment tranche — and rises the moment one does. Land it before \
-           a bake reads these slots, not after.",
-}];
 
 const DEFECT_F17: Defect = Defect {
     id: "F17",
@@ -1024,27 +876,6 @@ const fn v2sig_rev(
         defect,
     );
     SignalDef {  ..base }
-}
-
-const fn app(
-    block_local: u16,
-    name: &'static str,
-    statistic: Statistic,
-    form: Form,
-    direction: Direction,
-    kernel: KernelId,
-    tranche: Tranche,
-    placement: Placement,
-    defect: Option<Defect>,
-    revisions: &'static [Revision],
-) -> SignalDef {
-    SignalDef {
-        family: Family::Supported(ComputeToken::Append),
-        name,
-        tranche,
-        placement,
-        form,
-    }
 }
 
 /// The 13 v1 basic signals per (scale, channel), in `V1BasicSums::finalize_into`
@@ -1461,341 +1292,6 @@ pub(crate) static V2: [SignalDef; 29] = {
     ]
 };
 
-/// The 17 append signals per (scale, channel), index-aligned with
-/// `feature_v2::idx_append`.
-///
-/// The three `GLOBAL_*` and `GRAD_SRC_MEAN` are the tranche a v1-only walk can
-/// finalize from raw moments — [`CostClass::Free`] — which is what makes the
-/// `basic+peaks+moments` plan reachable without the append kernel.
-pub(crate) static APPEND: [SignalDef; 17] = {
-    use Direction::{HigherIsWorse, Unsigned};
-    use Form::{Difference, ReferenceOnly};
-    use KernelId::{Append as KA, FreeBoundedErr as KB, FreeRawMoments as KR};
-    use Placement::{AllCells, SkipBScale0, YOnlyActive};
-    use Statistic::{Bin, Global, L2, Mean};
-    use Tranche::{ClassC, None as NoTranche, RawMoments};
-    [
-        app(
-            0,
-            "xmask_transducer",
-            Mean,
-            Difference,
-            HigherIsWorse,
-            KA,
-            NoTranche,
-            AllCells,
-            None,
-            NO_REV,
-        ),
-        app(
-            1,
-            "lum_transducer",
-            Mean,
-            Difference,
-            HigherIsWorse,
-            KA,
-            NoTranche,
-            AllCells,
-            None,
-            NO_REV,
-        ),
-        // The three luminance-binned error means are the class-C tranche, and
-        // ONLY at Y: the register-carry constraint the free accumulator works
-        // under has no room for the chroma pair.
-        app(
-            2,
-            "lum_dark_err",
-            Bin,
-            Difference,
-            HigherIsWorse,
-            KB,
-            ClassC,
-            YOnlyActive,
-            None,
-            NO_REV,
-        ),
-        app(
-            3,
-            "lum_mid_err",
-            Bin,
-            Difference,
-            HigherIsWorse,
-            KB,
-            ClassC,
-            YOnlyActive,
-            None,
-            NO_REV,
-        ),
-        app(
-            4,
-            "lum_bright_err",
-            Bin,
-            Difference,
-            HigherIsWorse,
-            KB,
-            ClassC,
-            YOnlyActive,
-            None,
-            NO_REV,
-        ),
-        app(
-            5,
-            "mscn_diff_mean",
-            Mean,
-            Difference,
-            HigherIsWorse,
-            KA,
-            NoTranche,
-            AllCells,
-            None,
-            NO_REV,
-        ),
-        app(
-            6,
-            "mscn_diff_l2",
-            L2,
-            Difference,
-            HigherIsWorse,
-            KA,
-            NoTranche,
-            AllCells,
-            None,
-            NO_REV,
-        ),
-        app(
-            7,
-            "contrast_gain",
-            Mean,
-            Difference,
-            HigherIsWorse,
-            KA,
-            NoTranche,
-            AllCells,
-            None,
-            NO_REV,
-        ),
-        app(
-            8,
-            "contrast_loss",
-            Mean,
-            Difference,
-            HigherIsWorse,
-            KA,
-            NoTranche,
-            AllCells,
-            None,
-            NO_REV,
-        ),
-        app(
-            9,
-            "texture_dissim",
-            Mean,
-            Difference,
-            HigherIsWorse,
-            KA,
-            NoTranche,
-            AllCells,
-            None,
-            NO_REV,
-        ),
-        app(
-            10,
-            "gms_dev2",
-            L2,
-            Difference,
-            HigherIsWorse,
-            KA,
-            NoTranche,
-            AllCells,
-            None,
-            NO_REV,
-        ),
-        app(
-            11,
-            "art_dev2",
-            L2,
-            Difference,
-            HigherIsWorse,
-            KA,
-            NoTranche,
-            AllCells,
-            None,
-            NO_REV,
-        ),
-        app(
-            12,
-            "det_dev2",
-            L2,
-            Difference,
-            HigherIsWorse,
-            KA,
-            NoTranche,
-            AllCells,
-            None,
-            NO_REV,
-        ),
-        // The raw-moment tranche — every append cell the 944 walk computes,
-        // i.e. all but `(B, scale 0)` (`APPEND_SKIP_B_SCALE0`).
-        app(
-            13,
-            "global_dmean",
-            Global,
-            Difference,
-            HigherIsWorse,
-            KR,
-            RawMoments,
-            SkipBScale0,
-            Some(DEFECT_F5),
-            REV_F5_PROPOSED,
-        ),
-        app(
-            14,
-            "global_cgain",
-            Global,
-            Difference,
-            HigherIsWorse,
-            KR,
-            RawMoments,
-            SkipBScale0,
-            Some(DEFECT_F5),
-            REV_F5_PROPOSED,
-        ),
-        app(
-            15,
-            "global_closs",
-            Global,
-            Difference,
-            HigherIsWorse,
-            KR,
-            RawMoments,
-            SkipBScale0,
-            Some(DEFECT_F5),
-            REV_F5_PROPOSED,
-        ),
-        app(
-            16,
-            "grad_src_mean",
-            Mean,
-            ReferenceOnly,
-            Unsigned,
-            KA,
-            NoTranche,
-            AllCells,
-            None,
-            NO_REV,
-        ),
-    ]
-};
-
-/// The 5 append2 signals per SCALE (Y-only), index-aligned with
-/// `feature_v2::idx_append2`.
-pub(crate) static APPEND2: [SignalDef; 5] = {
-    use ComputeToken::Append2 as F;
-    use Direction::{HigherIsWorse, Unsigned};
-    use Form::{Difference, ReferenceOnly};
-    use KernelId::{Append2 as KA, FreeRawMoments as KR};
-    use Statistic::{Bin, Mean};
-    const fn a2(
-        block_local: u16,
-        name: &'static str,
-        statistic: Statistic,
-        form: Form,
-        direction: Direction,
-        kernel: KernelId,
-        tranche: Tranche,
-        defect: Option<Defect>,
-    ) -> SignalDef {
-        SignalDef {
-            family: Family::Supported(F),
-            name,
-            tranche,
-            // append2 is a per-SCALE block, so there is no channel axis to
-            // restrict: every cell it has is a Y cell.
-            placement: Placement::AllCells,
-            form,
-        }
-    }
-    [
-        a2(
-            0,
-            "bandvis_gain",
-            Mean,
-            Difference,
-            HigherIsWorse,
-            KA,
-            Tranche::None,
-            None,
-        ),
-        a2(
-            1,
-            "bandvis_loss",
-            Mean,
-            Difference,
-            HigherIsWorse,
-            KA,
-            Tranche::None,
-            None,
-        ),
-        // THE slot that makes the 944 identity probe non-zero: a property of
-        // the reference alone, so a perfect copy leaves it at its reference
-        // value. Free from the raw moments a v1-only walk already has.
-        a2(
-            2,
-            "luma_mean_ref",
-            Mean,
-            ReferenceOnly,
-            Unsigned,
-            KR,
-            Tranche::RawMoments,
-            Some(DEFECT_F5),
-        ),
-        a2(
-            3,
-            "hl_bin1",
-            Bin,
-            Difference,
-            HigherIsWorse,
-            KA,
-            Tranche::None,
-            None,
-        ),
-        a2(
-            4,
-            "hl_bin2",
-            Bin,
-            Difference,
-            HigherIsWorse,
-            KA,
-            Tranche::None,
-            None,
-        ),
-    ]
-};
-
-/// The 3 CSFW tier-1 signals per SCALE (Y-only), index-aligned with
-/// `feature_v2::idx_csfw`.
-pub(crate) static CSFW: [SignalDef; 3] = {
-    use ComputeToken::Csfw as F;
-    use Direction::HigherIsWorse;
-    use Form::Difference;
-    use KernelId::Csfw as K;
-    use Statistic::Global;
-    const fn cs(block_local: u16, name: &'static str) -> SignalDef {
-        SignalDef {
-            family: Family::Supported(F),
-            name,
-            tranche: Tranche::None,
-            placement: Placement::AllCells,
-            form: Difference,
-        }
-    }
-    [
-        cs(0, "w_global_dmean"),
-        cs(1, "w_global_cgain"),
-        cs(2, "w_global_closs"),
-    ]
-};
-
 // ============================================================================
 // Rev4 candidate feature bank (f986..1321 at 4 scales)
 // ============================================================================
@@ -1808,363 +1304,6 @@ pub(crate) static CSFW: [SignalDef; 3] = {
 // cell is registered-with-stated-zero (period 1 has no phase contrast), not
 // skipped, so the slot exists and emits 0.0 deliberately.
 
-/// The 8 gridblk signals per (scale, channel) cell — the C1 phase-aligned
-/// blocking family. `mag_bin*` are SIGNED mass bins of the activity-scaled
-/// boundary step excess (`ẽ` may be negative = suppression), so they are
-/// `Unsigned`; `on_mean` is signed for the same reason; `onoff_ratio` is a
-/// magnitude ratio, `HigherIsWorse`.
-pub(crate) static GRIDBLK: [SignalDef; 8] = {
-    use ComputeToken::Gridblk as F;
-    use Form::Difference;
-    use KernelId::Gridblk as K;
-    const fn gb(
-        block_local: u16,
-        name: &'static str,
-        statistic: Statistic,
-        direction: Direction,
-    ) -> SignalDef {
-        SignalDef {
-            family: Family::Supported(F),
-            name,
-            tranche: Tranche::None,
-            placement: Placement::AllCells,
-            form: Difference,
-        }
-    }
-    [
-        gb(0, "mag_bin1", Statistic::Bin, Direction::Unsigned),
-        gb(1, "mag_bin2", Statistic::Bin, Direction::Unsigned),
-        gb(2, "mag_bin3", Statistic::Bin, Direction::Unsigned),
-        gb(3, "mag_bin4", Statistic::Bin, Direction::Unsigned),
-        gb(4, "mag_bin5", Statistic::Bin, Direction::Unsigned),
-        gb(5, "mag_bin6", Statistic::Bin, Direction::Unsigned),
-        gb(6, "on_mean", Statistic::Mean, Direction::Unsigned),
-        gb(7, "onoff_ratio", Statistic::Ratio, Direction::HigherIsWorse),
-    ]
-};
-
-/// The 6 ringbasis signals per (scale, channel) cell — the C2
-/// ringing-magnitude basis. Triangular log-axis bins of the gradient
-/// kernel's own per-pixel ringing term; every bin is a nonnegative pooled
-/// mass, so all are `HigherIsWorse`.
-pub(crate) static RINGBASIS: [SignalDef; 6] = {
-    use ComputeToken::Ringbasis as F;
-    use Direction::HigherIsWorse;
-    use Form::Difference;
-    use KernelId::V2Gradient as K;
-    use Statistic::Bin;
-    const fn rb(block_local: u16, name: &'static str) -> SignalDef {
-        SignalDef {
-            family: Family::Supported(F),
-            name,
-            tranche: Tranche::None,
-            placement: Placement::AllCells,
-            form: Difference,
-        }
-    }
-    [
-        rb(0, "mag_bin1"),
-        rb(1, "mag_bin2"),
-        rb(2, "mag_bin3"),
-        rb(3, "mag_bin4"),
-        rb(4, "mag_bin5"),
-        rb(5, "mag_bin6"),
-    ]
-};
-
-/// The 12 tailhist signals per (scale, channel) cell — the C3 tail profile
-/// of the four existing dense per-pixel maps (`ssim` dissimilarity,
-/// `art`, `det`, `mse`). `p95`/`p99` are read off the family's 32-bin
-/// log-edged histogram (a bin statistic); `max` is the exact map max.
-pub(crate) static TAILHIST: [SignalDef; 12] = {
-    use ComputeToken::Tailhist as F;
-    use Direction::HigherIsWorse;
-    use Form::Difference;
-    use KernelId::V2Dense as K;
-    const fn th(
-        block_local: u16,
-        name: &'static str,
-        statistic: Statistic,
-        revisions: &'static [Revision],
-    ) -> SignalDef {
-        SignalDef {
-            family: Family::Supported(F),
-            name,
-            tranche: Tranche::None,
-            placement: Placement::AllCells,
-            form: Difference,
-        }
-    }
-    [
-        th(0, "ssim_p95", Statistic::Bin, TAILHIST_BIN_REVS),
-        th(1, "ssim_p99", Statistic::Bin, TAILHIST_BIN_REVS),
-        th(2, "ssim_max", Statistic::Max, REV4BANK),
-        th(3, "art_p95", Statistic::Bin, TAILHIST_BIN_REVS),
-        th(4, "art_p99", Statistic::Bin, TAILHIST_BIN_REVS),
-        th(5, "art_max", Statistic::Max, REV4BANK),
-        th(6, "det_p95", Statistic::Bin, TAILHIST_BIN_REVS),
-        th(7, "det_p99", Statistic::Bin, TAILHIST_BIN_REVS),
-        th(8, "det_max", Statistic::Max, REV4BANK),
-        th(9, "mse_p95", Statistic::Bin, TAILHIST_BIN_REVS),
-        th(10, "mse_p99", Statistic::Bin, TAILHIST_BIN_REVS),
-        th(11, "mse_max", Statistic::Max, REV4BANK),
-    ]
-};
-
-/// The 6 arttype signals per SCALE (channel `Scalar`) — the C4 artifact-type
-/// descriptors: blur (EWC × HF_LOSS product at that scale), flat-region HF
-/// noise per channel, and chroma bleed outside the dilated luma-edge mask.
-pub(crate) static ARTTYPE: [SignalDef; 6] = {
-    use ComputeToken::Arttype as F;
-    use Direction::HigherIsWorse;
-    use Form::Difference;
-    const fn at(
-        block_local: u16,
-        name: &'static str,
-        statistic: Statistic,
-        kernel: KernelId,
-    ) -> SignalDef {
-        SignalDef {
-            family: Family::Supported(F),
-            name,
-            tranche: Tranche::None,
-            placement: Placement::AllCells,
-            form: Difference,
-        }
-    }
-    [
-        at(0, "blur", Statistic::Global, KernelId::V2Dense),
-        at(1, "noise_x", Statistic::Mean, KernelId::V2Dense),
-        at(2, "noise_y", Statistic::Mean, KernelId::V2Dense),
-        at(3, "noise_b", Statistic::Mean, KernelId::V2Dense),
-        at(4, "bleed_x", Statistic::Ratio, KernelId::V2Gradient),
-        at(5, "bleed_b", Statistic::Ratio, KernelId::V2Gradient),
-    ]
-};
-
-/// C8: sparse native-Y/coarse-chroma gradient and chromaticity signals.
-pub(crate) static GMSBANK_SIGNALS: [SignalDef; 25] = {
-    use ComputeToken::Gmsbank as F;
-    use Direction::HigherIsWorse;
-    use Form::Difference;
-    use KernelId::V2Gradient as K;
-    const fn gb(block_local: u16, name: &'static str, statistic: Statistic) -> SignalDef {
-        SignalDef {
-            family: Family::Supported(F),
-            name,
-            tranche: Tranche::None,
-            placement: Placement::AllCells,
-            form: Difference,
-        }
-    }
-    [
-        gb(0, "loss0", Statistic::Mean),
-        gb(1, "gain0", Statistic::Mean),
-        gb(2, "dev0", Statistic::Global),
-        gb(3, "loss1", Statistic::Mean),
-        gb(4, "gain1", Statistic::Mean),
-        gb(5, "dev1", Statistic::Global),
-        gb(6, "loss2", Statistic::Mean),
-        gb(7, "gain2", Statistic::Mean),
-        gb(8, "dev2", Statistic::Global),
-        gb(9, "loss3", Statistic::Mean),
-        gb(10, "gain3", Statistic::Mean),
-        gb(11, "dev3", Statistic::Global),
-        gb(12, "loss4", Statistic::Mean),
-        gb(13, "gain4", Statistic::Mean),
-        gb(14, "dev4", Statistic::Global),
-        gb(15, "cs_loss0", Statistic::Mean),
-        gb(16, "cs_dev0", Statistic::Global),
-        gb(17, "cs_loss1", Statistic::Mean),
-        gb(18, "cs_dev1", Statistic::Global),
-        gb(19, "cs_loss2", Statistic::Mean),
-        gb(20, "cs_dev2", Statistic::Global),
-        gb(21, "cs_loss3", Statistic::Mean),
-        gb(22, "cs_dev3", Statistic::Global),
-        gb(23, "cs_loss4", Statistic::Mean),
-        gb(24, "cs_dev4", Statistic::Global),
-    ]
-};
-
-/// A1 (restored): standard deviation of five per-pixel maps of the v1 band
-/// kernel per (scale, channel). `mse_dev` is exactly zero on an identity pair;
-/// the four HF maps are reference/distorted properties, so on an identity
-/// pair `hfsq_src_dev == hfsq_dst_dev` and neither is zero.
-pub(crate) static MAPDEV_SIGNALS: [SignalDef; 5] = {
-    use ComputeToken::Mapdev as F;
-    use Statistic::Global;
-    const fn md(
-        block_local: u16,
-        name: &'static str,
-        form: Form,
-        direction: Direction,
-    ) -> SignalDef {
-        SignalDef {
-            family: Family::Supported(F),
-            name,
-            tranche: Tranche::None,
-            placement: Placement::AllCells,
-            form,
-        }
-    }
-    [
-        md(0, "mse_dev", Form::Difference, Direction::HigherIsWorse),
-        md(1, "hfsq_src_dev", Form::ReferenceOnly, Direction::Unsigned),
-        md(2, "hfsq_dst_dev", Form::Undeclared, Direction::Unsigned),
-        md(3, "hfabs_src_dev", Form::ReferenceOnly, Direction::Unsigned),
-        md(4, "hfabs_dst_dev", Form::Undeclared, Direction::Unsigned),
-    ]
-};
-
-/// B2 (restored): the 13 basic + 6 peak v1 signals pooled over ungated 5x5
-/// block maxima, in `BASIC` then `PEAKS` order.
-pub(crate) static Z1MAX_SIGNALS: [SignalDef; 19] = {
-    use ComputeToken::Z1max as F;
-    use Statistic::{BlockL4 as L4, BlockL8 as L8, L2, Max, Mean, Ratio};
-    const fn zm(
-        block_local: u16,
-        name: &'static str,
-        statistic: Statistic,
-        form: Form,
-    ) -> SignalDef {
-        SignalDef {
-            family: Family::Supported(F),
-            name,
-            tranche: Tranche::None,
-            placement: Placement::AllCells,
-            form,
-        }
-    }
-    use Form::{Difference as D, Undeclared as U};
-    [
-        zm(0, "ssim_mean", Mean, U),
-        zm(1, "ssim_4th", L4, U),
-        zm(2, "ssim_2nd", L2, U),
-        zm(3, "edge_art_mean", Mean, D),
-        zm(4, "edge_art_4th", L4, D),
-        zm(5, "edge_art_2nd", L2, D),
-        zm(6, "edge_det_mean", Mean, D),
-        zm(7, "edge_det_4th", L4, D),
-        zm(8, "edge_det_2nd", L2, D),
-        zm(9, "mse", Mean, D),
-        zm(10, "var_loss", Ratio, D),
-        zm(11, "tex_loss", Ratio, D),
-        zm(12, "contrast_inc", Ratio, D),
-        zm(13, "ssim_max", Max, U),
-        zm(14, "edge_art_max", Max, D),
-        zm(15, "edge_det_max", Max, D),
-        zm(16, "ssim_l8", L8, U),
-        zm(17, "edge_art_l8", L8, D),
-        zm(18, "edge_det_l8", L8, D),
-    ]
-};
-
-/// Ambiguous 7 (restored): C8's per-channel gradient bank at native scale for
-/// the X and B channels (15 slots each), identical to the coarse X/B cells'
-/// definition.
-pub(crate) static GMSNATIVE_SIGNALS: [SignalDef; 15] = {
-    use ComputeToken::Gmsnative as F;
-    use Direction::HigherIsWorse;
-    use Form::Difference;
-    use KernelId::V2Gradient as K;
-    const fn gn(block_local: u16, name: &'static str, statistic: Statistic) -> SignalDef {
-        SignalDef {
-            family: Family::Supported(F),
-            name,
-            tranche: Tranche::None,
-            placement: Placement::AllCells,
-            form: Difference,
-        }
-    }
-    [
-        gn(0, "loss0", Statistic::Mean),
-        gn(1, "gain0", Statistic::Mean),
-        gn(2, "dev0", Statistic::Global),
-        gn(3, "loss1", Statistic::Mean),
-        gn(4, "gain1", Statistic::Mean),
-        gn(5, "dev1", Statistic::Global),
-        gn(6, "loss2", Statistic::Mean),
-        gn(7, "gain2", Statistic::Mean),
-        gn(8, "dev2", Statistic::Global),
-        gn(9, "loss3", Statistic::Mean),
-        gn(10, "gain3", Statistic::Mean),
-        gn(11, "dev3", Statistic::Global),
-        gn(12, "loss4", Statistic::Mean),
-        gn(13, "gain4", Statistic::Mean),
-        gn(14, "dev4", Statistic::Global),
-    ]
-};
-
-const fn palette_signal(block_local: u16, name: &'static str, direction: Direction) -> SignalDef {
-    SignalDef {
-        family: Family::Palette,
-        name,
-        tranche: Tranche::None,
-        placement: Placement::AllCells,
-        form: Form::Difference,
-    }
-}
-pub(crate) static PALETTE_SIGNALS: [SignalDef; 42] = [
-    palette_signal(0, "n2_shift", Direction::HigherIsWorse),
-    palette_signal(1, "n2_lightness_signed", Direction::Undeclared),
-    palette_signal(2, "n2_chroma_signed", Direction::Undeclared),
-    palette_signal(3, "n2_hue_signed", Direction::Undeclared),
-    palette_signal(4, "n2_weight_emd", Direction::HigherIsWorse),
-    palette_signal(5, "n2_largest_shift", Direction::HigherIsWorse),
-    palette_signal(6, "n3_shift", Direction::HigherIsWorse),
-    palette_signal(7, "n3_lightness_signed", Direction::Undeclared),
-    palette_signal(8, "n3_chroma_signed", Direction::Undeclared),
-    palette_signal(9, "n3_hue_signed", Direction::Undeclared),
-    palette_signal(10, "n3_weight_emd", Direction::HigherIsWorse),
-    palette_signal(11, "n3_largest_shift", Direction::HigherIsWorse),
-    palette_signal(12, "n4_shift", Direction::HigherIsWorse),
-    palette_signal(13, "n4_lightness_signed", Direction::Undeclared),
-    palette_signal(14, "n4_chroma_signed", Direction::Undeclared),
-    palette_signal(15, "n4_hue_signed", Direction::Undeclared),
-    palette_signal(16, "n4_weight_emd", Direction::HigherIsWorse),
-    palette_signal(17, "n4_largest_shift", Direction::HigherIsWorse),
-    palette_signal(18, "n5_shift", Direction::HigherIsWorse),
-    palette_signal(19, "n5_lightness_signed", Direction::Undeclared),
-    palette_signal(20, "n5_chroma_signed", Direction::Undeclared),
-    palette_signal(21, "n5_hue_signed", Direction::Undeclared),
-    palette_signal(22, "n5_weight_emd", Direction::HigherIsWorse),
-    palette_signal(23, "n5_largest_shift", Direction::HigherIsWorse),
-    palette_signal(24, "n6_shift", Direction::HigherIsWorse),
-    palette_signal(25, "n6_lightness_signed", Direction::Undeclared),
-    palette_signal(26, "n6_chroma_signed", Direction::Undeclared),
-    palette_signal(27, "n6_hue_signed", Direction::Undeclared),
-    palette_signal(28, "n6_weight_emd", Direction::HigherIsWorse),
-    palette_signal(29, "n6_largest_shift", Direction::HigherIsWorse),
-    palette_signal(30, "n7_shift", Direction::HigherIsWorse),
-    palette_signal(31, "n7_lightness_signed", Direction::Undeclared),
-    palette_signal(32, "n7_chroma_signed", Direction::Undeclared),
-    palette_signal(33, "n7_hue_signed", Direction::Undeclared),
-    palette_signal(34, "n7_weight_emd", Direction::HigherIsWorse),
-    palette_signal(35, "n7_largest_shift", Direction::HigherIsWorse),
-    palette_signal(36, "n8_shift", Direction::HigherIsWorse),
-    palette_signal(37, "n8_lightness_signed", Direction::Undeclared),
-    palette_signal(38, "n8_chroma_signed", Direction::Undeclared),
-    palette_signal(39, "n8_hue_signed", Direction::Undeclared),
-    palette_signal(40, "n8_weight_emd", Direction::HigherIsWorse),
-    palette_signal(41, "n8_largest_shift", Direction::HigherIsWorse),
-];
-
-const fn globaff_signal(block_local: u16, name: &'static str, direction: Direction) -> SignalDef {
-    SignalDef {
-        family: Family::Supported(ComputeToken::GlobAff),
-        name,
-        tranche: Tranche::None,
-        placement: Placement::AllCells,
-        form: Form::Difference,
-    }
-}
-/// `share` (block-local 0) and `explained` (1) per (scale, channel), in the
-/// sidecar's order `2·(3·scale + channel) + signal`.
-pub(crate) static GLOBAFF_SIGNALS: [SignalDef; crate::globaff::GLOBAFF_PER_CELL] = [
-    globaff_signal(0, "share", Direction::Unsigned),
-    globaff_signal(1, "explained", Direction::HigherIsWorse),
-];
-
 // ============================================================================
 // Layout arithmetic — THE owner
 // ============================================================================
@@ -2174,19 +1313,6 @@ pub(crate) static GLOBAFF_SIGNALS: [SignalDef; crate::globaff::GLOBAFF_PER_CELL]
 pub(crate) enum Replication {
     /// One cell per (scale, channel): 3 cells per scale.
     PerChannel,
-    /// One cell per scale (the Y-only blocks).
-    PerScale,
-    /// family's own pyramid levels are its signal axis, not the walk's
-    /// scales, so there is nothing to replicate). [`def_at`] reports
-    /// `scale = 0, channel = Scalar` for every flat slot, which is also what
-    /// `ComputeSet::at_scale` narrowing needs: a flat family's slots live
-    /// and die with the scale-0 walk rows that feed them.
-    Flat,
-    /// Native Y gradients, then coarse X/Y/B gradients and joint chroma CS.
-    GmsbankChroma,
-    /// Two cells total, at scale 0: X then B (the native-scale chroma cells
-    /// the coarse-only C8 layout omits).
-    NativeXb,
 }
 
 /// A registered block: a signal table plus where it sits in the layout.
@@ -2225,71 +1351,6 @@ pub(crate) static BLOCKS: &[BlockDef] = &[
         signals: &V2,
         replication: Replication::PerChannel,
     },
-    BlockDef {
-        family: Family::Supported(ComputeToken::Append),
-        signals: &APPEND,
-        replication: Replication::PerChannel,
-    },
-    BlockDef {
-        family: Family::Supported(ComputeToken::Append2),
-        signals: &APPEND2,
-        replication: Replication::PerScale,
-    },
-    BlockDef {
-        family: Family::Supported(ComputeToken::Csfw),
-        signals: &CSFW,
-        replication: Replication::PerScale,
-    },
-    BlockDef {
-        family: Family::Supported(ComputeToken::Gridblk),
-        signals: &GRIDBLK,
-        replication: Replication::PerChannel,
-    },
-    BlockDef {
-        family: Family::Supported(ComputeToken::Ringbasis),
-        signals: &RINGBASIS,
-        replication: Replication::PerChannel,
-    },
-    BlockDef {
-        family: Family::Supported(ComputeToken::Tailhist),
-        signals: &TAILHIST,
-        replication: Replication::PerChannel,
-    },
-    BlockDef {
-        family: Family::Supported(ComputeToken::Arttype),
-        signals: &ARTTYPE,
-        replication: Replication::PerScale,
-    },
-    BlockDef {
-        family: Family::Supported(ComputeToken::Gmsbank),
-        signals: &GMSBANK_SIGNALS,
-        replication: Replication::GmsbankChroma,
-    },
-    BlockDef {
-        family: Family::Supported(ComputeToken::Mapdev),
-        signals: &MAPDEV_SIGNALS,
-        replication: Replication::PerChannel,
-    },
-    BlockDef {
-        family: Family::Supported(ComputeToken::Z1max),
-        signals: &Z1MAX_SIGNALS,
-        replication: Replication::PerChannel,
-    },
-    BlockDef {
-        family: Family::Supported(ComputeToken::Gmsnative),
-        signals: &GMSNATIVE_SIGNALS,
-        replication: Replication::NativeXb,
-    },
-    BlockDef {
-        family: Family::Palette,
-        signals: &PALETTE_SIGNALS,
-        replication: Replication::Flat,
-    },
-    BlockDef {
-        family: Family::Supported(ComputeToken::GlobAff),
-        signals: &GLOBAFF_SIGNALS,
-        replication: Replication::PerChannel,
-    },
 ];
 
 impl BlockDef {
@@ -2297,34 +1358,14 @@ impl BlockDef {
     pub(crate) fn width(&self, n_scales: usize) -> usize {
         let cells = match self.replication {
             Replication::PerChannel => n_scales * 3,
-            Replication::PerScale => n_scales,
-            Replication::Flat => 1,
-            Replication::NativeXb => {
-                return if n_scales == 0 {
-                    0
-                } else {
-                    2 * self.signals.len()
-                };
-            }
-            Replication::GmsbankChroma => {
-                return if n_scales == 0 {
-                    0
-                } else {
-                    15 + (n_scales - 1) * 55
-                };
-            }
         };
         cells * self.signals.len()
     }
 }
 
 /// Retired slots stay unassigned so later feature IDs keep their meaning.
-fn reserved_before(family: Family) -> usize {
-    match family {
-        Family::Supported(ComputeToken::Gridblk) => 30,
-        Family::Palette => 5,
-        _ => 0,
-    }
+fn reserved_before(_family: Family) -> usize {
+    0
 }
 
 /// The base slot id of `family` at `n_scales`, and its block.
@@ -2367,29 +1408,10 @@ pub(crate) fn def_at(id: usize, n_scales: usize) -> Option<FeatureDef> {
             let off = id - base;
             let per = block.signals.len();
             let (scale, channel, local) = match block.replication {
-                Replication::GmsbankChroma => {
-                    if off < 15 {
-                        (0, Channel::Y, off)
-                    } else {
-                        let scale = 1 + (off - 15) / 55;
-                        let within = (off - 15) % 55;
-                        if within < 45 {
-                            (scale, Channel::TRIPLE[within / 15], within % 15)
-                        } else {
-                            (scale, Channel::Scalar, 15 + within - 45)
-                        }
-                    }
-                }
-                Replication::NativeXb => {
-                    let cell = off / per;
-                    (0, [Channel::X, Channel::B][cell], off % per)
-                }
                 Replication::PerChannel => {
                     let cell = off / per;
                     (cell / 3, Channel::TRIPLE[cell % 3], off % per)
                 }
-                Replication::PerScale => (off / per, Channel::Scalar, off % per),
-                Replication::Flat => (0, Channel::Scalar, off),
             };
             return Some(FeatureDef {
                 signal: &block.signals[local],
@@ -2437,11 +1459,6 @@ pub(crate) fn family_slots(family: impl Into<Family>, n_scales: usize) -> SlotSe
 fn placement_admits(placement: Placement, scale: usize, channel: Channel) -> bool {
     match placement {
         Placement::AllCells => true,
-        // `APPEND_SKIP_B_SCALE0`: the 944 walk never computes that append
-        // cell, so its slots are structural zeros on BOTH sides — including
-        // them would make a parity gate weaker, not stronger.
-        Placement::SkipBScale0 => !(channel == Channel::B && scale == 0),
-        Placement::YOnlyActive => channel == Channel::Y,
     }
 }
 
@@ -2488,18 +1505,6 @@ mod tests {
             (Family::Supported(ComputeToken::Masked), 228, 72),
             (Family::Supported(ComputeToken::Iw), 300, 72),
             (Family::Supported(ComputeToken::V2), 372, 348),
-            (Family::Supported(ComputeToken::Append), 720, 204),
-            (Family::Supported(ComputeToken::Append2), 924, 20),
-            (Family::Supported(ComputeToken::Csfw), 944, 12),
-            (Family::Supported(ComputeToken::Gridblk), 986, 96),
-            (Family::Supported(ComputeToken::Ringbasis), 1082, 72),
-            (Family::Supported(ComputeToken::Tailhist), 1154, 144),
-            (Family::Supported(ComputeToken::Arttype), 1298, 24),
-            (Family::Supported(ComputeToken::Gmsbank), 1322, 180),
-            (Family::Supported(ComputeToken::Mapdev), 1502, 60),
-            (Family::Supported(ComputeToken::Z1max), 1562, 228),
-            (Family::Supported(ComputeToken::Gmsnative), 1790, 30),
-            (Family::Palette, 1825, 42),
         ];
         for (family, base, width) in expect {
             let (b, blk) = block_base(family, NS).expect("registered family");
@@ -2555,28 +1560,6 @@ mod owner_gates {
 
     const NS: usize = crate::NUM_SCALES;
 
-    /// The block widths this registry derives BY COUNTING its own signals must
-    /// equal the geometry constants `feature_v2` and `metric` declare. A new
-    /// signal that forgets to bump its block's constant fails here rather than
-    /// silently shifting every slot above it.
-    #[test]
-    fn geometry_matches_the_block_constants() {
-        assert_eq!(BASIC.len(), crate::metric::FEATURES_PER_CHANNEL_BASIC);
-        assert_eq!(
-            BASIC.len() + PEAKS.len(),
-            crate::metric::FEATURES_PER_CHANNEL_WITH_PEAKS
-        );
-        assert_eq!(
-            BASIC.len() + PEAKS.len() + MASKED.len(),
-            crate::metric::FEATURES_PER_CHANNEL_EXTENDED
-        );
-        assert_eq!(IW.len(), crate::metric::FEATURES_PER_CHANNEL_IW);
-        assert_eq!(V2.len(), feature_v2::FEATURES_PER_CHANNEL_V2_TOTAL);
-        assert_eq!(APPEND.len(), feature_v2::FEATURES_PER_CHANNEL_APPEND);
-        assert_eq!(APPEND2.len(), feature_v2::APPEND2_PER_SCALE);
-        assert_eq!(CSFW.len(), feature_v2::CSFW_PER_SCALE);
-    }
-
     /// **The tranche gate.** The registry derives the free tranches from
     /// per-signal `Tranche` + `Placement` declarations; `feature_v2` derives
     /// them from hand-written loops. They must be the SAME SET.
@@ -2587,13 +1570,17 @@ mod owner_gates {
     /// the 944 walk never computes).
     #[test]
     fn tranche_slots_match_the_feature_v2_owners() {
-        let raw_owner = SlotSet::from_slots(feature_v2::free_slot_indices(NS));
+        // The owners also list slots in the research blocks after the v2 block, which
+        // this registry does not carry; compare within the registered width.
+        let raw_owner =
+            SlotSet::from_slots(feature_v2::free_slot_indices(NS)).clipped_to(full_width(NS));
         assert_eq!(
             tranche_slots(Tranche::RawMoments, NS),
             raw_owner,
             "raw-moment tranche disagrees with feature_v2::free_slot_indices"
         );
-        let cc_owner = SlotSet::from_slots(feature_v2::class_c_slot_indices(NS));
+        let cc_owner =
+            SlotSet::from_slots(feature_v2::class_c_slot_indices(NS)).clipped_to(full_width(NS));
         assert_eq!(
             tranche_slots(Tranche::ClassC, NS),
             cc_owner,

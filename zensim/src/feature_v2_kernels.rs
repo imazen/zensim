@@ -1142,23 +1142,6 @@ impl ComputeSet {
         let masked_end = n_scales * 3 * crate::metric::FEATURES_PER_CHANNEL_EXTENDED;
         let v1_total = masked_end + n_scales * 3 * crate::metric::FEATURES_PER_CHANNEL_IW;
         let v2_end = v1_total + n_scales * 3 * FEATURES_PER_CHANNEL_V2_TOTAL;
-        let append_end = v2_end + n_scales * 3 * FEATURES_PER_CHANNEL_APPEND;
-        let append2_end = append_end + n_scales * APPEND2_PER_SCALE;
-        let csfw_end = append2_end + n_scales * CSFW_PER_SCALE;
-        // Flat block: 30 slots at `csfw_end` regardless of `n_scales`
-        // (`feature_defs::Replication::Flat` owns the same arithmetic).
-        let reserved_end = csfw_end + 30;
-        // REV4 families: registered (absolute) bases — the emit tail is
-        // absolute-positioned, so each family's range lands at its
-        // registered slots whether or not the families before it ran.
-        let gridblk_end = reserved_end + n_scales * 3 * GRIDBLK_PER_CELL;
-        let ringbasis_end = gridblk_end + n_scales * 3 * RINGBASIS_PER_CELL;
-        let tailhist_end = ringbasis_end + n_scales * 3 * TAILHIST_PER_CELL;
-        let arttype_end = tailhist_end + n_scales * ARTTYPE_PER_SCALE;
-        let gmsbank_end = arttype_end + gmsbank_width(n_scales);
-        let mapdev_end = gmsbank_end + n_scales * 3 * MAPDEV_PER_CELL;
-        let z1max_end = mapdev_end + n_scales * 3 * Z1MAX_PER_CELL;
-        let gmsnative_end = z1max_end + GMSNATIVE_WIDTH;
 
         let mut ranges: Vec<(usize, usize)> = Vec::new();
         let mut scattered: Vec<usize> = Vec::new();
@@ -1173,17 +1156,6 @@ impl ComputeSet {
         if self.v2_blocks {
             ranges.push((v1_total, v2_end));
         }
-        // Registered base (after the reserved slots and the research palette
-        // block), so the range follows the registry rather than a re-typed
-        // offset. Every channel at every scale: the channel masks below are
-        // kernel masks and do not apply to it.
-        let globaff_base = crate::feature_defs::block_base(
-            crate::feature_set_id::ComputeToken::GlobAff,
-            n_scales,
-        )
-        .expect("globaff is a registered block")
-        .0;
-        let globaff_range = 0..0;
         if self.raw_moments() {
             scattered.extend(free_slot_indices(n_scales));
         }
@@ -1194,8 +1166,7 @@ impl ComputeSet {
             .union(&SlotSet::from_slots(scattered))
             .clipped_to(layout_width);
         SlotSet::from_slots(slots.iter_slots().filter(|&id| {
-            globaff_range.contains(&id)
-                || ((!self.omit_pjnd_fragility
+            ((!self.omit_pjnd_fragility
                 || !(v1_total..v2_end).contains(&id)
                 || (id - v1_total) % FEATURES_PER_CHANNEL_V2_TOTAL != idx::PJND_FRAGILITY)
                 && (!self.local_only
