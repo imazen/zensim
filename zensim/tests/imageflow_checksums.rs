@@ -1,4 +1,6 @@
 #![cfg(feature = "classification")]
+#![allow(deprecated)]
+// exercises the deprecated `ZensimProfile::A` (shipped behind the default-on `deprecated-profiles` feature)
 //! Imageflow visual regression checksum analysis.
 //!
 //! Downloads old/new image pairs from imageflow's S3 bucket and runs
@@ -111,7 +113,9 @@ fn load_image_rgba(path: &Path) -> Option<(Vec<[u8; 4]>, u32, u32)> {
     let rgba = img.to_rgba8();
     let (w, h) = rgba.dimensions();
     let pixels: Vec<[u8; 4]> = rgba
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .map(|c| [c[0], c[1], c[2], c[3]])
         .collect();
     Some((pixels, w, h))
@@ -149,7 +153,7 @@ fn imageflow_checksum_analysis() {
             .into_owned()
     });
 
-    let zensim = Zensim::new(ZensimProfile::latest());
+    let zensim = Zensim::new(ZensimProfile::A);
     let commits = manifest["commits"].as_array().expect("commits array");
 
     let mut tsv = String::new();
@@ -336,7 +340,7 @@ fn imageflow_checksum_analysis() {
             &commit[..8],
             change_type,
             pairs.len(),
-            &msg.chars().take(60).collect::<String>(),
+            msg.chars().take(60).collect::<String>(),
         );
     }
 

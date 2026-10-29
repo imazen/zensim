@@ -5,7 +5,11 @@
 ### QUEUED BREAKING CHANGES
 <!-- Breaking changes that ship together in the next major (or minor for 0.x).
      Persist across patch releases. Only clear when the breaking release ships. -->
-_(none currently queued)_
+- zensim 0.3.0: `ZensimProfile::latest()` returns the new `E` profile, so default scores change.
+- zensim 0.3.0: `ZensimError` and `profile::ProfileParams` become `#[non_exhaustive]`; `ZensimError` gains variants.
+- zensim 0.3.0: the 0.2.x linear profiles' scores shift by up to about 1.5e-2 (kernel fusion and summation order),
+  and inputs smaller than 64 px are reflect-padded, which changes their scores.
+- zensim 0.3.0: minimum Rust version 1.93.
 
 ## Workspace
 
@@ -13,6 +17,36 @@ _(none currently queued)_
   [imazen/zensimx](https://github.com/imazen/zensimx) (2026-10-28).
 
 ## zensim
+
+### Unreleased (0.3.0)
+
+#### Added
+- `ZensimProfile::E` (`zensim-e`, returned by `latest()`): general-purpose monotone MLP over revision-7 features.
+- `ZensimProfile::ECodec` (`zensim-e-codec`) and `ZensimProfile::codec_target()`: the model specialised for codec output.
+- `ZensimProfile::A` (`zensim-a`): the legacy MLP profile of the 0.3.0 development line.
+- `Zensim::with_max_pixels` / `max_pixels` and `ZensimError::ImageTooLarge`: a pixel-count cap for untrusted input.
+- `Zensim::with_stop`, `ZensimError::Cancelled` and the `Stop`, `StopReason`, `Unstoppable` re-exports from `enough`.
+- `ZensimError::ModelLoadFailed`, `ModelForwardFailed`, `UnsupportedPixelFormat`, `FeatureWeightsLengthMismatch`.
+- `PrecomputedReference::width` / `height`; `try_score_from_features` (`training` feature).
+- `Zensim::compute_hdr` and `HdrEncoding` (`Linear`, `Pq`, `Hlg`): HDR input in absolute display light through a PU21
+  front-end and the revision-7 feature walk; features bit-identical to the research crate.
+
+#### Changed
+- Share diffmap scoring and mask/sqrt/crop postprocessing across RGB and planar paths,
+  preserving existing score and map bits. Extend revision-7 cross-path contracts to
+  feature vectors, scratch reuse, SIMD dispatch, strided planes and map options.
+- Remove obsolete research commentary from the extraction and scoring code.
+- Remove the constant transducer channel gate after auditing profile, cached, and training paths.
+- Fold revision-1 defaults in legacy kernels; canonical kernels retain explicit per-call revisions.
+- Remove empty research feature families and their unused planner and accumulator code.
+- Remove unused free-feature accumulators. Single-slot MSE plans use the same kernels as full plans,
+  and private feature-selection flags survive plan-to-toggle conversion.
+- Cut from the research repository imazen/zensimx on 2026-10-28; every kept profile scores bit-identically to it on
+  the split parity run (`docs/PROFILES.md`).
+- Inputs below 64 px in either dimension are reflect-padded and scored; only empty images are rejected (0.2.7
+  rejected images smaller than 8×8).
+- New dependencies: `zenpredict` 0.2 (model runtime), `enough` 0.4 (cancellation), `libm`. `archmage` / `magetypes`
+  0.9.30.
 
 ### [0.2.7] - 2026-04-27
 

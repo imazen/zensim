@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["zensim", "zensim-validate", "zensim-regress", "zensim-bench", "zensim-wasm-tests"]
+members = ["zensim", "zensim-regress"]
 
 [profile.release]
 lto = "thin"
@@ -13,17 +13,23 @@ opt-level = 2
 opt-level = 2
 
 [workspace.dependencies]
-zensim = { version = "0.2.7", path = "zensim", default-features = false }
+zensim = { version = "0.3.0", path = "zensim", default-features = false }
 zensim-regress = { version = "0.4.0", path = "zensim-regress", default-features = false }
-archmage = { version = "0.9.23", features = ["macros", "avx512"] }
-magetypes = { version = "0.9.23", features = ["avx512"] }
-bytemuck = { version = "1.25", default-features = false }
+archmage = { version = "0.9.30", features = ["macros", "avx512"] }
+magetypes = { version = "0.9.30", features = ["avx512"] }
+libm = { version = "0.2.16", default-features = false }
+bytemuck = { version = "1.25", default-features = false, features = ["derive"] }
 thiserror = "2"
 image = "0.25"
 rayon = "1.10"
 imgref = "1.12"
 rgb = { version = "0.8", default-features = false, features = ["bytemuck"] }
 linear-srgb = { version = "0.6.7", default-features = false, features = ["std"] }
+enough = { version = "0.4.2", default-features = false, features = ["std"] }
+# zenpredict 0.2.0 (ZNPR v3) is unpublished; crates.io has 0.1.0 (v2 only). The
+# shipped bakes are v3, so a crates.io release of this crate waits on zenpredict 0.2.0.
+zenpredict = { version = "0.2.0", git = "https://github.com/imazen/zenanalyze", rev = "f0903489300aea240ffae2e3f1359f8f2b9a0ba4" }
+zenpixels = { version = ">=0.2.10, <0.4.0", default-features = false }
 codec-corpus = "1.0.3"
-zenbench = "0.1.2"
+zenbench = { version = "0.1.11", default-features = false }
 zenresize = { version = "0.2.1", default-features = false, features = ["std"] }

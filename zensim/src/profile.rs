@@ -1,32 +1,90 @@
 //! Named metric profiles.
 //!
-//! Each [`ZensimProfile`] variant bundles weights and parameters that affect
-//! score output. A given profile should produce approximately the same scores
-//! across versions, but profiles may be removed in future major versions as
-//! the algorithm evolves.
+//! Each [`ZensimProfile`] variant selects a named model. [`ZensimProfile::latest`]
+//! returns the general-purpose default ([`ZensimProfile::E`]) and
+//! [`ZensimProfile::codec_target`] the model specialised for codec artifacts
+//! ([`ZensimProfile::ECodec`]). Pin the crate version when reproducing exact
+//! scores: a profile name alone does not freeze its coefficients or calibration.
 
 /// Named metric profile. Scores for a given profile should be approximately
 /// stable across crate versions. Profiles may be removed in future versions.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ZensimProfile {
-    /// Preview v0.1. Trained on 344k synthetic pairs, 5-fold CV SROCC=0.9936.
+    /// Preview v0.1 — linear-weights profile (no MLP). 344k synthetic
+    /// pairs, 5-fold CV SROCC = 0.9936. Uses the [`WEIGHTS_PREVIEW_V0_1`]
+    /// coefficients with the classic `100 − 18·d^0.7` score mapping.
+    ///
+    /// Kept for compatibility with zensim 0.1.x / 0.2.x, which shipped the same
+    /// weights and mapping. Scores match those releases closely but not
+    /// bit-exactly: kernel-fusion and summation-order changes since 0.2.7 shift
+    /// scores of images 64 px and larger by about 1e-3 to 1.5e-2, and inputs below
+    /// 64 px now reflect-pad (different, better-behaved scores at those sizes).
     PreviewV0_1,
     /// Preview v0.2. Concordance-filtered 218k pairs, Nelder-Mead SROCC=0.9960.
+    /// Linear-weights profile, no MLP forward pass. `latest()` returned this
+    /// through zensim 0.2.x; the 0.2.7 compatibility note on
+    /// [`Self::PreviewV0_1`] applies here too.
     PreviewV0_2,
+    /// Legacy MLP profile `A` (`zensim-a`): 372 features at the first formula
+    /// revision, a monotone network and a calibrated output spline. It was the
+    /// codec-quality target of the 0.3.0 development line before [`Self::E`] and
+    /// is kept for callers whose thresholds are calibrated to its scores. New code
+    /// should use [`Self::latest`] or [`Self::codec_target`].
+    A,
+    /// General-purpose profile `E` (`zensim-e`), the default since 0.3.0.
+    ///
+    /// A monotone MLP over 410 revision-7 damage features and 410 fragility
+    /// products (each damage feature scaled by the reference's local flatness),
+    /// with every damage input entering with non-negative weight, so more damage
+    /// never raises the score. Trained on synthetic codec ladders scored by
+    /// SSIMULACRA2 together with human-rated datasets covering codecs, noise, blur,
+    /// colour and contrast changes. Scores run from 100 (identical) downwards and
+    /// can go negative for severe damage.
+    E,
+    /// Codec-specialised profile `ECodec` (`zensim-e-codec`), returned by
+    /// [`Self::codec_target`].
+    ///
+    /// The same architecture and features as [`Self::E`], fitted to human
+    /// judgments of compression artifacts. It ranks codec output more accurately
+    /// than `E` and is less reliable on other distortion types (noise, colour
+    /// shifts, contrast changes), so use it where the input is codec output.
+    ECodec,
+    /// **INTERNAL — legacy 228-weight linear scoring, no MLP head.**
+    /// Tags results from the training entry points `compute_zensim_with_config`
+    /// and `compute_zensim_with_ref_and_config`, which score via a plain
+    /// `dot(features, WEIGHTS_PREVIEW_V0_2)` distance (the caller-supplied
+    /// [`crate::ZensimConfig`] drives blur/scale/masking knobs directly) and
+    /// never run an MLP forward pass. The tag exists so `ZensimResult::profile()`
+    /// never claims an MLP-scored result for a linear-only computation.
+    #[cfg(any(feature = "training", test))]
+    #[doc(hidden)]
+    LegacyLinearV0_2,
 }
 
 impl ZensimProfile {
-    /// Latest recommended general-purpose profile.
+    /// Latest recommended general-purpose profile: [`Self::E`].
     pub fn latest() -> Self {
-        Self::PreviewV0_2
+        Self::E
     }
 
-    /// Canonical name string, e.g. `"zensim-preview-v0.1"`.
+    /// The profile specialised for codec artifacts: [`Self::ECodec`]. Encoders
+    /// that target a score use this so later model rotations reach them without
+    /// changing their profile selection.
+    pub const fn codec_target() -> Self {
+        Self::ECodec
+    }
+
+    /// Canonical name string, e.g. `"zensim-e"`.
     pub fn name(&self) -> &'static str {
         match self {
             Self::PreviewV0_1 => "zensim-preview-v0.1",
             Self::PreviewV0_2 => "zensim-preview-v0.2",
+            Self::A => "zensim-a",
+            Self::E => "zensim-e",
+            Self::ECodec => "zensim-e-codec",
+            #[cfg(any(feature = "training", test))]
+            Self::LegacyLinearV0_2 => "zensim-legacy-linear-v0.2",
         }
     }
 
@@ -35,7 +93,23 @@ impl ZensimProfile {
         match self {
             Self::PreviewV0_1 => &PROFILE_PREVIEW_V0_1,
             Self::PreviewV0_2 => &PROFILE_PREVIEW_V0_2,
+            Self::A => &PROFILE_A,
+            Self::E => &PROFILE_E,
+            Self::ECodec => &PROFILE_E_CODEC,
+            #[cfg(any(feature = "training", test))]
+            Self::LegacyLinearV0_2 => &PROFILE_LEGACY_LINEAR_V0_2,
         }
+    }
+}
+
+impl ProfileParams {
+    /// Every bake whose forward pass consumes the v1-layout feature vector:
+    /// the primary, the optional D2 secondary, and the optional ensemble
+    /// classifier. Used by the fold engine's per-profile weight-skipping to
+    /// take the UNION of what the profile actually reads — missing one would
+    /// silently skip a family a live consumer still looks at.
+    pub(crate) fn scoring_bake_bytes(&self) -> impl Iterator<Item = &'static [u8]> + '_ {
+        self.mlp_bytes.into_iter().map(|f| f())
     }
 }
 
@@ -49,9 +123,12 @@ impl core::fmt::Display for ZensimProfile {
 ///
 /// Each parameter's effect on computation path and performance is documented
 /// on the corresponding field of `ZensimConfig` in `metric.rs`.
-#[cfg_attr(not(feature = "training"), allow(dead_code))]
+#[derive(Debug)]
+#[non_exhaustive]
 pub struct ProfileParams {
     /// Scoring weights (one per feature, length = `FEATURES_PER_SCALE * num_scales`).
+    /// Empty `&[]` for MLP-scored profiles (the bake bytes live in a
+    /// crate-private `mlp_bytes` field accessed via the profile API).
     pub weights: &'static [f64],
     /// Box blur radius at scale 0 (kernel width = `2 * radius + 1`).
     pub blur_radius: usize,
@@ -59,15 +136,70 @@ pub struct ProfileParams {
     pub blur_passes: u8,
     /// Number of pyramid scales (typically 4).
     pub num_scales: usize,
-    /// Score mapping coefficient A in `100 - A × d^B`.
+    /// Score mapping coefficient A in `100 - A × d^B`. **Ignored when
+    /// [`Self::skip_score_mapping`] is `true` (the bake is already
+    /// MCOS-calibrated).**
     pub score_mapping_a: f64,
-    /// Score mapping exponent B in `100 - A × d^B`.
+    /// Score mapping exponent B in `100 - A × d^B`. **Ignored when
+    /// [`Self::skip_score_mapping`] is `true`.**
     pub score_mapping_b: f64,
+    /// When `true`, the MLP bake's raw output is returned **directly**
+    /// as the final score (no `100 − A·d^B` transform). This is correct
+    /// for V0_5+ bakes, which are affine-calibrated to the
+    /// MCOS-aligned 0–100 scale during baking. Set `false` for V0_1 /
+    /// V0_2 linear profiles whose raw output is a distance.
+    pub(crate) skip_score_mapping: bool,
+    /// MLP scorer for non-linear profiles. When `Some`, the scoring
+    /// path replaces the linear `dot(features, weights)` with a forward
+    /// pass through the MLP loaded from these bytes (`ZNPK` v1 format).
+    /// `None` for V0_1 / V0_2 — they keep the classic linear path.
+    ///
+    /// Stored as a function pointer rather than `&'static [u8]` so the
+    /// bytes can be lazily baked at first use (V0_4 placeholder is built
+    /// at runtime from `WEIGHTS_PREVIEW_V0_2`; trained bakes will move
+    /// to a `static` byte array once the training pipeline lands).
+    pub(crate) mlp_bytes: Option<fn() -> &'static [u8]>,
+
+    /// When `true`, the runtime computes the **extended-features**
+    /// block (228 → 300 features — adds 72 masked features) per pair
+    /// via `Zensim::compute_extended_features`. Required when the
+    /// profile's MLP bake has `n_inputs > 228`. Default `false` keeps
+    /// the V_18 / V_20 IS 228-feature fast path.
+    ///
+    /// The masking pass reuses the already-computed flatness map, so
+    /// extended-features overhead is moderate (~10–30 % per-pair compute
+    /// vs standard). Distinct from `compute_iw_features` which adds
+    /// a separate weighted pool (more expensive).
+    ///
+    /// Added 2026-05-15 to enable V_20 extended-shaping profile
+    /// (PreviewV0_5_Extended at 300-feat input) after the V_20a IW
+    /// (372-feat) path was falsified for CID22 transfer.
+    pub(crate) extended_features: bool,
+
+    /// When `true`, the runtime also computes the **IW pool** block
+    /// (300 → 372 features — adds 72 IW-weighted features per Wang &
+    /// Li 2011). Implies `extended_features = true` for the standard
+    /// IW layout. Default `false`.
+    pub(crate) compute_iw_features: bool,
+
+    /// EXP-CROSS-CODEC-V10 (2026-05-20): when `true`, the final score
+    /// is returned **without clamping or soft-clamping** — the
+    /// PCHIP spline's linear extrapolation past the knot endpoints
+    /// flows through to the user. V10 profiles set this so the
+    /// score-space dial can dip below 0 for "pathological /
+    /// unreasonable" codec output (worst codec at q=0, butter > 12)
+    /// rather than collapsing into a tie block at 0.
+    ///
+    /// Default `false` preserves legacy [0, 100] semantics for V9 and
+    /// earlier profiles whose splines/anchors only span [0, 100].
+    pub(crate) extrapolate_score: bool,
 }
 
 #[cfg(feature = "training")]
 impl ProfileParams {
     /// Create custom params for weight training/exploration.
+    ///
+    /// Custom parameters use linear scoring (`mlp_bytes = None`).
     pub fn custom(
         weights: &'static [f64],
         blur_radius: usize,
@@ -83,12 +215,23 @@ impl ProfileParams {
             num_scales,
             score_mapping_a,
             score_mapping_b,
+            // Custom training params get the legacy distance-to-score mapping
+            // (V0_2 semantics). V0_8+ pre-calibrated bakes set the flag in
+            // their static `ProfileParams` definitions.
+            skip_score_mapping: false,
+            mlp_bytes: None,
+            extended_features: false,
+            compute_iw_features: false,
+            extrapolate_score: false,
         }
     }
 }
 
 // --- Profile definitions ---
 
+// `PreviewV0_1` is the linear V0.1 profile published through zensim
+// 0.1.x / 0.2.x. Identical to `PROFILE_PREVIEW_V0_2` except for the
+// weight vector, so scores match those releases bit-for-bit.
 static PROFILE_PREVIEW_V0_1: ProfileParams = ProfileParams {
     weights: &WEIGHTS_PREVIEW_V0_1,
     blur_radius: 5,
@@ -96,8 +239,19 @@ static PROFILE_PREVIEW_V0_1: ProfileParams = ProfileParams {
     num_scales: 4,
     score_mapping_a: 18.0,
     score_mapping_b: 0.7,
+    skip_score_mapping: false,
+    mlp_bytes: None,
+    extended_features: false,
+    compute_iw_features: false,
+    extrapolate_score: false,
 };
 
+/// `ZensimProfile::PreviewV0_2` params — the plain 228-weight linear V0_2
+/// scoring path (no MLP head), published through zensim 0.1.x / 0.2.x.
+/// Byte-identical to `PROFILE_LEGACY_LINEAR_V0_2` and to
+/// [`ProfileParams::builder`]'s defaults; kept as its own ungated static so
+/// the always-available `PreviewV0_2` variant can dispatch to it in every
+/// build.
 static PROFILE_PREVIEW_V0_2: ProfileParams = ProfileParams {
     weights: &WEIGHTS_PREVIEW_V0_2,
     blur_radius: 5,
@@ -105,14 +259,136 @@ static PROFILE_PREVIEW_V0_2: ProfileParams = ProfileParams {
     num_scales: 4,
     score_mapping_a: 18.0,
     score_mapping_b: 0.7,
+    skip_score_mapping: false,
+    mlp_bytes: None,
+    extended_features: false,
+    compute_iw_features: false,
+    extrapolate_score: false,
 };
+
+/// `ZensimProfile::A` bake bytes — **rotated 2026-05-27 to
+/// `v47-strict-QAT-native`** (`v47_strict_qat_native_2026-05-27.bin`, 27 KB,
+/// sha256 `d0ef7a30…`). This is a bake rotation of the `Profile::A` slot, not
+/// an API change — the `A` name and the metric architecture are
+/// unchanged.
+///
+/// **Why rotated:** the prior V39 bake (`v39_v32plus_spline…`, still backing
+/// `PreviewV0_4`) is *not a correct similarity metric* — it scores
+/// `identity = 0` on every reference and its codec dial is non-invertible
+/// (q-sweep 67.7 % monotone / 53.6 % tied; high-quality encodes collapse to
+/// score 0). v47-strict is **masked-monotone-by-construction** (W1 ≥ 0 on the
+/// 300 sign-safe features, rank_w ≤ 0, α ≡ 1): 0 inversions, 0 above-identity,
+/// `identity = 97.69` (the dial max). Best codec dial measured — q-sweep
+/// **94.33 % monotone / 0.33 % tied**, clean monotone median q5→q95
+/// (1.40→88.50). Global ordering verified: identity 97.69 > honest-q20
+/// 40.36 > channel-invert 12.21 > block-zero 0.00 (the regression-test
+/// ordering V39 inverts).
+///
+/// 372-input MLP (372 → 128 → 64 + per-sample-α + tanh pin), f16+zerobias
+/// encoder + f32 identity passthrough, with a monotone PCHIP dial spline
+/// (`zentrain.output_calibration_spline`, fit in-pass on the projected+
+/// quantized net). Produced by ONE `zensim_mlp_train --manifest
+/// zensim/weights/manifests/v47_strict_qat.toml` pass (QAT-native, no Python
+/// post-step).
+///
+/// **Held-out panel** (vs the prior V39, which it replaces): CID22 0.8657,
+/// KADID 0.7933, TID 0.7927, KonJND 0.4185, AIC-3 0.7680, AIC-4 0.8854.
+/// Costs vs V39 are rank-SROCC on the non-compression analytic-distortion
+/// corpora (KADID/TID −0.13, integrity guards) + KonJND (f16 drops PJND
+/// precision) — V39's higher rank there is moot because its dial is
+/// non-invertible. Methodology (all 8 sub-points):
+/// `benchmarks/v0_qat_native_methodology_2026-05-27.md`. q-sweep:
+/// `benchmarks/qsweep_qat_native_vs_v39_2026-05-27.md`. The prior V39 bytes
+/// were relocated to
+/// `zensim-experimental/weights/v39_v32plus_spline_seed17_2026-05-25.bin`
+/// (backing `zensim_experimental::preview_v0_4()`) for reproducibility.
+pub(crate) fn mlp_bake_a_v47_qat() -> &'static [u8] {
+    include_bytes!("../weights/v47_strict_qat_native_byid_2026-09-06.bin")
+}
+
+/// Profile `A` params. Its bake identity is recorded in `docs/PROFILES.md`.
+static PROFILE_A: ProfileParams = ProfileParams {
+    // Linear weights are unused on the MLP path but kept non-empty so
+    // any caller that introspects `params.weights` length without
+    // checking `mlp_bytes.is_some()` sees a sensible (V0_2-equivalent)
+    // value.
+    weights: &WEIGHTS_PREVIEW_V0_2,
+    blur_radius: 5,
+    blur_passes: 1,
+    num_scales: 4,
+    // v47-strict-QAT bake carries its own monotone PCHIP spline calibration
+    // via the `zentrain.output_calibration_spline` metadata — the raw MLP
+    // output is dial-honest after the spline applies. No legacy
+    // `100 - 18·d^0.7` transform needed.
+    score_mapping_a: 18.0,
+    score_mapping_b: 0.7,
+    skip_score_mapping: true,
+    mlp_bytes: Some(mlp_bake_a_v47_qat),
+    // v47-strict is a 372-feature bake (extended + IW-pool features).
+    extended_features: true,
+    compute_iw_features: true,
+    // Hard clamp at [0, 100] post-spline (spline output is already
+    // calibrated into the dial range; clamp catches numerical drift).
+    extrapolate_score: true,
+};
+
+/// Legacy linear weights and score mapping used by the custom-configuration
+/// training entry points in `metric.rs`.
+#[cfg(any(feature = "training", test))]
+static PROFILE_LEGACY_LINEAR_V0_2: ProfileParams = ProfileParams {
+    weights: &WEIGHTS_PREVIEW_V0_2,
+    blur_radius: 5,
+    blur_passes: 1,
+    num_scales: 4,
+    score_mapping_a: 18.0,
+    score_mapping_b: 0.7,
+    skip_score_mapping: false,
+    mlp_bytes: None,
+    extended_features: false,
+    compute_iw_features: false,
+    extrapolate_score: false,
+};
+
+/// `ZensimProfile::E` bake: the general revision-7 model (H128 monotone MLP,
+/// 820 inputs), stripped of its training-provenance metadata; its weights and
+/// serving metadata equal the evaluated artifact byte for byte. The mapping to
+/// the research identity is in `docs/PROFILES.md`.
+pub(crate) fn mlp_bake_e_general() -> &'static [u8] {
+    include_bytes!("../weights/rev7_general_h128_2026-10-27.bin")
+}
+
+/// `ZensimProfile::ECodec` bake: the codec revision-7 model, prepared the same
+/// way as [`mlp_bake_e_general`].
+pub(crate) fn mlp_bake_e_codec() -> &'static [u8] {
+    include_bytes!("../weights/rev7_codec_h128_2026-10-27.bin")
+}
+
+/// Shared runtime shape of the revision-7 profiles. Feature IDs, formula revision,
+/// derived inputs and output calibration all come from the bake's metadata.
+const fn rev7_params(bake: fn() -> &'static [u8]) -> ProfileParams {
+    ProfileParams {
+        weights: &WEIGHTS_PREVIEW_V0_2,
+        blur_radius: 5,
+        blur_passes: 1,
+        num_scales: 4,
+        score_mapping_a: 18.0,
+        score_mapping_b: 0.7,
+        skip_score_mapping: true,
+        mlp_bytes: Some(bake),
+        extended_features: true,
+        compute_iw_features: true,
+        extrapolate_score: true,
+    }
+}
+
+static PROFILE_E: ProfileParams = rev7_params(mlp_bake_e_general);
+static PROFILE_E_CODEC: ProfileParams = rev7_params(mlp_bake_e_codec);
 
 // --- Weight arrays ---
 
-/// Preview v0.1 weights (344k synthetic pairs, 5-fold CV SROCC=0.9936).
-/// SROCC = 0.9941 on full training set.
-/// Layout: 4 scales × 3 channels × (13 basic + 6 peak) features = 228.
-#[allow(clippy::excessive_precision)]
+/// Preview v0.1 linear weights (344k synthetic pairs, 5-fold CV SROCC=0.9936).
+/// 228 entries = 4 scales × 3 channels × 19 features. The canonical V0.1
+/// coefficient vector backing [`ZensimProfile::PreviewV0_1`].
 pub static WEIGHTS_PREVIEW_V0_1: [f64; 228] = [
     // --- Basic features (13/ch × 3ch × 4 scales = 156) ---
     0.0000000000,
@@ -350,7 +626,6 @@ pub static WEIGHTS_PREVIEW_V0_1: [f64; 228] = [
 /// SROCC = 0.9942 on full 344k synthetic dataset.
 /// Raw distance SROCC: TID2013=0.8427, KADIK10k=0.8192, CID22=0.8676.
 /// Layout: 4 scales × 3 channels × (13 basic + 6 peak) features = 228.
-#[allow(clippy::excessive_precision)]
 pub static WEIGHTS_PREVIEW_V0_2: [f64; 228] = [
     // --- Basic features (13/ch × 3ch × 4 scales = 156) ---
     0.0000000000,
@@ -583,3 +858,6 @@ pub static WEIGHTS_PREVIEW_V0_2: [f64; 228] = [
     12.8104312758,
     0.0000000000, // Scale 3 Channel B
 ];
+
+// --- Canonical aliases ---
+//

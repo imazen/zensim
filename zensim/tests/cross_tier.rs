@@ -8,8 +8,17 @@
 //!
 //! Run with: `cargo test -p zensim --test cross_tier -- --test-threads=1`
 
+#![allow(deprecated)] // exercises the deprecated `ZensimProfile::A` (still shipped behind the default-on `deprecated-profiles` feature)
+
 use archmage::testing::{CompileTimePolicy, for_each_token_permutation};
 use zensim::{RgbSlice, Zensim, ZensimProfile, ZensimResult};
+
+/// Whether archmage has runtime-disableable SIMD token slots on this target.
+/// `for_each_token_permutation` only knows x86_64 and aarch64 tokens; on every
+/// other target (i686, wasm32, ...) dispatch is scalar-only and the walk yields
+/// exactly one permutation, so "at least two tiers" is not a meaningful
+/// requirement there.
+const HAS_RUNTIME_TOKENS: bool = cfg!(any(target_arch = "x86_64", target_arch = "aarch64"));
 
 /// Generate deterministic test images: gradient source + small per-pixel distortion.
 fn generate_test_images(w: usize, h: usize) -> (Vec<[u8; 3]>, Vec<[u8; 3]>) {
@@ -115,7 +124,7 @@ fn score_reproducibility_across_tiers() {
     let mut results: Vec<(String, Vec<String>, ZensimResult)> = Vec::new();
 
     let report = for_each_token_permutation(CompileTimePolicy::Warn, |perm| {
-        let z = Zensim::new(ZensimProfile::latest());
+        let z = Zensim::new(ZensimProfile::A);
         let s = RgbSlice::new(&src, w, h);
         let d = RgbSlice::new(&dst, w, h);
         let result = z.compute(&s, &d).expect("compute failed");
@@ -128,11 +137,18 @@ fn score_reproducibility_across_tiers() {
     for w in &report.warnings {
         eprintln!("  warning: {w}");
     }
-    assert!(
-        report.permutations_run >= 2,
-        "Need at least 2 permutations (got {})",
-        report.permutations_run,
-    );
+    if HAS_RUNTIME_TOKENS {
+        assert!(
+            report.permutations_run >= 2,
+            "Need at least 2 permutations (got {})",
+            report.permutations_run,
+        );
+    } else {
+        assert_eq!(
+            report.permutations_run, 1,
+            "scalar-only target: expected exactly one permutation"
+        );
+    }
 
     // Group results by effective tier
     let mut tier_results: std::collections::BTreeMap<&'static str, Vec<(String, &ZensimResult)>> =
@@ -290,7 +306,7 @@ fn score_reproducibility_512x512() {
     let mut results: Vec<(String, Vec<String>, ZensimResult)> = Vec::new();
 
     let report = for_each_token_permutation(CompileTimePolicy::Warn, |perm| {
-        let z = Zensim::new(ZensimProfile::latest());
+        let z = Zensim::new(ZensimProfile::A);
         let s = RgbSlice::new(&src, w, h);
         let d = RgbSlice::new(&dst, w, h);
         let result = z.compute(&s, &d).expect("compute failed");
@@ -298,7 +314,11 @@ fn score_reproducibility_512x512() {
         results.push((perm.label.clone(), disabled, result));
     });
 
-    assert!(report.permutations_run >= 2);
+    if HAS_RUNTIME_TOKENS {
+        assert!(report.permutations_run >= 2);
+    } else {
+        assert_eq!(report.permutations_run, 1);
+    }
 
     // Group by tier
     let mut tier_results: std::collections::BTreeMap<&'static str, Vec<&ZensimResult>> =

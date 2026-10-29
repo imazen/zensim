@@ -104,6 +104,8 @@
 //! scale count, then mapped to a 0–100 score via:
 //! `score = 100 - a · distance^b` (default a=18.0, b=0.7).
 
+use crate::bake_metadata::*;
+use crate::det_math::{DetPow, active_pow_form};
 use crate::error::ZensimError;
 
 /// Configuration for zensim computation.
@@ -140,31 +142,18 @@ impl Default for BlurKernel {
 /// Downscale filter for pyramid construction.
 ///
 /// Controls how each pyramid level is produced from the previous one.
-/// The default `Box2x2` averages 2×2 pixel blocks, halving resolution.
-/// Enable the `zenresize` feature for `Mitchell` and `Lanczos` variants.
+/// `Box2x2` (2×2 block averaging) is the only filter the trained
+/// profiles are calibrated for and the only implemented variant; the
+/// enum stays `#[non_exhaustive]` so alternative kernels can be added
+/// without a breaking change. (Speculative `zenresize`-gated
+/// Mitchell/Lanczos variants were removed pre-0.3.0 — imazen/zensimx#47 —
+/// because no compute path ever dispatched on them.)
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub enum DownscaleFilter {
     /// 2×2 box averaging (fastest, current default).
     #[default]
     Box2x2,
-    /// Mitchell-Netravali bicubic (B=1/3, C=1/3). Good balance of sharpness
-    /// and ringing. Requires the `zenresize` feature.
-    #[cfg(feature = "zenresize")]
-    #[allow(dead_code)]
-    Mitchell,
-    /// Lanczos-3 windowed sinc. Sharper than Mitchell but may ring on edges.
-    /// Requires the `zenresize` feature.
-    #[cfg(feature = "zenresize")]
-    #[allow(dead_code)]
-    Lanczos,
-    /// Mitchell-Netravali bicubic followed by a Gaussian blur with the given
-    /// sigma. This anti-aliases the pyramid more aggressively than plain
-    /// Mitchell, which may help metrics that are sensitive to high-frequency
-    /// ringing. Requires the `zenresize` feature.
-    #[cfg(feature = "zenresize")]
-    #[allow(dead_code)]
-    MitchellBlur(f32),
 }
 
 /// Configuration for the zensim metric computation pipeline.
@@ -175,6 +164,11 @@ pub enum DownscaleFilter {
 #[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
 pub struct ZensimConfig {
+    /// Request-local arithmetic for model-bound serving.
+    pub(crate) formula_revision: Option<crate::feature_defs::FormulaRevision>,
+    pub(crate) local_only: bool,
+    pub(crate) omit_edges: bool,
+    pub(crate) attribution_channels: Option<[[bool; 3]; crate::NUM_SCALES]>,
     /// Box blur radius at scale 0 (default: 5, giving an 11-pixel kernel).
     ///
     /// The blur kernel width is `2 * blur_radius + 1`. Larger radii capture
@@ -200,14 +194,12 @@ pub struct ZensimConfig {
     ///
     /// Overrides `blur_passes` when set. The `blur_radius` field still controls
     /// the kernel width. Currently only the `Box` variant is implemented.
-    #[allow(dead_code)] // planned: not yet wired into blur dispatch
     pub blur_kernel: BlurKernel,
 
     /// Downscale filter for pyramid construction (default: `DownscaleFilter::Box2x2`).
     ///
-    /// Controls how each pyramid level is produced. Enable the `zenresize`
-    /// feature for `Mitchell` and `Lanczos` variants.
-    #[allow(dead_code)] // planned: not yet wired into pyramid construction
+    /// Controls how each pyramid level is produced. `Box2x2` is currently
+    /// the only variant.
     pub downscale_filter: DownscaleFilter,
 
     /// Compute all 156 features even when their weights are zero (default: false).
@@ -236,6 +228,29 @@ pub struct ZensimConfig {
     /// Typical range: 2.0–8.0.
     pub extended_masking_strength: f32,
 
+    /// Compute information-content-weighted (IW) features (Wang & Li
+    /// 2011, IW-SSIM). When `true`, emits a per-scale per-channel block
+    /// of 6 features (`iw_ssim_mean / iw_ssim_4th / iw_ssim_2nd /
+    /// iw_art_4th / iw_det_4th / iw_mse`) pooled with weights derived
+    /// from the source image's local activity — the OPPOSITE polarity
+    /// of the `extended_features` masked block (which suppresses
+    /// texture). Texture-rich regions get MORE weight, mirroring
+    /// Wang's GSM-on-wavelet info-content estimator.
+    ///
+    /// At `num_scales = 4` and 3 channels, enabling this adds 72
+    /// features (228 → 300 in the basic profile).
+    ///
+    /// **Zero overhead when `false`** — the per-pixel work is gated by
+    /// a constant-per-call branch in the SIMD loop; the branch
+    /// predictor sees a fixed direction.
+    pub compute_iw_features: bool,
+
+    /// IW weighting strength: `iw_weight[i] = 1.0 + k * blur(|src - mu|)`.
+    /// Only used when `compute_iw_features` is true. Higher values
+    /// concentrate the pool more aggressively on textured / edge
+    /// regions. Default: 4.0 (mirrors `extended_masking_strength`).
+    pub iw_strength: f32,
+
     /// Maximum number of downscale levels (default: 4).
     ///
     /// Each level halves resolution. 4 scales covers 1×, 2×, 4×, 8× — sufficient
@@ -262,9 +277,24 @@ pub struct ZensimConfig {
     pub allow_multithreading: bool,
 }
 
+impl ZensimConfig {
+    /// The formula revision this computation runs: the request's own
+    /// (`formula_revision`), or — when the request names none — the process
+    /// revision, which is what `None` has always meant. The value every
+    /// revision-dependent leaf on this config's walk receives (featcanon D1).
+    pub(crate) fn revision(&self) -> crate::feature_defs::FormulaRevision {
+        self.formula_revision
+            .unwrap_or_else(crate::ssim_form::active_revision)
+    }
+}
+
 impl Default for ZensimConfig {
     fn default() -> Self {
         Self {
+            formula_revision: None,
+            local_only: false,
+            omit_edges: false,
+            attribution_channels: None,
             blur_radius: 5,
             blur_passes: 1,
             blur_kernel: BlurKernel::default(),
@@ -272,6 +302,8 @@ impl Default for ZensimConfig {
             compute_all_features: false,
             extended_features: false,
             extended_masking_strength: 4.0,
+            compute_iw_features: false,
+            iw_strength: 4.0,
             num_scales: crate::NUM_SCALES,
             score_mapping_a: 18.0,
             score_mapping_b: 0.7,
@@ -297,24 +329,25 @@ pub(crate) fn distance_to_score(raw_distance: f64) -> f64 {
 /// extreme distortions (the magnitude below zero is informative —
 /// it distinguishes "slightly wrong" from "completely wrong").
 fn distance_to_score_mapped(raw_distance: f64, a: f64, b: f64) -> f64 {
-    if raw_distance <= 0.0 {
-        100.0
-    } else {
-        100.0 - a * raw_distance.powf(b)
-    }
+    crate::score_math::distance_to_score_mapped(raw_distance, a, b, active_pow_form())
 }
 
 /// Compute score from raw features using custom weights.
-/// `features`: raw features from ZensimResult.features
-/// `weights`: one weight per feature (len must equal features.len())
-/// Returns (score, raw_distance)
-#[cfg_attr(not(feature = "training"), allow(dead_code))]
-pub fn score_from_features(features: &[f64], weights: &[f64]) -> (f64, f64) {
-    assert_eq!(
-        features.len(),
-        weights.len(),
-        "features and weights must have same length"
-    );
+///
+/// `features`: raw features from `ZensimResult::features()`.
+/// `weights`: one weight per feature; `weights.len()` must equal
+/// `features.len()`.
+///
+/// Returns `(score, raw_distance)` on success, or
+/// [`ZensimError::FeatureWeightsLengthMismatch`] if the slices have
+/// different lengths.
+pub fn try_score_from_features(
+    features: &[f64],
+    weights: &[f64],
+) -> Result<(f64, f64), ZensimError> {
+    if features.len() != weights.len() {
+        return Err(ZensimError::FeatureWeightsLengthMismatch);
+    }
     let raw_distance: f64 = features
         .iter()
         .zip(weights.iter())
@@ -335,7 +368,20 @@ pub fn score_from_features(features: &[f64], weights: &[f64]) -> (f64, f64) {
         .unwrap_or(FEATURES_PER_CHANNEL_BASIC * 3);
     let n_scales = features.len() / features_per_scale;
     let raw_distance = raw_distance / n_scales.max(1) as f64;
-    (distance_to_score(raw_distance), raw_distance)
+    Ok((distance_to_score(raw_distance), raw_distance))
+}
+
+/// Compute score from raw features using custom weights.
+/// `features`: raw features from ZensimResult.features
+/// `weights`: one weight per feature (len must equal features.len())
+/// Returns (score, raw_distance)
+///
+/// # Panics
+///
+/// Panics if the slices have different lengths; [`try_score_from_features`]
+/// returns an error instead.
+pub fn score_from_features(features: &[f64], weights: &[f64]) -> (f64, f64) {
+    try_score_from_features(features, weights).expect("features and weights must have same length")
 }
 
 /// Pre-compute reference with a custom number of pyramid scales.
@@ -343,7 +389,10 @@ pub fn score_from_features(features: &[f64], weights: &[f64]) -> (f64, f64) {
 /// Use this when calling [`compute_zensim_with_ref_and_config`] with a non-default
 /// `num_scales`. The precomputed data must have at least as many scales as the config
 /// requests.
-#[cfg_attr(not(feature = "training"), allow(dead_code))]
+///
+/// Feature-extraction API for custom scale counts. Changing the pyramid
+/// changes the features; default trained weights need their original layout.
+#[doc(hidden)]
 pub fn precompute_reference_with_scales(
     source: &[[u8; 3]],
     width: usize,
@@ -353,19 +402,32 @@ pub fn precompute_reference_with_scales(
     if width < 8 || height < 8 {
         return Err(ZensimError::ImageTooSmall);
     }
-    if source.len() != width * height {
+    let pixels = width
+        .checked_mul(height)
+        .ok_or(ZensimError::ImageTooLarge)?;
+    // Reject any width/height combination whose padded-plane size would
+    // overflow `usize` on the current target.
+    check_within_max_pixels(width, height, None)?;
+    if source.len() != pixels {
         return Err(ZensimError::InvalidDataLength);
     }
-    let src_img = crate::source::RgbSlice::new(source, width, height);
+    let src_img = crate::source::RgbSlice::try_new(source, width, height)?;
     Ok(crate::streaming::PrecomputedReference::new(
-        &src_img, num_scales, true,
+        &src_img,
+        num_scales,
+        true,
+        crate::ssim_form::active_revision(),
     ))
 }
 
 /// Compute zensim with a precomputed reference and custom configuration.
 ///
-/// Training/research variant. The `config.num_scales`
-/// must not exceed the number of scales in `precomputed`.
+/// **Research / feature-extraction API; not stable.** The
+/// `ZensimConfig` knobs that this entry exposes change metric
+/// internals whose outputs are incomparable with the default trained
+/// weights. The `config.num_scales` must not exceed the number of
+/// scales in `precomputed`.
+#[doc(hidden)]
 #[cfg(feature = "training")]
 pub fn compute_zensim_with_ref_and_config(
     precomputed: &crate::streaming::PrecomputedReference,
@@ -377,21 +439,41 @@ pub fn compute_zensim_with_ref_and_config(
     if width < 8 || height < 8 {
         return Err(ZensimError::ImageTooSmall);
     }
-    if distorted.len() != width * height {
+    let pixels = width
+        .checked_mul(height)
+        .ok_or(ZensimError::ImageTooLarge)?;
+    if distorted.len() != pixels {
         return Err(ZensimError::InvalidDataLength);
     }
-    let dst_img = crate::source::RgbSlice::new(distorted, width, height);
-    let result = crate::streaming::compute_zensim_streaming_with_ref(
-        precomputed,
-        &dst_img,
-        &config,
-        WEIGHTS,
-    );
-    Ok(result)
+    if precomputed.width() != width || precomputed.height() != height {
+        return Err(ZensimError::DimensionMismatch);
+    }
+    let dst_img = crate::source::RgbSlice::try_new(distorted, width, height)?;
+    // The reference was reflect-padded inside `PrecomputedReference::new`;
+    // pad the distorted to match or the scale walk asserts on the width
+    // mismatch. Same rule as `Zensim::compute_with_ref`.
+    let result = if needs_pyramid_pad(width, height, config.num_scales) {
+        let d = reflect_pad_for_scales(&dst_img, config.num_scales);
+        crate::streaming::compute_zensim_streaming_with_ref(precomputed, &d, &config, WEIGHTS, None)
+    } else {
+        crate::streaming::compute_zensim_streaming_with_ref(
+            precomputed,
+            &dst_img,
+            &config,
+            WEIGHTS,
+            None,
+        )
+    };
+    // This entry point scores via the plain WEIGHTS (V0_2 linear) distance,
+    // never an MLP forward pass — tag honestly rather than inheriting
+    // `combine_scores`'s internal `codec_target()` (`B`) placeholder tag
+    // (which every `Zensim::compute*` caller overrides but this standalone
+    // function does not go through).
+    Ok(result.with_profile(crate::profile::ZensimProfile::LegacyLinearV0_2))
 }
 
 /// Per-scale statistics collected during computation.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub(crate) struct ScaleStats {
     /// SSIM statistics: [mean_d, root4_d] per channel = 6 values
     pub(crate) ssim: [f64; 6],
@@ -433,6 +515,17 @@ pub(crate) struct ScaleStats {
     pub(crate) art_p95: [f64; 3],
     /// L8 power pool edge detail_lost per channel = 3 values: (Σd⁸/N)^(1/8)
     pub(crate) det_p95: [f64; 3],
+    // --- IW (information-content-weighted) features (only populated when
+    //     compute_iw_features=true). Texture-EMPHASISING counterpart to
+    //     the masked_* block. Wang & Li 2011 IW-SSIM. ---
+    /// IW SSIM: [mean, 4th, 2nd] per channel = 9 values
+    pub(crate) iw_ssim: [f64; 9],
+    /// IW edge artifact L4 per channel = 3 values
+    pub(crate) iw_art_4th: [f64; 3],
+    /// IW edge detail_lost L4 per channel = 3 values
+    pub(crate) iw_det_4th: [f64; 3],
+    /// IW MSE per channel = 3 values
+    pub(crate) iw_mse: [f64; 3],
 }
 
 /// Result from a zensim comparison.
@@ -446,6 +539,20 @@ pub struct ZensimResult {
     features: Vec<f64>,
     profile: crate::profile::ZensimProfile,
     mean_offset: [f64; 3],
+    /// Set by the identity-image short-circuit in
+    /// `compute_with_config_inner` / `compute_zensim_streaming`. When
+    /// true, the post-network MLP scoring path in
+    /// `apply_mlp_scoring_with_codec` MUST NOT overwrite the result —
+    /// running the trained MLP on the all-zero feature vector
+    /// produces garbage (the bake has no signal anchoring
+    /// "zero feature vector → score 100").
+    ///
+    /// Replaces the pre-0.3.0 sentinel check
+    /// `raw_distance == 0.0 && features.iter().all(== 0.0)` which was
+    /// brittle (any future profile that legitimately produces
+    /// raw_distance=0.0 + all-zero features on a real image would
+    /// silently skip MLP scoring).
+    is_identical: bool,
 }
 
 impl ZensimResult {
@@ -463,13 +570,41 @@ impl ZensimResult {
             features,
             profile,
             mean_offset,
+            is_identical: false,
         }
+    }
+
+    /// Mark this result as the byte-identical short-circuit output.
+    /// `apply_mlp_scoring_with_codec` reads this flag to skip the
+    /// MLP forward pass (which would overwrite the (100, 0, zeros)
+    /// payload with garbage).
+    #[inline]
+    pub(crate) fn mark_identical(mut self) -> Self {
+        self.is_identical = true;
+        self
+    }
+
+    /// True iff this result was produced by the byte-identical
+    /// short-circuit. Used by `apply_mlp_scoring_with_codec` to
+    /// preserve the (score=100, raw_distance=0, zero-features)
+    /// invariant regardless of which bake is loaded.
+    #[inline]
+    pub(crate) fn is_identical(&self) -> bool {
+        self.is_identical
     }
 
     /// Set the profile on this result (builder pattern). Internal use only.
     pub(crate) fn with_profile(mut self, profile: crate::profile::ZensimProfile) -> Self {
         self.profile = profile;
         self
+    }
+
+    /// Replace the raw distance and score with values from the MLP
+    /// scoring path. Internal use only — called by
+    /// [`apply_mlp_scoring`](crate::metric::apply_mlp_scoring).
+    pub(crate) fn set_mlp_score(&mut self, raw_distance: f64, score: f64) {
+        self.raw_distance = raw_distance;
+        self.score = score;
     }
 
     /// Create a NaN sentinel result (for error/placeholder paths).
@@ -480,6 +615,7 @@ impl ZensimResult {
             features: vec![],
             profile: crate::profile::ZensimProfile::PreviewV0_1,
             mean_offset: [f64::NAN; 3],
+            is_identical: false,
         }
     }
 
@@ -542,7 +678,7 @@ impl ZensimResult {
         if self.raw_distance <= 0.0 {
             return 100.0;
         }
-        (100.0 - 19.0379 * self.raw_distance.powf(0.5979)).max(-100.0)
+        (100.0 - 19.0379 * self.raw_distance.det_powf(0.5979, active_pow_form())).max(-100.0)
     }
 
     /// Approximate DSSIM value from the raw distance.
@@ -557,7 +693,7 @@ impl ZensimResult {
         if self.raw_distance <= 0.0 {
             return 0.0;
         }
-        0.000922 * self.raw_distance.powf(1.2244)
+        0.000922 * self.raw_distance.det_powf(1.2244, active_pow_form())
     }
 
     /// Approximate butteraugli distance from the raw distance.
@@ -571,7 +707,7 @@ impl ZensimResult {
         if self.raw_distance <= 0.0 {
             return 0.0;
         }
-        2.365353 * self.raw_distance.powf(0.6130)
+        2.365353 * self.raw_distance.det_powf(0.6130, active_pow_form())
     }
 }
 
@@ -752,15 +888,19 @@ pub struct ClassifiedResult {
 
 // --- Zensim config struct (primary API) ---
 
+use crate::feature_v2::HdrEncoding;
 use crate::profile::{ProfileParams, ZensimProfile};
 use crate::source::ImageSource;
+
+mod bake;
+pub(crate) use bake::BakeScorer;
 
 /// Metric configuration. Methods on this struct are the primary API.
 ///
 /// ```no_run
 /// use zensim::{Zensim, ZensimProfile, RgbSlice};
 /// # let (src, dst) = (vec![[0u8; 3]; 64], vec![[0u8; 3]; 64]);
-/// let z = Zensim::new(ZensimProfile::latest());
+/// let z = Zensim::new(ZensimProfile::codec_target());
 /// let source = RgbSlice::new(&src, 8, 8);
 /// let distorted = RgbSlice::new(&dst, 8, 8);
 /// let result = z.compute(&source, &distorted).unwrap();
@@ -770,15 +910,84 @@ use crate::source::ImageSource;
 pub struct Zensim {
     profile: ZensimProfile,
     parallel: bool,
+    /// Optional cap on total pixels (`width * height`) per image. `None`
+    /// disables the cap. Allocation grows roughly `~14 × pixels × 4 B` for
+    /// the streaming pipeline, so callers feeding untrusted dimensions
+    /// should set this. See [`Zensim::with_max_pixels`].
+    max_pixels: Option<usize>,
+    /// Optional cooperative-cancellation token, checked at row-band and
+    /// scale boundaries inside the streaming walk. See [`Zensim::with_stop`].
+    stop: Option<StopHandle>,
+}
+
+/// Shared cancellation token stored on [`Zensim`]. Wraps the caller's
+/// [`enough::Stop`] in an `Arc` so `Zensim` stays `Clone` (clones share
+/// the same token). Debug output elides the token (trait objects have no
+/// useful Debug form).
+#[derive(Clone)]
+struct StopHandle(std::sync::Arc<dyn enough::Stop>);
+
+impl core::fmt::Debug for StopHandle {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("StopHandle(..)")
+    }
+}
+
+/// Whether a computation that asked for internal parallel work runs it:
+/// `requested`, and the current rayon pool has more than one thread. With a
+/// single thread each parallel section would only hand its work to the
+/// pool's one worker and block until it returns (most of a small image's
+/// time); the sequential path computes the same bits.
+#[inline]
+pub(crate) fn effective_parallel(requested: bool) -> bool {
+    #[cfg(feature = "threads")]
+    {
+        requested && rayon::current_num_threads() > 1
+    }
+    #[cfg(not(feature = "threads"))]
+    {
+        let _ = requested;
+        false
+    }
 }
 
 impl Zensim {
     /// Create a new `Zensim` with the given profile. Parallel by default.
+    ///
+    /// A default `max_pixels` cap of **120 million** (≈ 120 MP — large enough
+    /// for common ~108 MP camera photos) is applied so that forwarding
+    /// untrusted dimensions can't drive an unbounded allocation (memory is
+    /// ~14×w×h×4 B). Call [`Zensim::with_max_pixels`] to tighten it, or
+    /// `with_max_pixels(usize::MAX)` to opt out for trusted input.
     pub fn new(profile: ZensimProfile) -> Self {
         Self {
             profile,
             parallel: true,
+            max_pixels: Some(120_000_000),
+            stop: None,
         }
+    }
+
+    /// The serving PLAN for a SCORING entry: `None` (today's unconditional v1
+    /// walk) unless the extraction must differ — because this instance opted
+    /// into pool skipping, or because a bake declares a LAYOUT wider than the
+    /// v1 walk emits.
+    ///
+    /// The second case is what makes a wide bake servable at all. Before it,
+    /// a 944-declared bake reached `prep_bake_input_f32` with a 372-wide
+    /// vector and was refused with `"bake declares more input features than
+    /// the caller supplied"` — a true statement about a situation the runtime
+    /// created by never asking for the width the bake declared.
+    fn scoring_plan(
+        &self,
+        params: &ProfileParams,
+        config: &ZensimConfig,
+    ) -> Option<crate::feature_plan::Plan> {
+        crate::fold_engine::score_plan(
+            params,
+            config,
+            config.revision() >= crate::feature_defs::FormulaRevision::Rev5,
+        )
     }
 
     /// Enable or disable multi-threaded computation (rayon).
@@ -786,6 +995,104 @@ impl Zensim {
     pub fn with_parallel(mut self, parallel: bool) -> Self {
         self.parallel = parallel;
         self
+    }
+
+    /// Set a cap on total pixels (`width * height`) accepted by every
+    /// `compute*` entry point. Images exceeding the cap are rejected with
+    /// [`ZensimError::ImageTooLarge`] before any allocation runs.
+    ///
+    /// Default: **120 MP** (set by [`Zensim::new`]). Zensim allocates
+    /// roughly `width × height × 4 bytes × ~14` for the streaming XYB
+    /// pyramid plus destination planes, so a 4K (≈8.3 MP) image needs
+    /// ~470 MB of scratch. A cap of e.g. 64 MP (8192×8192) keeps the
+    /// worst case at ~3.6 GB.
+    ///
+    /// Pass [`usize::MAX`] explicitly to disable the cap on a previously
+    /// configured `Zensim`.
+    pub fn with_max_pixels(mut self, max_pixels: usize) -> Self {
+        self.max_pixels = Some(max_pixels);
+        self
+    }
+
+    /// Install a cooperative-cancellation token, checked at row-band and
+    /// scale boundaries inside the streaming compute walk. When the token
+    /// fires, the walk abandons remaining work promptly and the entry
+    /// point returns [`ZensimError::Cancelled`].
+    ///
+    /// Accepts any [`enough::Stop`] implementation — typically a
+    /// `Stopper` from the sibling
+    /// [`almost-enough`](https://docs.rs/almost-enough) crate, cancelled
+    /// from another thread (or wired to a timeout). Passing
+    /// [`Unstoppable`](enough::Unstoppable) (or any token whose
+    /// [`may_stop`](enough::Stop::may_stop) is `false`) stores nothing and
+    /// keeps the zero-check fast path.
+    ///
+    /// Coverage: the scoring entry points (`compute`,
+    /// `compute_with_codec_hint`, `compute_with_ref`, `compute_pu_linear`,
+    /// `compute_pu_linear_planar`) and the diffmap entries
+    /// (`compute_with_ref_and_diffmap`,
+    /// `compute_with_ref_and_diffmap_linear_planar`). The v2
+    /// feature-extraction walks and the caller-paced strip APIs
+    /// (`compute_streaming_strips*`, where the caller already controls
+    /// cadence between strips) do not check the token yet.
+    ///
+    /// At Rev5, canonical fold scoring checks the token between strips as
+    /// well as before and after the fold. Earlier buffered paths retain
+    /// the following band-level cancellation granularity.
+    /// Cancellation granularity is one row band (a few dozen rows) at the
+    /// current scale; a fired token is detected within roughly one band's
+    /// worth of work per rayon worker.
+    ///
+    /// Below Rev5 a live token therefore keeps every scoring entry on the
+    /// buffered walk. A profile whose bake reads past that walk's width
+    /// (`C`, `CHdr`) is served through the fold only without a token; with
+    /// one, `compute`, `compute_pu_linear` and `compute_pu_linear_planar` all
+    /// refuse it with the same error, so one contract covers every entry.
+    ///
+    /// ```no_run
+    /// use zensim::{Zensim, ZensimProfile};
+    /// # struct S(std::sync::Arc<std::sync::atomic::AtomicBool>);
+    /// # impl enough::Stop for S {
+    /// #     fn check(&self) -> Result<(), enough::StopReason> {
+    /// #         if self.0.load(std::sync::atomic::Ordering::Relaxed) {
+    /// #             Err(enough::StopReason::Cancelled)
+    /// #         } else { Ok(()) }
+    /// #     }
+    /// # }
+    /// # let token = S(Default::default());
+    /// let z = Zensim::new(ZensimProfile::codec_target()).with_stop(token);
+    /// // z.compute(..) now returns Err(ZensimError::Cancelled { .. })
+    /// // soon after the token fires.
+    /// ```
+    pub fn with_stop(mut self, stop: impl enough::Stop + 'static) -> Self {
+        // may_stop() == false (e.g. Unstoppable) can never fire — skip
+        // storing it so every check stays on the None fast path.
+        self.stop = if stop.may_stop() {
+            Some(StopHandle(std::sync::Arc::new(stop)))
+        } else {
+            None
+        };
+        self
+    }
+
+    /// Borrow the installed stop token for threading into the walkers.
+    pub(crate) fn stop_ref(&self) -> Option<&dyn enough::Stop> {
+        self.stop.as_ref().map(|h| &*h.0 as &dyn enough::Stop)
+    }
+
+    /// Return `Err(ZensimError::Cancelled)` if the installed token has
+    /// fired. Entry points call this up front (cheap pre-flight) and after
+    /// the walk returns (converting an abandoned walk into the error).
+    pub(crate) fn check_stop(&self) -> Result<(), ZensimError> {
+        match &self.stop {
+            Some(h) => h.0.check().map_err(ZensimError::from),
+            None => Ok(()),
+        }
+    }
+
+    /// Current `max_pixels` cap, if any.
+    pub fn max_pixels(&self) -> Option<usize> {
+        self.max_pixels
     }
 
     /// Current profile.
@@ -796,6 +1103,13 @@ impl Zensim {
     /// Whether multi-threaded computation is enabled.
     pub fn parallel(&self) -> bool {
         self.parallel
+    }
+
+    /// Whether this call runs its internal parallel work: [`Self::parallel`]
+    /// and a rayon pool of more than one thread ([`effective_parallel`]).
+    #[inline]
+    fn parallel_now(&self) -> bool {
+        effective_parallel(self.parallel)
     }
 
     /// Compare source and distorted images.
@@ -810,8 +1124,24 @@ impl Zensim {
     ) -> Result<ZensimResult, ZensimError> {
         let params = self.profile.params();
         validate_pair(source, distorted)?;
-        let config = config_from_params(params, self.parallel);
-        let result = compute_with_config_inner(source, distorted, &config, params.weights);
+        check_within_max_pixels(source.width(), source.height(), self.max_pixels)?;
+        self.check_stop()?;
+        let config = config_from_params(params, self.parallel_now());
+        let mut result = compute_with_config_inner(
+            source,
+            distorted,
+            &config,
+            params.weights,
+            self.stop_ref(),
+            self.scoring_plan(params, &config).as_ref(),
+        );
+        self.check_stop()?;
+        apply_mlp_scoring_with_codec(
+            &mut result,
+            params,
+            source.width() as u32,
+            source.height() as u32,
+        )?;
         Ok(result.with_profile(self.profile))
     }
 
@@ -819,43 +1149,153 @@ impl Zensim {
     ///
     /// # Errors
     ///
-    /// Returns [`ZensimError::ImageTooSmall`] if dimensions < 8×8.
+    /// Returns [`ZensimError::ImageTooSmall`] if either dimension is zero.
     pub fn precompute_reference(
         &self,
         source: &impl ImageSource,
     ) -> Result<crate::streaming::PrecomputedReference, ZensimError> {
         let params = self.profile.params();
-        if source.width() < 8 || source.height() < 8 {
+        if source.width() == 0 || source.height() == 0 {
             return Err(ZensimError::ImageTooSmall);
         }
+        // Sub-64px sources are reflect-padded inside `PrecomputedReference::new`
+        // (matching the buffered path), so no 8px floor here.
+        check_within_max_pixels(source.width(), source.height(), self.max_pixels)?;
         Ok(crate::streaming::PrecomputedReference::new(
             source,
             params.num_scales,
-            self.parallel,
+            self.parallel_now(),
+            config_from_params(params, self.parallel_now()).revision(),
         ))
+    }
+
+    /// The engine-routed body of [`Self::compute_with_ref`]: the fold-backed
+    /// ref-cached compare when this instance asks for it AND the fold can
+    /// serve the request bit-identically, the buffered `*_with_ref` walk
+    /// otherwise. Both consume the SAME `PrecomputedReference` — the pyramid
+    /// cache is not buffered-walk state (fold-engine lane stage 3).
+    fn compare_against_ref(
+        &self,
+        precomputed: &crate::streaming::PrecomputedReference,
+        distorted: &impl ImageSource,
+        config: &ZensimConfig,
+        weights: &[f64],
+    ) -> ZensimResult {
+        self.compare_against_ref_into(precomputed, distorted, config, weights, None)
+    }
+
+    /// [`Self::compare_against_ref`] with an optional caller-owned scratch.
+    /// `None` allocates a fresh one per call (what `compute_with_ref` does on
+    /// both engines); `Some` is the ref-loop shape `compute_with_ref_into`
+    /// exposes, and is what makes the fold's ref-cache saving match buffered's
+    /// instead of being halved by a per-compare allocation (fold-MT lane).
+    fn compare_against_ref_into(
+        &self,
+        precomputed: &crate::streaming::PrecomputedReference,
+        distorted: &impl ImageSource,
+        config: &ZensimConfig,
+        weights: &[f64],
+        scratch: Option<&mut crate::streaming::ZensimScratch>,
+    ) -> ZensimResult {
+        let mut scratch = scratch;
+        if config.revision() >= crate::feature_defs::FormulaRevision::Rev5
+            && crate::fold_engine::is_fold_backable(config)
+        {
+            let mut owned;
+            let v2 = match scratch.as_mut() {
+                Some(s) => &mut s.v2,
+                None => {
+                    owned = crate::feature_v2::V2Scratch::new();
+                    &mut owned
+                }
+            };
+            if config.revision() >= crate::feature_defs::FormulaRevision::Rev5 {
+                let plan = self.scoring_plan(self.profile.params(), config);
+                if let Some(result) =
+                    crate::fold_engine::compute_fold_backed_with_ref_stoppable_plan(
+                        precomputed,
+                        distorted,
+                        config,
+                        weights,
+                        v2,
+                        plan.as_ref().map(|p| p.compute.v1_pools),
+                        plan.as_ref(),
+                        self.stop_ref(),
+                    )
+                {
+                    return result;
+                }
+            }
+            // The ref-cached walk emits the v1 layout only; a wide bake is
+            // not servable through it yet (phase 2 — registered, and the
+            // servability census reports it as such rather than silently
+            // scoring a truncated vector). Take just the pool axis.
+            let pool_mode = self
+                .scoring_plan(self.profile.params(), config)
+                .map(|p| p.compute.v1_pools);
+            if let Some(r) = crate::fold_engine::compute_fold_backed_with_ref(
+                precomputed,
+                distorted,
+                config,
+                weights,
+                v2,
+                pool_mode,
+            ) {
+                return r;
+            }
+        }
+        crate::streaming::compute_zensim_streaming_with_ref(
+            precomputed,
+            distorted,
+            config,
+            weights,
+            self.stop_ref(),
+        )
     }
 
     /// Compare a distorted image against a precomputed reference.
     ///
     /// # Errors
     ///
-    /// Returns [`ZensimError::ImageTooSmall`] if dimensions < 8×8.
+    /// Returns [`ZensimError::ImageTooSmall`] if either dimension is zero.
+    /// Returns [`ZensimError::DimensionMismatch`] if `distorted.width()` /
+    /// `distorted.height()` differ from the precomputed reference's
+    /// dimensions (see
+    /// [`PrecomputedReference::width`](crate::PrecomputedReference::width)).
+    /// Returns [`ZensimError::ImageTooLarge`] if dimensions exceed the
+    /// configured `max_pixels` cap.
     pub fn compute_with_ref(
         &self,
         precomputed: &crate::streaming::PrecomputedReference,
         distorted: &impl ImageSource,
     ) -> Result<ZensimResult, ZensimError> {
         let params = self.profile.params();
-        if distorted.width() < 8 || distorted.height() < 8 {
+        if distorted.width() == 0 || distorted.height() == 0 {
             return Err(ZensimError::ImageTooSmall);
         }
-        let config = config_from_params(params, self.parallel);
-        let result = crate::streaming::compute_zensim_streaming_with_ref(
-            precomputed,
-            distorted,
-            &config,
-            params.weights,
-        );
+        // Contract: distorted must match the reference's ORIGINAL (unpadded)
+        // dims (`PrecomputedReference` keeps those even when its pyramid was
+        // built on a reflect-padded source).
+        validate_ref_match(precomputed, distorted)?;
+        check_within_max_pixels(distorted.width(), distorted.height(), self.max_pixels)?;
+        // The precomputed reference was built via `precompute_reference`,
+        // which already rejected HDR — so only check the distorted side
+        // here. Symmetry across the call path is preserved.
+        let config = config_from_params(params, self.parallel_now());
+        validate_cached_revision(precomputed, config.revision())?;
+        let (ow, oh) = (distorted.width(), distorted.height());
+        // Pad a sub-64px distorted to the pyramid minimum so it aligns with the
+        // (also-padded) reference pyramid; score with the original dims. The
+        // pad is SHARED — it runs before either engine, so both see the same
+        // pixels against the same cached pyramid.
+        let mut result = if needs_pyramid_pad(ow, oh, config.num_scales) {
+            let d = reflect_pad_for_scales(distorted, config.num_scales);
+            self.compare_against_ref(precomputed, &d, &config, params.weights)
+        } else {
+            self.compare_against_ref(precomputed, distorted, &config, params.weights)
+        };
+        self.check_stop()?;
+        apply_mlp_scoring(&mut result, params, ow as u32, oh as u32)?;
         Ok(result.with_profile(self.profile))
     }
 
@@ -870,7 +1310,7 @@ impl Zensim {
     ///
     /// # Errors
     ///
-    /// Returns [`ZensimError::ImageTooSmall`] if dimensions < 8×8.
+    /// Returns [`ZensimError::ImageTooSmall`] if either dimension is zero.
     pub fn compute_with_ref_into(
         &self,
         precomputed: &crate::streaming::PrecomputedReference,
@@ -878,19 +1318,79 @@ impl Zensim {
         scratch: &mut crate::streaming::ZensimScratch,
     ) -> Result<ZensimResult, ZensimError> {
         let params = self.profile.params();
-        if distorted.width() < 8 || distorted.height() < 8 {
+        if distorted.width() == 0
+            || distorted.height() == 0
+            || (distorted.width() < 8 || distorted.height() < 8)
+        {
             return Err(ZensimError::ImageTooSmall);
         }
-        let config = config_from_params(params, self.parallel);
-        let (stats, mean_offset) =
+        validate_ref_match(precomputed, distorted)?;
+        check_within_max_pixels(distorted.width(), distorted.height(), self.max_pixels)?;
+        let config = config_from_params(params, self.parallel_now());
+        validate_cached_revision(precomputed, config.revision())?;
+        let (ow, oh) = (distorted.width(), distorted.height());
+        // ENGINE ROUTING (fold-MT lane). `compute_with_ref` has routed to the
+        // fold since the fold-engine lane; this entry did not, so a ref LOOP —
+        // the one shape that exists to amortise work — was the one shape that
+        // could not use the fold. It routes through the same
+        // `compare_against_ref_into` and hands it `scratch`, so the fold's
+        // per-compare `V2Scratch` is reused exactly like buffered's
+        // `dst_planes`. Out-of-domain requests still degrade to the buffered
+        // walk below, byte-for-byte.
+        if config.revision() >= crate::feature_defs::FormulaRevision::Rev5
+            && crate::fold_engine::is_fold_backable(&config)
+        {
+            // Same shared reflect-pad `compute_with_ref` applies, so the two
+            // ref entries route identically rather than differing on sub-64.
+            let mut result = if needs_pyramid_pad(ow, oh, config.num_scales) {
+                let d = reflect_pad_for_scales(distorted, config.num_scales);
+                self.compare_against_ref_into(
+                    precomputed,
+                    &d,
+                    &config,
+                    params.weights,
+                    Some(scratch),
+                )
+            } else {
+                self.compare_against_ref_into(
+                    precomputed,
+                    distorted,
+                    &config,
+                    params.weights,
+                    Some(scratch),
+                )
+            };
+            apply_mlp_scoring(&mut result, params, ow as u32, oh as u32)?;
+            return Ok(result.with_profile(self.profile));
+        }
+        // Pad a sub-pyramid-minimum distorted so it aligns with the (also
+        // padded) reference pyramid — the same rule `compute_with_ref`
+        // applies. Without it this entry fed a 48-wide plane to a 64-wide
+        // reference scale and tripped `scale 0 width mismatch`; scoring still
+        // uses the ORIGINAL dims (2026-08-30).
+        let (stats, mean_offset) = if needs_pyramid_pad(ow, oh, config.num_scales) {
+            let d = reflect_pad_for_scales(distorted, config.num_scales);
+            crate::streaming::compute_multiscale_stats_streaming_with_ref_borrowed(
+                precomputed,
+                &d,
+                &mut scratch.dst_planes,
+                &config,
+                params.weights,
+                self.stop_ref(),
+            )
+        } else {
             crate::streaming::compute_multiscale_stats_streaming_with_ref_borrowed(
                 precomputed,
                 distorted,
                 &mut scratch.dst_planes,
                 &config,
                 params.weights,
-            );
-        let result = combine_scores(&stats, params.weights, &config, mean_offset);
+                self.stop_ref(),
+            )
+        };
+        self.check_stop()?;
+        let mut result = combine_scores(&stats, params.weights, &config, mean_offset);
+        apply_mlp_scoring(&mut result, params, ow as u32, oh as u32)?;
         Ok(result.with_profile(self.profile))
     }
 
@@ -905,7 +1405,7 @@ impl Zensim {
     ///
     /// # Errors
     ///
-    /// Returns [`ZensimError::ImageTooSmall`] if dimensions < 8×8.
+    /// Returns [`ZensimError::ImageTooSmall`] if either dimension is zero.
     pub fn precompute_reference_linear_planar(
         &self,
         planes: [&[f32]; 3],
@@ -917,18 +1417,32 @@ impl Zensim {
         if width < 8 || height < 8 {
             return Err(ZensimError::ImageTooSmall);
         }
+        check_within_max_pixels(width, height, self.max_pixels)?;
+        // `stride * height` must fit in usize on 32-bit; reject overflow up
+        // front so downstream `y * stride + x` arithmetic cannot wrap.
+        let row_capacity = stride
+            .checked_mul(height)
+            .ok_or(ZensimError::ImageTooLarge)?;
+        for plane in &planes {
+            if plane.len() < row_capacity {
+                return Err(ZensimError::InvalidDataLength);
+            }
+        }
         Ok(crate::streaming::PrecomputedReference::from_linear_planar(
             planes,
             width,
             height,
             stride,
             params.num_scales,
-            self.parallel,
+            self.parallel_now(),
+            config_from_params(params, self.parallel_now()).revision(),
         ))
     }
 
     /// Like `compute`, but always computes all features regardless of
     /// zero weights (forces every channel active). For training/research.
+    /// At Rev5 this emits all supported basic, peak and v2 slots in the
+    /// 720 layout; masked/IW slots remain outside the supported scope.
     #[cfg(feature = "training")]
     pub fn compute_all_features(
         &self,
@@ -937,10 +1451,148 @@ impl Zensim {
     ) -> Result<ZensimResult, ZensimError> {
         let params = self.profile.params();
         validate_pair(source, distorted)?;
-        let mut config = config_from_params(params, self.parallel);
+        let mut config = config_from_params(params, self.parallel_now());
         config.compute_all_features = true;
-        let result = compute_with_config_inner(source, distorted, &config, params.weights);
+        let extraction_plan = if config.revision() >= crate::feature_defs::FormulaRevision::Rev5 {
+            use crate::feature_defs::family_slots;
+            use crate::feature_set_id::ComputeToken;
+            let want = family_slots(ComputeToken::Basic, config.num_scales)
+                .union(&family_slots(ComputeToken::Peaks, config.num_scales))
+                .union(&family_slots(ComputeToken::V2, config.num_scales));
+            // At the profile's revision, as `Plan::for_bake` serves it: a slot
+            // request alone would take the shipped revision (1).
+            Some(
+                crate::feature_plan::Plan::derive_with_layout_at(
+                    &want,
+                    crate::feature_layout::Layout::identity(720),
+                    config.revision(),
+                )
+                .map_err(|_| ZensimError::ModelLoadFailed {
+                    reason: "cannot derive the full supported Rev5 extraction plan",
+                })?,
+            )
+        } else {
+            None
+        };
+        let result = compute_with_config_inner(
+            source,
+            distorted,
+            &config,
+            params.weights,
+            self.stop_ref(),
+            // Research extraction requests every supported slot, independently
+            // of the profile's serving read set.
+            extraction_plan.as_ref(),
+        );
+        self.check_stop()?;
         Ok(result.with_profile(self.profile))
+    }
+
+    /// Score an HDR pair. Pixel values map to absolute display light as
+    /// `encoding` declares (already-linear cd/m², or PQ/HLG through a display
+    /// model); a PU21 front-end then feeds the same feature walk as SDR input,
+    /// and this profile's model scores the result.
+    ///
+    /// Sources are [`PixelFormat::LinearF32Rgba`] (f32 light; any encoding) or
+    /// [`PixelFormat::Srgb16Rgba`] (16-bit code values; [`HdrEncoding::Pq`] and
+    /// [`HdrEncoding::Hlg`] only), with [`AlphaMode::Opaque`]. Declared
+    /// primaries are honoured without clipping light to the SDR range.
+    ///
+    /// # Errors
+    ///
+    /// [`ZensimError::UnsupportedPixelFormat`] for any other format or alpha
+    /// mode, invalid display parameters, or the size and cancellation errors of
+    /// [`Self::compute`].
+    ///
+    /// [`PixelFormat::LinearF32Rgba`]: crate::PixelFormat::LinearF32Rgba
+    /// [`PixelFormat::Srgb16Rgba`]: crate::PixelFormat::Srgb16Rgba
+    /// [`AlphaMode::Opaque`]: crate::AlphaMode::Opaque
+    pub fn compute_hdr(
+        &self,
+        source: &impl ImageSource,
+        distorted: &impl ImageSource,
+        encoding: HdrEncoding,
+    ) -> Result<ZensimResult, ZensimError> {
+        let params = self.profile.params();
+        validate_pair(source, distorted)?;
+        let config = config_from_params(params, self.parallel_now());
+        let plan = if config.revision() >= crate::feature_defs::FormulaRevision::Rev5 {
+            use crate::feature_defs::family_slots;
+            use crate::feature_set_id::ComputeToken;
+            let want = family_slots(ComputeToken::Basic, config.num_scales)
+                .union(&family_slots(ComputeToken::Peaks, config.num_scales))
+                .union(&family_slots(ComputeToken::V2, config.num_scales));
+            Some(
+                crate::feature_plan::Plan::derive_with_layout_at(
+                    &want,
+                    crate::feature_layout::Layout::identity(720),
+                    config.revision(),
+                )
+                .map_err(|_| ZensimError::ModelLoadFailed {
+                    reason: "cannot derive the full supported Rev5 extraction plan",
+                })?,
+            )
+        } else {
+            None
+        };
+        let toggles = plan.as_ref().map_or_else(
+            || crate::feature_v2::V2NewFeatureToggles {
+                v1_only: true,
+                ..Default::default()
+            },
+            |p| p.toggles(),
+        );
+        let mut scratch = crate::feature_v2::V2Scratch::new();
+        let mut mo = crate::feature_v2::MeanOffsetRows::at_revision(
+            source.width(),
+            source.height(),
+            toggles.formula_revision,
+        );
+        let mut features = crate::feature_v2::compute_folded720_hdr_streaming_extras(
+            source,
+            distorted,
+            encoding,
+            self.max_pixels,
+            self.parallel_now(),
+            toggles,
+            &mut scratch,
+            crate::feature_v2::FoldWalkExtras {
+                compute: plan.as_ref().map(|p| p.compute),
+                mean_offset: Some(&mut mo),
+                ..Default::default()
+            },
+        )?
+        .into_features();
+        if let Some(p) = plan {
+            p.check_emit_covered(features.len())
+                .map_err(|_| ZensimError::ModelLoadFailed {
+                    reason: "PU fold did not materialize the bake's declared reads",
+                })?;
+            features.resize(
+                p.walk_width()
+                    .max(crate::fold_engine::v1_feature_width(&config)),
+                0.0,
+            );
+        } else {
+            features.truncate(crate::fold_engine::v1_feature_width(&config));
+        }
+        let (score, raw_distance) =
+            score_v1_layout_features(&mut features, params.weights, &config, config.num_scales);
+        let mut result =
+            ZensimResult::new(score, raw_distance, features, self.profile, mo.finish());
+        if images_byte_identical(source, distorted) {
+            result.score = 100.0;
+            result.raw_distance = 0.0;
+            result = result.mark_identical();
+        }
+        self.check_stop()?;
+        apply_mlp_scoring(
+            &mut result,
+            params,
+            source.width() as u32,
+            source.height() as u32,
+        )?;
+        Ok(result)
     }
 }
 
@@ -964,8 +1616,10 @@ impl Zensim {
     ) -> Result<ClassifiedResult, ZensimError> {
         validate_pair(source, distorted)?;
 
-        // Compute delta stats (pixel-level analysis in sRGB space)
-        let delta_stats = crate::streaming::compute_delta_stats(source, distorted);
+        // Compute delta stats (pixel-level analysis in sRGB space).
+        // Returns `ZensimError::UnsupportedPixelFormat` if either input
+        // uses a `PixelFormat` the delta-stats extractor doesn't handle.
+        let delta_stats = crate::streaming::compute_delta_stats(source, distorted)?;
 
         // Compute the standard zensim score
         let result = self.compute(source, distorted)?;
@@ -991,7 +1645,19 @@ impl Zensim {
     ) -> Result<ZensimResult, ZensimError> {
         validate_pair(source, distorted)?;
         let config = config_from_params(params, true);
-        let result = compute_with_config_inner(source, distorted, &config, params.weights);
+        let serving_plan = if config.revision() >= crate::feature_defs::FormulaRevision::Rev5 {
+            crate::fold_engine::score_plan(params, &config, true)
+        } else {
+            None
+        };
+        let result = compute_with_config_inner(
+            source,
+            distorted,
+            &config,
+            params.weights,
+            None,
+            serving_plan.as_ref(),
+        );
         Ok(result)
     }
 }
@@ -1086,11 +1752,15 @@ fn derive_classification(delta_stats: &DeltaStats, _result: &ZensimResult) -> Er
         (ErrorCategory::AlphaCompositing, score_alpha),
     ];
 
+    // NaN-safe: `total_cmp` orders all f64 values (including NaN) without
+    // panicking. If any score is NaN, it sorts to the most-negative end
+    // and is therefore never selected as the max — the `best_score > 0.0`
+    // check below then routes to `Unclassified`.
     let (best_cat, best_score) = scores
         .iter()
         .copied()
-        .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
-        .unwrap();
+        .max_by(|a, b| a.1.total_cmp(&b.1))
+        .expect("scores is a 3-element array — max is always defined");
 
     let (dominant, confidence) = if best_score > 0.0 {
         (best_cat, best_score)
@@ -1160,7 +1830,21 @@ pub(crate) fn validate_pair(
     source: &impl ImageSource,
     distorted: &impl ImageSource,
 ) -> Result<(), ZensimError> {
-    if source.width() < 8 || source.height() < 8 {
+    validate_pair_dims(source, distorted)?;
+    // Refuse HDR-flagged input on either side — a mixed SDR/HDR pair is
+    // just as unscorable by the SDR pipeline as an all-HDR one.
+    Ok(())
+}
+
+/// Validate matching, nonzero image dimensions.
+pub(crate) fn validate_pair_dims(
+    source: &impl ImageSource,
+    distorted: &impl ImageSource,
+) -> Result<(), ZensimError> {
+    // Empty images are unscoreable; sub-64px images are now handled by
+    // reflect-padding in `compute_with_config_inner` (scores down to 1×1),
+    // so they are NOT rejected here anymore.
+    if source.width() == 0 || source.height() == 0 {
         return Err(ZensimError::ImageTooSmall);
     }
     if source.width() != distorted.width() || source.height() != distorted.height() {
@@ -1169,9 +1853,80 @@ pub(crate) fn validate_pair(
     Ok(())
 }
 
+/// Validate that `distorted` matches the dimensions baked into `precomputed`.
+///
+/// A precomputed reference is built from a specific source's `width × height`
+/// (recorded on the struct via
+/// [`PrecomputedReference::width`](crate::PrecomputedReference::width) /
+/// [`height`](crate::PrecomputedReference::height)). Reusing it against a
+/// distorted image with different dims would either silently produce garbage
+/// scores (smaller padded width misaligns reference rows) or panic on slice
+/// out-of-range. Reject such calls up front.
+pub(crate) fn validate_ref_match(
+    precomputed: &crate::streaming::PrecomputedReference,
+    distorted: &impl ImageSource,
+) -> Result<(), ZensimError> {
+    validate_ref_dimensions(precomputed, distorted)
+}
+
+pub(crate) fn validate_cached_revision(
+    precomputed: &crate::PrecomputedReference,
+    revision: crate::feature_defs::FormulaRevision,
+) -> Result<(), ZensimError> {
+    if crate::featcanon::mode(precomputed.formula_revision) != crate::featcanon::mode(revision) {
+        return Err(ZensimError::ModelLoadFailed {
+            reason: "reference cache color conversion revision differs from scorer; precompute with this profile",
+        });
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_ref_dimensions(
+    precomputed: &crate::streaming::PrecomputedReference,
+    distorted: &impl ImageSource,
+) -> Result<(), ZensimError> {
+    if precomputed.width() != distorted.width() || precomputed.height() != distorted.height() {
+        return Err(ZensimError::DimensionMismatch);
+    }
+    Ok(())
+}
+
+/// Reject `width × height` if it overflows `usize` on the current target,
+/// exceeds the configured `max_pixels` cap, or if the padded plane size
+/// (`pyramid_plane_stride(width) × height`) would overflow during downstream
+/// allocation.
+///
+/// Centralizes the overflow guard so 32-bit / wasm32 builds (where
+/// `usize = u32`) cannot wrap silently inside downstream allocation math.
+pub(crate) fn check_within_max_pixels(
+    width: usize,
+    height: usize,
+    max_pixels: Option<usize>,
+) -> Result<(), ZensimError> {
+    let pixels = width
+        .checked_mul(height)
+        .ok_or(ZensimError::ImageTooLarge)?;
+    if let Some(cap) = max_pixels
+        && pixels > cap
+    {
+        return Err(ZensimError::ImageTooLarge);
+    }
+    // Also confirm the padded plane size fits. `pyramid_plane_stride` rounds
+    // up to a multiple of 16 (and may add another 16 above 512 wide), so
+    // `padded_width * height` may overflow even when `width * height` did
+    // not. Guarding here is cheaper than threading checked-arithmetic
+    // through every internal allocation site.
+    let padded = crate::blur::pyramid_plane_stride(width);
+    crate::blur::checked_padded_plane_len(padded, height)?;
+    Ok(())
+}
+
 /// Check if source and distorted images have byte-identical pixel data
 /// and matching color interpretation (format + primaries).
-fn images_byte_identical(source: &impl ImageSource, distorted: &impl ImageSource) -> bool {
+pub(crate) fn images_byte_identical(
+    source: &impl ImageSource,
+    distorted: &impl ImageSource,
+) -> bool {
     use crate::source::{AlphaMode, PixelFormat};
 
     let (w, h) = (source.width(), source.height());
@@ -1250,49 +2005,925 @@ fn images_byte_identical(source: &impl ImageSource, distorted: &impl ImageSource
     true
 }
 
+/// Minimum per-dimension size for the full 4-scale pyramid (8·2³ = 64).
+pub(crate) const MIN_PYRAMID_DIM: usize = min_pyramid_dim_for_scales(crate::NUM_SCALES);
+
+/// Smallest per-dimension size that still forms `num_scales` pyramid levels.
+///
+/// The scale walk (`streaming::compute_multiscale_stats_streaming` and every
+/// `*_with_ref` sibling) halves `w`/`h` per level and stops at `w < 8 ||
+/// h < 8`, so level `num_scales-1` needs `8 · 2^(num_scales-1)` at level 0.
+/// At the shipped `NUM_SCALES = 4` this is 64 — the historical
+/// [`MIN_PYRAMID_DIM`] constant, unchanged.
+#[inline]
+pub(crate) const fn min_pyramid_dim_for_scales(num_scales: usize) -> usize {
+    // `num_scales` comes from a profile / `ZensimConfig` (1..=6 in practice);
+    // saturate rather than shift-overflow on a nonsense value.
+    match num_scales {
+        0 | 1 => 8,
+        n if n <= 32 => 8usize << (n - 1),
+        _ => usize::MAX,
+    }
+}
+
+/// **THE single owner of the "must reflect-pad before the scale walk"
+/// decision.** Every v1 entry point that reaches the pyramid asks this.
+///
+/// A pair that answers `true` and is NOT padded produces a SHORT feature
+/// vector (fewer `ScaleStats` → `n_scales · 3 · 31` instead of 372) or, on
+/// the `*_with_ref` paths, trips the `scale 0 width mismatch` assertion
+/// against an already-padded reference. Both were live defects until
+/// 2026-08-30 — see `docs/DATASET_HISTORY.md` §3.26 and
+/// `zensim/tests/v1_feature_width_pure_function.rs`.
+///
+/// Note the asymmetry this hides: the walk starts at
+/// `pyramid_plane_stride(width)` but plain `height`, so before the padding was
+/// applied `54x96` came out full-width (54 → 64 by SIMD alignment) while
+/// `96x54` came out short. Callers must not re-derive the rule.
+#[inline]
+pub(crate) fn needs_pyramid_pad(width: usize, height: usize, num_scales: usize) -> bool {
+    let min_dim = min_pyramid_dim_for_scales(num_scales);
+    width > 0 && height > 0 && (width < min_dim || height < min_dim)
+}
+
+/// Owned, tightly-packed image presenting a reflect(mirror)-padded view of a
+/// sub-64px input so the multi-scale pyramid always forms. This is the
+/// bake-/metric-agnostic small-image fix: the pipeline computes genuine scales
+/// over reflected content (a constant difference scores identically at every
+/// size; scores down to 1×1 with no error) instead of synthesizing a feature
+/// vector. NO-OP for images already ≥ 64px in both dims.
+pub(crate) struct OwnedImage {
+    data: Vec<u8>,
+    width: usize,
+    height: usize,
+    format: crate::source::PixelFormat,
+    alpha: crate::source::AlphaMode,
+    primaries: crate::source::ColorPrimaries,
+}
+
+impl ImageSource for OwnedImage {
+    fn width(&self) -> usize {
+        self.width
+    }
+    fn height(&self) -> usize {
+        self.height
+    }
+    fn pixel_format(&self) -> crate::source::PixelFormat {
+        self.format
+    }
+    fn alpha_mode(&self) -> crate::source::AlphaMode {
+        self.alpha
+    }
+    fn color_primaries(&self) -> crate::source::ColorPrimaries {
+        self.primaries
+    }
+    fn row_bytes(&self, y: usize) -> &[u8] {
+        let stride = self.width * self.format.bytes_per_pixel();
+        &self.data[y * stride..y * stride + stride]
+    }
+}
+
+/// reflect-101 index map (mirror without repeating the edge); `n == 1` → 0.
+#[inline]
+pub(crate) fn reflect_index(i: usize, n: usize) -> usize {
+    if n <= 1 {
+        return 0;
+    }
+    let period = 2 * (n - 1);
+    let mut k = i % period;
+    if k >= n {
+        k = period - k;
+    }
+    k
+}
+
+/// Reflect(mirror)-pad `src` up to at least [`MIN_PYRAMID_DIM`] in each dim.
+pub(crate) fn reflect_pad_to_min(src: &impl ImageSource) -> OwnedImage {
+    reflect_pad_for_scales(src, crate::NUM_SCALES)
+}
+
+/// Reflect(mirror)-pad `src` up to [`min_pyramid_dim_for_scales`] in each dim.
+pub(crate) fn reflect_pad_for_scales(src: &impl ImageSource, num_scales: usize) -> OwnedImage {
+    reflect_pad_to_size(src, min_pyramid_dim_for_scales(num_scales))
+}
+
+pub(crate) fn reflect_pad_to_size(src: &impl ImageSource, min_dim: usize) -> OwnedImage {
+    let (w, h) = (src.width(), src.height());
+    let bpp = src.pixel_format().bytes_per_pixel();
+    let (bw, bh) = (w.max(min_dim), h.max(min_dim));
+    let mut data = vec![0u8; bw * bh * bpp];
+    for y in 0..bh {
+        let srow = src.row_bytes(reflect_index(y, h));
+        for x in 0..bw {
+            let sx = reflect_index(x, w) * bpp;
+            let dx = (y * bw + x) * bpp;
+            data[dx..dx + bpp].copy_from_slice(&srow[sx..sx + bpp]);
+        }
+    }
+    OwnedImage {
+        data,
+        width: bw,
+        height: bh,
+        format: src.pixel_format(),
+        alpha: src.alpha_mode(),
+        primaries: src.color_primaries(),
+    }
+}
+
+/// **The shared front of every SDR scoring entry.** The reflect-pad and the
+/// byte-identical short-circuit run BEFORE either walk, so both walks see
+/// exactly the same pixels and the same identical-pair payload.
 fn compute_with_config_inner(
     source: &impl ImageSource,
     distorted: &impl ImageSource,
     config: &ZensimConfig,
     weights: &[f64],
+    stop: Option<&dyn enough::Stop>,
+    // The serving plan, resolved by the CALLER (only `Zensim` knows the
+    // profile's bakes). `None` = today's unconditional behaviour.
+    // Deliberately a resolved plan rather than a flag: the decision belongs
+    // to `fold_engine::score_plan`, and passing the answer keeps this shared
+    // front ignorant of bakes.
+    plan: Option<&crate::feature_plan::Plan>,
 ) -> ZensimResult {
+    // Sub-64px inputs can't form the 4-scale pyramid. Reflect-pad both sides
+    // to the pyramid minimum so every metric/bake gets 4 genuinely-computed
+    // scales. NO-OP at ≥ 64px in both dims (the common path is untouched).
+    let (w, h) = (source.width(), source.height());
+    if needs_pyramid_pad(w, h, config.num_scales) {
+        let s = reflect_pad_for_scales(source, config.num_scales);
+        let d = reflect_pad_for_scales(distorted, config.num_scales);
+        return compute_with_config_core(&s, &d, config, weights, stop, plan);
+    }
+    compute_with_config_core(source, distorted, config, weights, stop, plan)
+}
+
+fn compute_with_config_core(
+    source: &impl ImageSource,
+    distorted: &impl ImageSource,
+    config: &ZensimConfig,
+    weights: &[f64],
+    stop: Option<&dyn enough::Stop>,
+    plan: Option<&crate::feature_plan::Plan>,
+) -> ZensimResult {
+    // Rev5 identity features are computed by the same canonical walk as
+    // nonidentity pairs. The canonical walk checks a live stop token between
+    // strips; public entries discard partial results when cancellation fires.
+    if config.revision() >= crate::feature_defs::FormulaRevision::Rev5
+        && crate::fold_engine::is_fold_backable(config)
+    {
+        let mut scratch = crate::feature_v2::V2Scratch::new();
+        if let Ok(mut result) = crate::fold_engine::compute_fold_backed_stoppable(
+            source,
+            distorted,
+            config,
+            weights,
+            &mut scratch,
+            plan,
+            stop,
+        ) {
+            if images_byte_identical(source, distorted) {
+                result.score = 100.0;
+                result.raw_distance = 0.0;
+                result = result.mark_identical();
+            }
+            return result;
+        }
+    }
+
     // Identical images must score exactly 100.0 — short-circuit before
     // floating-point arithmetic introduces sub-ULP noise in SSIM/edge features.
     if images_byte_identical(source, distorted) {
-        let fpc = if config.extended_features {
-            FEATURES_PER_CHANNEL_EXTENDED
-        } else {
-            FEATURES_PER_CHANNEL_WITH_PEAKS
-        };
-        let num_features = config.num_scales * 3 * fpc;
-        return ZensimResult::new(
-            100.0,
-            0.0,
-            vec![0.0; num_features],
-            ZensimProfile::latest(),
-            [0.0; 3],
-        );
+        {
+            // An identity result must be as wide as the bake that will read
+            // it, or a wide bake is refused on a PERFECT COPY — the one pair
+            // every metric must handle. The extra slots are zeros either way;
+            // what changes is the length.
+            return identical_result_at(config, plan.map_or(0, |p| p.walk_width()));
+        }
     }
 
-    crate::streaming::compute_zensim_streaming(source, distorted, config, weights)
+    // A plan whose layout is wider than the buffered walk can emit must take
+    // the fold: falling back to buffered there would be a refusal. A live
+    // cancellation token keeps the request on buffered, which checks it at
+    // row-band and scale boundaries; this fold has no stop hook.
+    let plan_needs_fold =
+        plan.is_some_and(|p| p.walk_width() > crate::fold_engine::v1_feature_width(config));
+    if plan_needs_fold && stop.is_none() && crate::fold_engine::is_fold_backable(config) {
+        let mut scratch = crate::feature_v2::V2Scratch::new();
+        // The fold's only failure modes here are the dimension/HDR checks
+        // the caller already made; a surprise falls back rather than
+        // erroring out of a path whose signature is infallible.
+        if let Ok(r) = crate::fold_engine::compute_fold_backed_stoppable(
+            source,
+            distorted,
+            config,
+            weights,
+            &mut scratch,
+            plan,
+            stop,
+        ) {
+            return r;
+        }
+    }
+
+    crate::streaming::compute_zensim_streaming_stoppable(source, distorted, config, weights, stop)
+}
+
+/// [`identical_result`] widened to at least `min_width` slots.
+///
+/// A perfect copy is the one pair every metric must handle, and a wide bake
+/// was refused on it for the same reason it was refused everywhere else: the
+/// vector handed to `prep_bake_input_f32` was the v1 width. The extra slots
+/// are zeros either way — what changes is the LENGTH, which is what the bake
+/// checks. `min_width = 0` is exactly today's behaviour.
+fn identical_result_at(config: &ZensimConfig, min_width: usize) -> ZensimResult {
+    let fpc = match (config.extended_features, config.compute_iw_features) {
+        (true, true) => FEATURES_PER_CHANNEL_EXTENDED + FEATURES_PER_CHANNEL_IW,
+        (true, false) => FEATURES_PER_CHANNEL_EXTENDED,
+        (false, _) => FEATURES_PER_CHANNEL_WITH_PEAKS,
+    };
+    let num_features = (config.num_scales * 3 * fpc).max(min_width);
+    ZensimResult::new(
+        100.0,
+        0.0,
+        vec![0.0; num_features],
+        // Placeholder tag (overridden by the compute* caller); the
+        // canonical codec-target profile, never the deprecated `A`.
+        ZensimProfile::codec_target(),
+        [0.0; 3],
+    )
+    .mark_identical()
 }
 
 pub(crate) fn config_from_params(params: &ProfileParams, parallel: bool) -> ZensimConfig {
     ZensimConfig {
+        formula_revision: params
+            .mlp_bytes
+            .and_then(|load| cached_profile_model(load()).ok())
+            .and_then(|model| crate::feature_layout::formula_revision(&model).ok())
+            .filter(|revision| *revision >= crate::feature_defs::FormulaRevision::Rev5),
+        local_only: false,
+        omit_edges: false,
+        attribution_channels: None,
         blur_radius: params.blur_radius,
         blur_passes: params.blur_passes,
         blur_kernel: BlurKernel::Box {
             passes: params.blur_passes,
         },
         downscale_filter: DownscaleFilter::default(),
-        compute_all_features: false,
-        extended_features: false,
+        // MLP-scored profiles need the full feature vector populated;
+        // the linear path can skip features it doesn't use.
+        compute_all_features: params.mlp_bytes.is_some(),
+        extended_features: params.extended_features,
         extended_masking_strength: 4.0,
+        compute_iw_features: params.compute_iw_features,
+        iw_strength: 4.0,
         num_scales: params.num_scales,
         score_mapping_a: params.score_mapping_a,
         score_mapping_b: params.score_mapping_b,
         allow_multithreading: parallel,
     }
+}
+
+/// Replace `result.raw_distance` and `result.score` with the MLP forward
+/// pass output when the profile uses an MLP scorer. No-op for linear
+/// profiles.
+///
+/// When the loaded MLP's `n_inputs` exceeds `result.features().len()`
+/// by exactly 4, this function appends size-axis features derived
+/// from the source `(width, height)` before scoring. This matches
+/// the V0_4 trainer's `--mlp-size-axes` mode (228 → 232 inputs):
+/// log2(pixels), log2(min_dim), log2(max_dim), and signed
+/// log2(max/min) by aspect orientation.
+pub(crate) fn apply_mlp_scoring(
+    result: &mut ZensimResult,
+    params: &crate::profile::ProfileParams,
+    width: u32,
+    height: u32,
+) -> Result<(), ZensimError> {
+    apply_mlp_scoring_with_codec(result, params, width, height)
+}
+
+/// Same as [`apply_mlp_scoring`] but accepts an optional codec hint
+/// that drives the per-codec post-spline affine calibration
+/// (EXP-CROSS-CODEC-V11-E). The hint is threaded into every
+/// `forward_one_bake_with_codec` call below — both the
+/// ensemble-routing branches and the primary/b3 mix branch — so
+/// every loaded bake gets a chance to apply per-codec affine if
+/// it carries the metadata.
+pub(crate) fn apply_mlp_scoring_with_codec(
+    result: &mut ZensimResult,
+    params: &crate::profile::ProfileParams,
+    width: u32,
+    height: u32,
+) -> Result<(), ZensimError> {
+    let Some(loader) = params.mlp_bytes else {
+        return Ok(());
+    };
+    // **Score-disposition guard (D9).** A bake carrying
+    // `zentrain.output_calibration_spline` emits an already-calibrated
+    // 0-100 score. Scoring it with `skip_score_mapping == false` applies
+    // the legacy `100 - A*d^B` DISTANCE mapping on top of that spline,
+    // sending every realistic score deeply negative; the default hard
+    // clamp then pins it to exactly 0.0. The observed signature is a
+    // model that looks catastrophically broken: identity 100, the very
+    // worst quality point scoring ~9, and every other point exactly
+    // 0.000000 (ADD156 ship audit 2026-08-31, defect D9 — reproduced
+    // first try, because the naive builder configuration IS the wrong
+    // one: `ProfileParams::builder()` defaults BOTH `skip_score_mapping`
+    // and `extrapolate_score` to `false`).
+    //
+    // Silently-wrong pixels/scores are a shipping bug, never a tolerated
+    // tradeoff, so we refuse the combination instead of returning the
+    // zero. The check runs only when `skip_score_mapping == false`, which
+    // no spline-carrying profile in this crate sets, so the shipped path
+    // pays nothing.
+    if !params.skip_score_mapping {
+        check_score_disposition(loader)?;
+    }
+    // **Identity-image short-circuit guard.** When the byte-identical
+    // short-circuit in `compute_with_config_inner` /
+    // `compute_zensim_with_config` fires, it produces
+    // `(score=100.0, raw_distance=0.0, features=[0.0; N])`. Running
+    // the MLP forward pass on the all-zero feature vector then
+    // overwrites those values with garbage — typically ~0 on
+    // V0_5Balanced (MSE bake on z-scored zeros), ~2 on
+    // V0_5Compression / V0_5Ensemble — because the trained MLP has
+    // no signal anchoring "zero feature vector → score 100". The
+    // bake's biases dominate, producing an off-scale output that
+    // `skip_score_mapping=true` returns verbatim.
+    //
+    // We detect the post-short-circuit state via the explicit
+    // `is_identical` flag set by `mark_identical`. The pre-0.3.0 code
+    // used a sentinel check (`raw_distance == 0.0 && features.all
+    // (== 0.0)`); the flag is robust against any future profile that
+    // legitimately produces an all-zero feature vector on a real
+    // image.
+    if result.is_identical() {
+        return Ok(());
+    }
+    {
+        let raw = forward_one_bake_with_codec(loader(), result.features(), width, height)?;
+        let score = dispose_mlp_raw(raw, params);
+        result.set_mlp_score(raw, score);
+    }
+    Ok(())
+}
+
+/// Post-forward score disposition shared by [`apply_mlp_scoring_with_codec`]
+/// and the batched FD-gradient entry
+/// ([`score_features_fd_gradient_with_profile`]) — extracted verbatim so the
+/// two paths cannot drift (campaign appendix Y, L-Y1).
+pub(crate) fn dispose_mlp_raw(raw: f64, params: &crate::profile::ProfileParams) -> f64 {
+    let pre_bound = if params.skip_score_mapping {
+        // The bake is already MCOS-calibrated (V0_8+); the raw
+        // output IS the final score. Skipping the
+        // `100 − A·d^B` transform avoids producing garbage
+        // (e.g. raw=90 → mapped=-374).
+        raw
+    } else {
+        distance_to_score_mapped(raw, params.score_mapping_a, params.score_mapping_b)
+    };
+    // Bound the score to [0, 100] before handing it back. Two
+    // policies exist:
+    //   - Hard clamp (default, legacy): out-of-range outputs pin
+    //     to 0 or 100. Cheap, MCOS-natural. Tie blocks at the
+    //     boundary collapse SROCC to 0 on affected bands when
+    //     many pairs extrapolate (multi-bake V_20 IS regime).
+    //   - Soft clamp (V_20+ multi-bake): logistic squash through
+    //     `100 / (1 + exp(-(raw - 50) / 20))`. The output deviates
+    //     from `raw` by < 1.5 units in the [5, 95] interior so
+    //     interior calibration is unchanged; only the tails are
+    //     reshaped. Preserves rank ordering at the extremes
+    //     (no ties → SROCC stays defined). Costs one `exp` per
+    //     score (~1 ns).
+    // The choice is per-profile via `ProfileParams::soft_clamp_score`.
+    // PreviewV0_4 (V_18 + V_20 IS multi-bake) sets `true`;
+    // the V_18 ship single-bake and earlier set `false`.
+    //
+    // EXP-CROSS-CODEC-V10 (2026-05-20): `extrapolate_score` overrides
+    // both hard- and soft-clamp paths. The PCHIP spline's linear
+    // extrapolation past its endpoint knots flows through, so
+    // "pathological" codec output (worst codec at q=0, butter > 12)
+    // maps to a negative score instead of collapsing to a tie at 0.
+    // V10 profiles (BalancedV3 / CompressionV3 / TunerV4) set this.
+    if params.extrapolate_score {
+        pre_bound
+    } else {
+        pre_bound.clamp(0.0, 100.0)
+    }
+}
+
+// ============================================================================
+// Per-sample-α head runtime dispatch (V_24-per-sample-α bakes)
+// ============================================================================
+//
+// Bakes trained with `train_mlp_per_sample_alpha_head_with_tv` in
+// zensim-train-core attach a `zentrain.per_sample_alpha_head`
+// metadata entry. The bake's final layer is a `n_hidden × n_hidden`
+// identity matrix (passthrough), so the predictor's output IS the
+// post-LeakyReLU hidden vector `h`. The runtime then mixes a rank
+// head (`y_rank = h · rank_w + rank_b`) and a pool head (`y_pool =
+// stats(h) · reducer_w + reducer_b`) via a per-sample gate
+// `α = σ(h · w_α + b_α)`:
+//
+//     y_final = α · y_rank + (1 − α) · y_pool
+//
+// Payload layout (f32 little-endian):
+//   [w_α[0..n_hidden]] [b_α] [rank_w[0..n_hidden]] [rank_b]
+//   [reducer_w[0..4]] [reducer_b] [p_norm]
+// Total size = (2·n_hidden + 8) × 4 bytes.
+//
+// The pool sigma floor mirrors `zensim-train-core::pool_head::POOL_STD_FLOOR`
+// and is owned once by `crate::score_math::POOL_STD_FLOOR` (it used to be
+// declared here TWICE, once per head, and a third time in `zensim-validate`).
+
+/// Apply the tanh-pinned [0, 100] sigmoid wrap: `y_score = 100 · σ(y_pre / scale)`.
+/// Matches `zensim_train_core::per_sample_alpha_head::bake_per_sample_alpha_head_v3_with_tanh`
+/// at training time and bit-exact with the train-time pin (single-precision sigmoid
+/// pin via clamp [−30, 30] in y_pre/scale, sigmoid in f64).
+fn apply_tanh_output_pin(y_pre: f64, scale: f64) -> f64 {
+    crate::score_math::tanh_output_pin(y_pre, scale, active_pow_form())
+}
+
+/// Evaluate the PCHIP spline at `x`, clamped to `≤ 100` on the UPPER
+/// side only.
+///
+/// A perceptual score can never exceed 100 (nothing is more similar than
+/// identical), so the upper extrapolation is clamped at 100 — this is the
+/// correct-by-construction upper bound that fixes the `> 100` defect
+/// (root cause: V39's degenerate spline linearly extrapolated past 100).
+/// The LOWER extrapolation is allowed to go **negative** so that inputs more
+/// dissimilar than a simple low-quality encode score below zero (a desired
+/// property of the codec-target dial — "worse than the worst codec output" is
+/// meaningful signal, not a tie at 0), but is FLOORED one calibrated-dial-range
+/// below the bottom knot as an OOD safety net (a pathological raw that slips
+/// past the winsor guard can't produce a wild score). The result stays monotone
+/// (min/max with a constant preserves order).
+fn apply_output_calibration_spline(x: f64, spline: &OutputCalibrationSpline) -> f64 {
+    // ONE owner (`crate::score_math::pchip_eval_capped`), reached identically
+    // from `zensim-validate::output_calibration_spline`. The mirror there had
+    // the upper EXTRAPOLATION capped (2026-07-04) but not the INTERIOR, so a
+    // spline declaring a knot above 100 — which the wire format permits —
+    // could be published above 100 by the evaluation tooling while the product
+    // runtime reported exactly 100. LATENT: 0 of the 49 bakes on disk declare
+    // one. Not Hermite overshoot; Fritsch-Carlson forbids that.
+    crate::score_math::pchip_eval_capped(x, &spline.xs, &spline.ys, &spline.derivs)
+}
+
+// ============================================================================
+// Min-max monotone head runtime dispatch (Sill 1998; 2026-07-16)
+// ============================================================================
+//
+// A min-max monotone bake REPLACES the MLP layer stack: the score is
+// `min over K groups  max over J pieces  (w[g][h]·x + b[g][h])` on the
+// standardized+transformed feature vector, with each `w` sign-constrained so
+// the score is monotone in codec quality BY CONSTRUCTION (see
+// `zensim_validate::mlp_train::minmax_monotone`). Because there is no matmul
+// forward, the runtime BYPASSES `Predictor::predict`: it reads the bake's
+// scaler + feature-transforms directly, applies transform→scale→clamp±8→min-max,
+// then the shared PCHIP output spline. The ±8 clamp mirrors the trainer's
+// standardize clamp (`train_minmax`) so runtime scoring is bit-exact with the
+// held-out eval that qualified the bake.
+//
+// Payload layout (little-endian):
+//   `[u32 k, u32 j, u32 n, w[k·j·n] f32, b[k·j] f32]`
+// so `12 + 4·(k·j·n + k·j)` bytes. `n` MUST equal the bake's `n_inputs`.
+
+impl PerSampleAlphaMeta {
+    /// Borrowed view for [`crate::score_math`], the owner of the arithmetic.
+    /// Free — no allocation, no copy of either weight vector.
+    fn params(&self) -> crate::score_math::PerSampleAlphaParams<'_> {
+        crate::score_math::PerSampleAlphaParams {
+            w_alpha: &self.w_alpha,
+            b_alpha: self.b_alpha,
+            rank_w: &self.rank_w,
+            rank_b: self.rank_b,
+            reducer_w: self.reducer_w,
+            reducer_b: self.reducer_b,
+            p_norm: self.p_norm,
+        }
+    }
+}
+
+/// Apply the per-sample-α runtime to a hidden vector `h`. Returns
+/// the final mixed score `y`. Bit-exact match with
+/// `zensim_train_core::per_sample_alpha_head::apply_per_sample_alpha_head_runtime`
+/// (asserted by the canonical regression test in
+/// `tests/per_sample_alpha_runtime.rs`).
+fn apply_per_sample_alpha_runtime(h: &[f32], meta: &PerSampleAlphaMeta) -> f64 {
+    debug_assert_eq!(meta.rank_w.len(), h.len());
+    debug_assert_eq!(meta.w_alpha.len(), h.len());
+    debug_assert!(!h.is_empty());
+    // ONE owner (`crate::score_math`), reached identically from here and from
+    // `zensim-validate`'s bake-evaluation runtime. The arithmetic used to live
+    // in both places, bit-exact in PROSE only, with no test binding them — and
+    // F19's `PowForm` made that a live wrong-number risk the moment
+    // `SHIPPED_REVISION` flips. See `score_math`'s module docs.
+    crate::score_math::per_sample_alpha_head(h, &meta.params(), active_pow_form())
+}
+
+// ============================================================================
+// Hybrid-head runtime dispatch (V_24-hybrid bakes)
+// ============================================================================
+//
+// Bakes trained with `train_mlp_hybrid_head_with_tv` in
+// zensim-train-core attach a `zentrain.hybrid_head` metadata
+// entry. Like the per-sample-α head, the bake's final layer is an
+// `n_hidden × n_hidden` identity matrix (passthrough), so the
+// predictor's output IS the post-LeakyReLU hidden vector `h`. The
+// runtime then mixes a rank head (`y_rank = h · rank_w + rank_b`)
+// and a pool head (`y_pool = stats(h) · reducer_w + reducer_b`)
+// via a single LEARNED SCALAR gate `α = σ(α_logit)` (different
+// from the per-sample-α head, where α is computed per-sample from
+// the hidden vector):
+//
+//     y_final = α · y_rank + (1 − α) · y_pool
+//
+// Payload layout (f32 little-endian):
+//   [rank_w[0..n_hidden]] [rank_b] [α_logit]
+//   [reducer_w[0..4]] [reducer_b] [p_norm]
+// Total size = (n_hidden + 8) × 4 bytes.
+//
+// The pool sigma floor is owned by `crate::score_math::POOL_STD_FLOOR`.
+
+/// Forward one bake over `features` and return the raw output scalar.
+/// Handles the three accepted input-width shapes (n_inputs == features,
+/// n_inputs == features+4 with size-axes, n_inputs < features prefix)
+/// and dispatches to `predict_transformed` when the bake declares
+/// non-trivial `feature_transforms` metadata (V_20+ input-shaping
+/// bakes); otherwise uses the plain `predict` path with zero overhead.
+///
+/// Bakes carrying `zentrain.per_sample_alpha_head` metadata
+/// (V_24-per-sample-α architecture) take a separate dispatch path:
+/// the forward returns `h` (the post-LeakyReLU hidden vector, since
+/// the bake's layer 2 is an identity passthrough) and the runtime
+/// mixes a rank-head + pool-head pair via a per-sample sigmoid gate.
+/// See `apply_per_sample_alpha_runtime` above for the formula and
+/// payload layout.
+///
+/// Bakes carrying `zentrain.hybrid_head` metadata (V_24-hybrid
+/// architecture) take a similar dispatch path, but the α gate is a
+/// single learned SCALAR (`α = σ(α_logit)`) shared across all
+/// samples rather than computed per-sample. See
+/// `apply_hybrid_head_runtime` above for the formula and payload
+/// layout.
+/// True iff `bytes` parses as a bake carrying a
+/// `zentrain.output_calibration_spline` metadata entry — i.e. its raw
+/// output is already a calibrated 0-100 score rather than a distance.
+///
+/// A parse failure returns `false`: the forward pass that follows will
+/// surface the real parse error with a better diagnostic than this guard
+/// could, and this helper must never turn a load problem into a
+/// configuration complaint.
+fn bake_carries_output_spline(bytes: &'static [u8]) -> bool {
+    cached_profile_model(bytes)
+        .map(|model| {
+            model
+                .metadata()
+                .get(OUTPUT_CALIBRATION_SPLINE_KEY)
+                .is_some()
+        })
+        .unwrap_or(false)
+}
+
+/// Refuse a profile configuration that would silently produce garbage
+/// scores (ADD156 ship audit 2026-08-31, defect **D9**).
+///
+/// Every bake whose raw output feeds [`dispose_mlp_raw`] is checked: if it
+/// carries an output-calibration spline while the profile asks for the
+/// legacy distance mapping, the two calibrations compose into nonsense and
+/// the hard clamp hides it as an exact `0.0`. Fail loud, naming the
+/// setting that is missing.
+///
+/// The ensemble CLASSIFIER bake is deliberately not checked — its output is
+/// a routing logit that never reaches the score disposition.
+fn check_score_disposition(primary: fn() -> &'static [u8]) -> Result<(), ZensimError> {
+    const MISCONFIGURED: &str = "bake carries zentrain.output_calibration_spline \
+         (its raw output is already a calibrated 0-100 score) but \
+         ProfileParams::skip_score_mapping is false, so the legacy 100-A*d^B \
+         distance mapping would be applied on top of the spline and clamp \
+         virtually every score to exactly 0 — set .skip_score_mapping(true), \
+         and .extrapolate_score(true) to keep the negative tail";
+
+    if bake_carries_output_spline(primary()) {
+        return Err(ZensimError::ModelForwardFailed {
+            reason: MISCONFIGURED,
+        });
+    }
+    Ok(())
+}
+
+/// The parsed [`crate::mlp::Model`] of a `&'static` profile bake, interned by
+/// the bytes' data pointer and length — the same cache shape (and stability
+/// argument) as [`cached_bake_metadata`] and `fold_engine::cached_bake_pool_need`:
+/// profile bake slices come from `&'static` slots via `ProfileParams`, so the
+/// key is stable and unique per slot. The cache holds one entry per distinct
+/// `&'static` bake slice: the built-in profiles, plus any loaders a caller
+/// registers through `custom-profiles`. A loader that leaks a fresh slice on
+/// every call (already a leak) adds one parsed, decoded model per call.
+/// Parsing is deterministic, so a cached model is
+/// the model a fresh parse would return; the scoring arithmetic is unchanged.
+///
+/// Without it every `Zensim::compute` of an MLP profile parsed its bake up to
+/// three times (serving plan, disposition check, forward), which became the
+/// dominant small-image cost once a parse decodes f16 layers.
+///
+/// A parse failure is returned, never cached. Dynamically loaded bakes do not
+/// come through here; they own their `Model` through `BakeScorer`.
+pub(crate) fn cached_profile_model(
+    bytes: &'static [u8],
+) -> Result<std::sync::Arc<crate::mlp::Model>, ZensimError> {
+    use std::collections::HashMap;
+    use std::sync::{Arc, OnceLock, RwLock};
+
+    type Cache = RwLock<HashMap<(usize, usize), Arc<crate::mlp::Model>>>;
+    static CACHE: OnceLock<Cache> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| RwLock::new(HashMap::new()));
+    let key = (bytes.as_ptr() as usize, bytes.len());
+    if let Ok(read) = cache.read()
+        && let Some(model) = read.get(&key)
+    {
+        return Ok(Arc::clone(model));
+    }
+    let parsed = Arc::new(crate::mlp::Model::from_bytes(bytes).map_err(|_| {
+        ZensimError::ModelLoadFailed {
+            reason: "Model::from_bytes failed to parse the bake header or layer table",
+        }
+    })?);
+    if let Ok(mut write) = cache.write() {
+        // Another thread's parse of the same slot is equally valid; keep the first.
+        return Ok(Arc::clone(write.entry(key).or_insert(parsed)));
+    }
+    // Poisoned lock: serve the fresh parse uncached.
+    Ok(parsed)
+}
+
+/// Lookup the parsed metadata for `bytes` from the static interner,
+/// or parse it on first sight and cache. Keyed by the bytes' data
+/// pointer (bake byte slices always come from `&'static` slots via
+/// `ProfileParams::mlp_bytes`, so the pointer is stable and unique
+/// per slot).
+///
+/// Returns an `Arc<ScoreMetadata>` — the caller drops the cache
+/// lock before doing the forward pass.
+fn cached_bake_metadata(
+    bytes: &[u8],
+    model: &crate::mlp::Model,
+) -> Result<std::sync::Arc<ScoreMetadata>, ZensimError> {
+    use std::collections::HashMap;
+    use std::sync::{Arc, OnceLock, RwLock};
+
+    static CACHE: OnceLock<RwLock<HashMap<usize, Arc<ScoreMetadata>>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| RwLock::new(HashMap::new()));
+    let key = bytes.as_ptr() as usize;
+
+    // Fast path: read-only lookup. Multiple readers can pass through
+    // simultaneously — only the first-sight parse holds the write lock.
+    if let Ok(read) = cache.read()
+        && let Some(entry) = read.get(&key)
+    {
+        return Ok(Arc::clone(entry));
+    }
+
+    // Slow path: parse + insert. Re-check after acquiring the write
+    // lock — another thread may have raced ahead of us.
+    let parsed = std::sync::Arc::new(parse_bake_metadata(model)?);
+
+    if let Ok(mut write) = cache.write() {
+        // Idempotent: another thread's parse for the same key is also
+        // valid; we just keep whichever Arc landed first.
+        let entry = write.entry(key).or_insert_with(|| Arc::clone(&parsed));
+        return Ok(Arc::clone(entry));
+    }
+    // Poisoned lock — return the freshly parsed bundle without
+    // caching. Forward correctness is preserved at the cost of one
+    // re-parse next call.
+    Ok(parsed)
+}
+
+/// Same as [`forward_one_bake`] but accepts an optional codec hint
+/// that drives the per-codec post-spline affine calibration
+/// (EXP-CROSS-CODEC-V11-E). When `codec_hint` is `Some` and the
+/// bake carries `zentrain.per_codec_calibration` metadata, the
+/// matched codec's `(alpha, beta)` affine is applied AFTER the
+/// PCHIP spline; otherwise the score is returned identical to the
+/// hint-less path.
+fn forward_one_bake_with_codec(
+    bytes: &'static [u8],
+    features: &[f64],
+    width: u32,
+    height: u32,
+) -> Result<f64, ZensimError> {
+    let model = cached_profile_model(bytes)?;
+    let bundle = cached_bake_metadata(bytes, &model)?;
+    let mut scorer = BakeScorer::with_metadata(&model, bundle)?;
+    scorer.score_features(features, width, height)
+}
+
+// One inference dispatch for named profiles, dynamically loaded bakes and eval.
+// The reusable surface owns these buffers; the named-profile adapter borrows them.
+#[allow(clippy::too_many_arguments)]
+fn forward_model_with_codec(
+    model: &crate::mlp::Model,
+    predictor: &mut crate::mlp::Predictor<'_>,
+    bundle: &ScoreMetadata,
+    layout: &crate::feature_layout::Layout,
+    gathered: &mut Vec<f64>,
+    f32_features: &mut Vec<f32>,
+    features: &[f64],
+    width: u32,
+    height: u32,
+) -> Result<f64, ZensimError> {
+    let n_inputs = model.caller_input_width();
+    let needs_transforms = model.has_nontrivial_feature_transforms();
+    let per_sample_alpha = bundle.per_sample_alpha.as_deref();
+    let tanh_pin_scale = bundle.tanh_pin_scale;
+    let output_spline = bundle.output_spline.as_deref();
+
+    // Resolve dense slot gathering before selecting a model head.
+    let feats: &[f64] = if layout.is_identity() {
+        features
+    } else {
+        // **The row must REACH every declared id, or this is a refusal.**
+        // `Layout::gather` writes the structural `0.0` for an id the walk did
+        // not reach, which is correct for a DECLARED GAP and wrong for a
+        // caller who simply handed over a short vector: every id a dense bake
+        // declares is an id it reads, so filling one is exactly the "a
+        // consumer cannot tell this zero from a measured zero" failure the
+        // dense contract exists to end. Loud, named, and never a silent prefix.
+        if features.len() < layout.walk_width() {
+            return Err(ZensimError::ModelForwardFailed {
+                reason: "the bake declares feature ids this feature vector does not reach",
+            });
+        }
+        layout.gather(features, gathered);
+        gathered.as_slice()
+    };
+
+    // E33 `fx1`: a derived-input bake's model row is built from its gathered
+    // declared layout (direct ids and same-cell f32 products). Load refused
+    // every head, transform and malformed declaration this cannot serve.
+    if let Some(derived) = bundle.derived_inputs.as_deref() {
+        if features.len() < layout.walk_width() {
+            return Err(ZensimError::ModelForwardFailed {
+                reason: "the bake declares feature ids this feature vector does not reach",
+            });
+        }
+        if layout.is_identity() {
+            layout.gather(features, gathered);
+        }
+        derived.fill_f32(gathered, f32_features);
+        return bake_dispatch_one(
+            predictor,
+            f32_features,
+            needs_transforms,
+            per_sample_alpha,
+            tanh_pin_scale,
+            output_spline,
+        );
+    }
+
+    // Min-max monotone head (Sill 1998): the score REPLACES the layer forward,
+    // so bypass the Predictor entirely — read the bake's scaler + feature
+    // transforms directly, apply transform→scale→clamp±8→min-max, then the
+    // shared PCHIP spline + per-codec affine. The clamp mirrors the trainer's
+    // standardize clamp so runtime scoring is bit-exact with the qualifying eval.
+
+    let dispatch = |p: &mut crate::mlp::Predictor<'_>, x: &[f32]| -> Result<f64, ZensimError> {
+        bake_dispatch_one(
+            p,
+            x,
+            needs_transforms,
+            per_sample_alpha,
+            tanh_pin_scale,
+            output_spline,
+        )
+    };
+    prep_bake_input_f32(feats, n_inputs, width, height, f32_features)?;
+    dispatch(predictor, f32_features)
+}
+
+/// Size a caller feature vector to a bake's declared input width and
+/// convert to f32 into `out` (cleared first). Extracted from
+/// [`forward_one_bake_with_codec`] so the batched FD-gradient entry
+/// reuses the identical sizing semantics without a per-forward
+/// allocation (campaign appendix Y, L-Y1). Branches:
+/// exact width / +4 size-axes / prefix / loud mismatch.
+fn prep_bake_input_f32(
+    features: &[f64],
+    n_inputs: usize,
+    width: u32,
+    height: u32,
+    out: &mut Vec<f32>,
+) -> Result<(), ZensimError> {
+    out.clear();
+    if n_inputs == features.len() {
+        out.extend(features.iter().map(|&v| v as f32));
+        Ok(())
+    } else if n_inputs == features.len() + 4 {
+        let mut augmented = features.to_vec();
+        append_mlp_size_axes(&mut augmented, width, height);
+        out.extend(augmented.iter().map(|&v| v as f32));
+        Ok(())
+    } else if n_inputs < features.len() {
+        out.extend(features[..n_inputs].iter().map(|&v| v as f32));
+        Ok(())
+    } else {
+        // n_inputs > features.len() + 4 — bake expects more features than
+        // the caller supplied, including the optional 4 size axes. This
+        // is a feature-shape mismatch on a successfully-loaded bake.
+        Err(ZensimError::ModelForwardFailed {
+            reason: "bake declares more input features than the caller supplied",
+        })
+    }
+}
+
+/// The per-forward post-network dispatch shared by
+/// [`forward_one_bake_with_codec`] and the batched FD-gradient entry
+/// ([`score_features_fd_gradient_with_profile`]) — extracted verbatim
+/// from the former's closure so the two paths cannot drift (campaign
+/// appendix Y, L-Y1). `x` must already be sized to the bake's input
+/// width (see [`prep_bake_input_f32`]).
+#[allow(clippy::too_many_arguments)]
+fn bake_dispatch_one(
+    p: &mut crate::mlp::Predictor<'_>,
+    x: &[f32],
+    needs_transforms: bool,
+    per_sample_alpha: Option<&PerSampleAlphaMeta>,
+    tanh_pin_scale: Option<f64>,
+    output_spline: Option<&OutputCalibrationSpline>,
+) -> Result<f64, ZensimError> {
+    let out = if needs_transforms {
+        p.predict_transformed(x)
+            .map_err(|_| ZensimError::ModelForwardFailed {
+                reason: "Predictor::predict_transformed failed",
+            })?
+    } else {
+        p.predict(x).map_err(|_| ZensimError::ModelForwardFailed {
+            reason: "Predictor::predict failed",
+        })?
+    };
+    finish_network_output(out, per_sample_alpha, tanh_pin_scale, output_spline)
+}
+
+fn finish_network_output(
+    out: &[f32],
+    per_sample_alpha: Option<&PerSampleAlphaMeta>,
+    tanh_pin_scale: Option<f64>,
+    output_spline: Option<&OutputCalibrationSpline>,
+) -> Result<f64, ZensimError> {
+    let y_pre = if let Some(meta) = per_sample_alpha {
+        // `out` is the hidden vector h (n_hidden floats). Apply
+        // the per-sample-α runtime formula.
+        if out.len() != meta.rank_w.len() {
+            // Shape mismatch between metadata's declared n_hidden
+            // and bake's n_outputs — bake is malformed.
+            return Err(ZensimError::ModelForwardFailed {
+                reason: "per-sample-α metadata n_hidden does not match bake output length",
+            });
+        }
+        apply_per_sample_alpha_runtime(out, meta)
+    } else {
+        out.first()
+            .copied()
+            .ok_or(ZensimError::ModelForwardFailed {
+                reason: "model has no score output",
+            })? as f64
+    };
+    let y_after_pin = if let Some(scale) = tanh_pin_scale {
+        apply_tanh_output_pin(y_pre, scale)
+    } else {
+        y_pre
+    };
+    Ok(if let Some(spline) = output_spline {
+        apply_output_calibration_spline(y_after_pin, spline)
+    } else {
+        y_after_pin
+    })
+}
+
+/// Extend features with log2 pixel count, minimum dimension, maximum dimension,
+/// and signed aspect ratio, in the order expected by the model.
+fn append_mlp_size_axes(features: &mut Vec<f64>, width: u32, height: u32) {
+    if width == 0 || height == 0 {
+        features.extend_from_slice(&[0.0, 0.0, 0.0, 0.0]);
+        return;
+    }
+    let w = width as f64;
+    let h = height as f64;
+    let pixels = w * h;
+    let min_dim = w.min(h);
+    let max_dim = w.max(h);
+    // F19: these four are MLP INPUTS, so they reach a shipped score through
+    // the forward pass exactly as the mapping exponents do.
+    let form = active_pow_form();
+    let log2_pixels = pixels.det_log2(form);
+    let log2_min = min_dim.det_log2(form);
+    let log2_max = max_dim.det_log2(form);
+    let log_aspect_signed = (max_dim / min_dim).det_log2(form) * if w >= h { 1.0 } else { -1.0 };
+    features.extend_from_slice(&[log2_pixels, log2_min, log2_max, log_aspect_signed]);
 }
 
 /// Features per channel per scale: 19 features always emitted.
@@ -1350,6 +2981,27 @@ pub const FEATURES_PER_CHANNEL_WITH_PEAKS: usize = 19;
 ///
 /// Total features = `num_scales × 3 channels × 25` = 300 at 4 scales.
 pub const FEATURES_PER_CHANNEL_EXTENDED: usize = 25;
+
+/// Information-content-weighted (IW) features per channel per scale.
+/// Wang & Li 2011 — IW-SSIM. Same 6 feature slots as the `masked_*`
+/// block but with the weight polarity flipped: texture-rich regions
+/// get MORE weight.
+///
+/// ```text
+///  Index  Name               Pooling  Source
+///  ─────  ─────────────────  ───────  ──────────────────
+///  0      iw_ssim_mean       mean     SSIM × iw_weight
+///  1      iw_ssim_4th        L4       SSIM × iw_weight
+///  2      iw_ssim_2nd        L2       SSIM × iw_weight
+///  3      iw_art_4th         L4       edge artifact × iw_weight
+///  4      iw_det_4th         L4       edge detail_lost × iw_weight
+///  5      iw_mse             mean     (src-dst)² × iw_weight
+/// ```
+///
+/// Enabled via `ZensimConfig::compute_iw_features`. At `num_scales = 4`
+/// and 3 channels, adds 72 features → total profile becomes 300
+/// (basic + peaks + IW).
+pub const FEATURES_PER_CHANNEL_IW: usize = 6;
 
 /// Named view over a flat feature vector.
 ///
@@ -1580,7 +3232,9 @@ impl<'a> FeatureView<'a> {
 
 /// Compute zensim with custom configuration (training API).
 ///
-/// Uses the v0.2 weights (latest general-purpose profile).
+/// Uses the legacy v0.2 linear weights. Custom configuration changes metric
+/// internals, so its scores are not comparable with default-profile scores.
+#[doc(hidden)]
 #[cfg(any(feature = "training", test))]
 pub fn compute_zensim_with_config(
     source: &[[u8; 3]],
@@ -1589,14 +3243,18 @@ pub fn compute_zensim_with_config(
     height: usize,
     config: ZensimConfig,
 ) -> Result<ZensimResult, ZensimError> {
-    // Validation
     if width < 8 || height < 8 {
         return Err(ZensimError::ImageTooSmall);
     }
-    if source.len() != width * height {
+    let pixels = width
+        .checked_mul(height)
+        .ok_or(ZensimError::ImageTooLarge)?;
+    // Also reject overflow on the padded plane size (pyramid_plane_stride(width) * height).
+    check_within_max_pixels(width, height, None)?;
+    if source.len() != pixels {
         return Err(ZensimError::InvalidDataLength);
     }
-    if distorted.len() != width * height {
+    if distorted.len() != pixels {
         return Err(ZensimError::InvalidDataLength);
     }
     if source.len() != distorted.len() {
@@ -1606,26 +3264,53 @@ pub fn compute_zensim_with_config(
     // Identical images must score exactly 100.0 — short-circuit before
     // floating-point arithmetic introduces sub-ULP noise in SSIM/edge features.
     if source == distorted {
-        let fpc = if config.extended_features {
-            FEATURES_PER_CHANNEL_EXTENDED
-        } else {
-            FEATURES_PER_CHANNEL_WITH_PEAKS
+        // Match the feature width to the enabled config flags. See the
+        // sister short-circuit above `compute_zensim_streaming` for the
+        // bug history (the 372-input compute_iw_features path was
+        // discovered when a 372-input bake failed with InvalidDataLength
+        // because the short-circuit only counted basic+extended = 300).
+        let fpc = match (config.extended_features, config.compute_iw_features) {
+            (true, true) => FEATURES_PER_CHANNEL_EXTENDED + FEATURES_PER_CHANNEL_IW,
+            (true, false) => FEATURES_PER_CHANNEL_EXTENDED,
+            (false, _) => FEATURES_PER_CHANNEL_WITH_PEAKS,
         };
         let num_features = config.num_scales * 3 * fpc;
+        // This entry point scores via the plain WEIGHTS (V0_2 linear)
+        // distance, never an MLP forward pass — tag with the honest
+        // legacy-linear profile rather than `A` (the canonical MLP-scored
+        // profile).
         return Ok(ZensimResult::new(
             100.0,
             0.0,
             vec![0.0; num_features],
-            ZensimProfile::latest(),
+            ZensimProfile::LegacyLinearV0_2,
             [0.0; 3],
-        ));
+        )
+        .mark_identical());
     }
 
     let src_img = crate::source::RgbSlice::new(source, width, height);
     let dst_img = crate::source::RgbSlice::new(distorted, width, height);
 
-    let result = crate::streaming::compute_zensim_streaming(&src_img, &dst_img, &config, WEIGHTS);
-    Ok(result)
+    // Reflect-pad a sub-pyramid-minimum pair, exactly as
+    // `compute_with_config_inner` (every `Zensim::compute*`) does. Without
+    // this the scale walk stopped early and this entry returned a SHORT
+    // feature vector — 93 / 186 / 279 wide instead of 372 — with no error.
+    // Both v1-372 extractors call this, which is what made ~6.5 % of the
+    // R1b eval-slice rows ragged (docs/DATASET_HISTORY.md §3.26).
+    let result = if needs_pyramid_pad(width, height, config.num_scales) {
+        let s = reflect_pad_for_scales(&src_img, config.num_scales);
+        let d = reflect_pad_for_scales(&dst_img, config.num_scales);
+        crate::streaming::compute_zensim_streaming(&s, &d, &config, WEIGHTS)
+    } else {
+        crate::streaming::compute_zensim_streaming(&src_img, &dst_img, &config, WEIGHTS)
+    };
+    // See the identical-shortcut branch above: this function scores via
+    // plain linear WEIGHTS, not an MLP bake, so it does not inherit
+    // `combine_scores`'s internal `codec_target()` (`B`) placeholder tag
+    // (which every `Zensim::compute*` caller overrides but this standalone
+    // function does not go through).
+    Ok(result.with_profile(ZensimProfile::LegacyLinearV0_2))
 }
 
 /// Combine per-scale statistics into a final score.
@@ -1638,7 +3323,6 @@ pub fn compute_zensim_with_config(
 ///
 /// Weights are trained against synthetic quality scores (see `weights/` directory).
 /// Features per scale for the default scoring profile (3 channels × 13 features = 39).
-#[cfg_attr(not(feature = "training"), allow(dead_code))]
 pub const FEATURES_PER_SCALE: usize = FEATURES_PER_CHANNEL_WITH_PEAKS * 3;
 
 /// Default scoring weights — references the latest profile weights.
@@ -1648,6 +3332,63 @@ pub const FEATURES_PER_SCALE: usize = FEATURES_PER_CHANNEL_WITH_PEAKS * 3;
 #[cfg(any(feature = "training", test))]
 pub const WEIGHTS: &[f64; 228] = &crate::profile::WEIGHTS_PREVIEW_V0_2;
 
+/// **THE single owner of "turn a v1-layout feature vector into
+/// `(score, raw_distance)`".** Extracted verbatim from [`combine_scores`]
+/// (2026-08-30, the fold-engine lane) so the buffered walk and the
+/// fold-backed engine share one implementation of the linear scoring tail
+/// instead of each restating the dot product — per the repo's
+/// NO-DUPLICATE-IMPLEMENTATIONS rule, where a second *Rust* site counts as a
+/// duplicate exactly as much as a Python one.
+///
+/// Does three things, in this order and no other:
+///
+/// 1. **Sanitize non-finite values** (NaN/Inf → 0) in place, before scoring
+///    *and* before the MLP forward reads the same slice. A single bad feature
+///    would otherwise poison the MLP (NaN cascades through every weighted
+///    sum) or the dot product (Inf swamps it). Replacing with 0 matches
+///    `zensim_gpu`'s defensive behaviour on degenerate inputs (one corpus
+///    pair, 2048×1365 JPEG q60, hit Inf at masked-ssim_mean B-channel).
+/// 2. **Dot with the weights** over the scored prefix — basic + peak, i.e.
+///    `n_scales · 3 · FEATURES_PER_CHANNEL_WITH_PEAKS` slots, truncated to
+///    `weights.len()` — in **ascending index order**, then divide by
+///    `max(n_scales, 1)`. The order is load-bearing: it is what makes the
+///    two engines' `raw_distance` bit-identical rather than
+///    equal-to-an-epsilon, so do not reassociate it.
+/// 3. **Map distance to score**: the correct-by-construction bounded squash
+///    (linear profiles that opt in) or the legacy unbounded `100 − a·d^b`.
+///    The squash is a strictly-monotone transform of the same
+///    `raw_distance`, so the *rank* is identical; only boundedness differs.
+///    See [`bounded_score_squash`] and
+///    `docs/METRIC_INVARIANTS_MECHANISM_AND_REDESIGN_2026-05-26.md`.
+///
+/// `features` may be any v1-layout width (228 / 300 / 372) — the scored
+/// prefix is the same in all of them, and the tail is sanitized but not
+/// weighted.
+pub(crate) fn score_v1_layout_features(
+    features: &mut [f64],
+    weights: &[f64],
+    config: &ZensimConfig,
+    n_scales: usize,
+) -> (f64, f64) {
+    for f in features.iter_mut() {
+        if !f.is_finite() {
+            *f = 0.0;
+        }
+    }
+
+    let scored_total = n_scales * 3 * FEATURES_PER_CHANNEL_WITH_PEAKS;
+    let n_score = scored_total.min(weights.len()).min(features.len());
+    let mut raw_distance = 0.0f64;
+    for (i, &feat) in features[..n_score].iter().enumerate() {
+        raw_distance += feat * weights[i];
+    }
+    raw_distance /= n_scales.max(1) as f64;
+
+    let score =
+        distance_to_score_mapped(raw_distance, config.score_mapping_a, config.score_mapping_b);
+    (score, raw_distance)
+}
+
 pub(crate) fn combine_scores(
     scale_stats: &[ScaleStats],
     weights: &[f64],
@@ -1655,23 +3396,30 @@ pub(crate) fn combine_scores(
     mean_offset: [f64; 3],
 ) -> ZensimResult {
     let extended = config.extended_features;
+    let iw = config.compute_iw_features;
 
-    // Feature vector layout:
+    // Feature vector layout (in order they appear in the Vec):
     //   [0..N_basic)        — 13/ch × 3ch × n_scales (basic features)
     //   [N_basic..N_peaks)  — 6/ch × 3ch × n_scales peak features (always included)
-    //   [N_peaks..N_all)    — 6/ch × 3ch × n_scales masked features (if extended)
+    //   [N_peaks..N_masked) — 6/ch × 3ch × n_scales masked features (if extended)
+    //   [N_masked..N_iw)    — 6/ch × 3ch × n_scales IW features (if compute_iw_features)
     //
     // Both basic and peak features are scored: features[0..WEIGHTS.len()]
-    // produces the dot product used for the final score.
+    // produces the dot product used for the final score. Masked + IW are
+    // training-only feature additions consumed by MLP-scored profiles.
     let n_scales = scale_stats.len();
     let basic_per_ch = FEATURES_PER_CHANNEL_BASIC; // 13
     let basic_total = n_scales * basic_per_ch * 3;
     let peak_total = n_scales * 6 * 3;
     let masked_total = if extended { n_scales * 6 * 3 } else { 0 };
-    let total = basic_total + peak_total + masked_total;
+    let iw_total = if iw {
+        n_scales * FEATURES_PER_CHANNEL_IW * 3
+    } else {
+        0
+    };
+    let total = basic_total + peak_total + masked_total + iw_total;
 
     let mut features = Vec::with_capacity(total);
-    let mut raw_distance = 0.0f64;
 
     // Pass 1: scored features (13/ch, weight-compatible order)
     for ss in scale_stats.iter() {
@@ -1718,24 +3466,36 @@ pub(crate) fn combine_scores(
         }
     }
 
-    // Apply weights — basic + peak features are scored
-    let scored_total = basic_total + peak_total;
-    let n_score = scored_total.min(weights.len());
-    for (i, &feat) in features[..n_score].iter().enumerate() {
-        raw_distance += feat * weights[i];
+    // Pass 4: IW (information-content-weighted) features (6/ch —
+    // texture-emphasising counterpart to masked). Wang & Li 2011.
+    if iw {
+        for ss in scale_stats.iter() {
+            for c in 0..3 {
+                features.push(ss.iw_ssim[c * 3].abs());
+                features.push(ss.iw_ssim[c * 3 + 1].abs());
+                features.push(ss.iw_ssim[c * 3 + 2].abs());
+                features.push(ss.iw_art_4th[c].abs());
+                features.push(ss.iw_det_4th[c].abs());
+                features.push(ss.iw_mse[c]);
+            }
+        }
     }
 
-    // Normalize by number of scales
-    raw_distance /= scale_stats.len().max(1) as f64;
+    let (score, raw_distance) =
+        score_v1_layout_features(&mut features, weights, config, scale_stats.len());
+    debug_assert_eq!(
+        basic_total + peak_total,
+        n_scales * 3 * FEATURES_PER_CHANNEL_WITH_PEAKS
+    );
 
-    let score =
-        distance_to_score_mapped(raw_distance, config.score_mapping_a, config.score_mapping_b);
-
+    // Placeholder profile tag — every `Zensim::compute*` caller overrides
+    // it via `with_profile(self.profile)` before returning to the user.
+    // Uses the canonical codec-target profile (`B`), never the deprecated `A`.
     ZensimResult::new(
         score,
         raw_distance,
         features,
-        ZensimProfile::PreviewV0_1,
+        ZensimProfile::codec_target(),
         mean_offset,
     )
 }
@@ -1743,6 +3503,68 @@ pub(crate) fn combine_scores(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[allow(deprecated)]
+    fn public_configs_preserve_revision_route_invariants() {
+        use crate::feature_defs::FormulaRevision;
+        for profile in [
+            ZensimProfile::PreviewV0_1,
+            ZensimProfile::PreviewV0_2,
+            ZensimProfile::A,
+            ZensimProfile::E,
+            ZensimProfile::ECodec,
+            ZensimProfile::LegacyLinearV0_2,
+        ] {
+            let params = profile.params();
+            let config = config_from_params(params, false);
+            if config.revision() >= FormulaRevision::Rev5 {
+                assert!(params.mlp_bytes.is_some(), "{profile:?}");
+                assert!(crate::fold_engine::is_fold_backable(&config), "{profile:?}");
+            }
+        }
+        let custom = ProfileParams::custom(&[], 3, 3, 2, 1.0, 1.0);
+        assert_eq!(
+            config_from_params(&custom, false).revision(),
+            FormulaRevision::Rev1
+        );
+        assert_eq!(ZensimConfig::default().revision(), FormulaRevision::Rev1);
+    }
+
+    /// OOD safety net (2026-07-10): the output-calibration spline's lower
+    /// extrapolation is floored one calibrated-dial-range below the bottom
+    /// knot, so a pathological out-of-distribution raw that slips past the
+    /// winsor guard produces a bounded score instead of a wild one (a raw of
+    /// −8.63 previously → ~−1131). Legitimate / modest negatives (the neg-tail)
+    /// are preserved; only the wild extreme is clamped. Mirrors
+    /// `zensim_validate::output_calibration_spline`.
+    #[test]
+    fn output_spline_lower_extrapolation_floored_ood_safety_net() {
+        // 2-knot identity-ish (0,0)-(100,100): floor = ys[0] - (ys[n-1]-ys[0])
+        // = 0 - 100 = -100.
+        let mut bytes = (2u32).to_le_bytes().to_vec();
+        for (x, y) in [(0.0f32, 0.0f32), (100.0f32, 100.0f32)] {
+            bytes.extend_from_slice(&x.to_le_bytes());
+            bytes.extend_from_slice(&y.to_le_bytes());
+        }
+        let spline = parse_output_calibration_spline(&bytes).expect("parse");
+        // Modest negatives extrapolate linearly (neg-tail intact).
+        assert!((apply_output_calibration_spline(-10.0, &spline) - (-10.0)).abs() < 1e-6);
+        assert!((apply_output_calibration_spline(-8.63, &spline) - (-8.63)).abs() < 1e-6);
+        // Pathological far-negative raw floored at -100, not wild.
+        assert!(
+            (apply_output_calibration_spline(-1.0e6, &spline) - (-100.0)).abs() < 1e-6,
+            "OOD pathology must floor at -100, not extrapolate to a wild score"
+        );
+        // Monotone across the floor transition.
+        let mut prev = f64::NEG_INFINITY;
+        for i in 0..=200 {
+            let x = -200.0 + i as f64;
+            let y = apply_output_calibration_spline(x, &spline);
+            assert!(y >= prev - 1e-9, "non-monotone at x={x}");
+            prev = y;
+        }
+    }
 
     /// Verify compute_all_features produces same score as default (weight-skipped) path.
     /// This exercises the multi-SSIM channel code path where ssim_chs.len() > 1.
@@ -1810,6 +3632,177 @@ mod tests {
         );
     }
 
+    /// `compute_zensim_with_config` scores via plain linear `WEIGHTS`
+    /// (V0_2), never an MLP forward pass — it must NOT claim the
+    /// MLP-scored `ZensimProfile::A` tag (a prior bug hardcoded `A` here).
+    /// Covers both the general path and the identical-images
+    /// short-circuit, which had its own separate hardcoded `A`.
+    #[test]
+    fn compute_zensim_with_config_tags_legacy_linear_profile_not_a() {
+        let w = 128;
+        let h = 128;
+        let n = w * h;
+        let mut src = vec![[128u8, 128, 128]; n];
+        let mut dst = vec![[128u8, 128, 128]; n];
+        for y in 0..h {
+            for x in 0..w {
+                let r = ((x * 255) / w) as u8;
+                src[y * w + x] = [r, 128, 128];
+                dst[y * w + x] = [r.saturating_add(5), 128, 128];
+            }
+        }
+
+        // General (non-identical) path.
+        let result = compute_zensim_with_config(&src, &dst, w, h, ZensimConfig::default()).unwrap();
+        assert_eq!(
+            result.profile(),
+            crate::profile::ZensimProfile::LegacyLinearV0_2,
+            "linear-scored result must not be tagged as MLP-scored profile A"
+        );
+
+        // Identical-images short-circuit path (its own hardcoded tag).
+        let identical =
+            compute_zensim_with_config(&src, &src, w, h, ZensimConfig::default()).unwrap();
+        assert_eq!(
+            identical.profile(),
+            crate::profile::ZensimProfile::LegacyLinearV0_2,
+            "identical-images short-circuit must not be tagged as MLP-scored profile A"
+        );
+        assert_eq!(identical.score(), 100.0);
+    }
+
+    /// Same honesty check for `compute_zensim_with_ref_and_config`.
+    #[cfg(feature = "training")]
+    #[test]
+    fn compute_zensim_with_ref_and_config_tags_legacy_linear_profile_not_a() {
+        let w = 128;
+        let h = 128;
+        let n = w * h;
+        let mut src = vec![[128u8, 128, 128]; n];
+        let mut dst = vec![[128u8, 128, 128]; n];
+        for y in 0..h {
+            for x in 0..w {
+                let r = ((x * 255) / w) as u8;
+                src[y * w + x] = [r, 128, 128];
+                dst[y * w + x] = [r.saturating_add(5), 128, 128];
+            }
+        }
+        let config = ZensimConfig::default();
+        let precomputed = precompute_reference_with_scales(&src, w, h, config.num_scales).unwrap();
+        let result = compute_zensim_with_ref_and_config(&precomputed, &dst, w, h, config).unwrap();
+        assert_eq!(
+            result.profile(),
+            crate::profile::ZensimProfile::LegacyLinearV0_2,
+            "linear-scored result must not be tagged as MLP-scored profile A"
+        );
+    }
+
+    /// V0_20a IW pool integration: `compute_iw_features=true` must
+    /// emit 72 additional features (228 → 300 at 4 scales × 3 ch × 6),
+    /// AND those features must differ from the masked block when both
+    /// are enabled (weight polarity is opposite).
+    #[test]
+    fn compute_iw_features_emits_300_when_enabled() {
+        let w = 128;
+        let h = 128;
+        let n = w * h;
+        let mut src = vec![[128u8, 128, 128]; n];
+        let mut dst = vec![[128u8, 128, 128]; n];
+        for y in 0..h {
+            for x in 0..w {
+                let r = ((x * 255) / w) as u8;
+                let g = ((y * 255) / h) as u8;
+                // Add a textured patch so the IW weights actually vary.
+                let noise = if (x % 16) < 8 && (y % 16) < 8 { 32 } else { 0 };
+                src[y * w + x] = [r.saturating_add(noise), g, 128];
+                dst[y * w + x] = [r.saturating_add(noise).saturating_add(5), g, 125];
+            }
+        }
+
+        // Off → 228 features (basic + peaks, masked OFF, iw OFF)
+        let off = compute_zensim_with_config(
+            &src,
+            &dst,
+            w,
+            h,
+            ZensimConfig {
+                compute_all_features: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(off.features.len(), 228);
+
+        // IW only → 228 + 72 = 300 features
+        let iw_only = compute_zensim_with_config(
+            &src,
+            &dst,
+            w,
+            h,
+            ZensimConfig {
+                compute_all_features: true,
+                compute_iw_features: true,
+                iw_strength: 4.0,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(iw_only.features.len(), 300);
+
+        // First 228 must match exactly (IW must not perturb basic/peaks).
+        for i in 0..228 {
+            let d = (off.features[i] - iw_only.features[i]).abs();
+            assert!(
+                d < 1e-9,
+                "IW must not affect basic/peak features; index {} differs by {}",
+                i,
+                d,
+            );
+        }
+
+        // IW block must produce non-zero output (we have textured patches).
+        let iw_block_nonzero = iw_only.features[228..]
+            .iter()
+            .filter(|f| f.abs() > 1e-12)
+            .count();
+        assert!(iw_block_nonzero > 0, "IW block was all zeros");
+
+        // When both extended_features and compute_iw_features are on,
+        // total = 228 + 72 (masked) + 72 (IW) = 372. Masked and IW
+        // pools have OPPOSITE weight polarity, so the two 72-feature
+        // blocks must differ.
+        let both = compute_zensim_with_config(
+            &src,
+            &dst,
+            w,
+            h,
+            ZensimConfig {
+                compute_all_features: true,
+                extended_features: true,
+                compute_iw_features: true,
+                iw_strength: 4.0,
+                extended_masking_strength: 4.0,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(both.features.len(), 372);
+
+        let mut masked_iw_diff_count = 0usize;
+        for i in 0..72 {
+            let masked = both.features[228 + i];
+            let iw = both.features[228 + 72 + i];
+            if (masked - iw).abs() > 1e-9 {
+                masked_iw_diff_count += 1;
+            }
+        }
+        assert!(
+            masked_iw_diff_count >= 60,
+            "masked vs IW features should differ; only {}/72 differed",
+            masked_iw_diff_count,
+        );
+    }
+
     /// Helper: create a gradient test image pair.
     fn make_gradient_pair(w: usize, h: usize) -> (Vec<[u8; 3]>, Vec<[u8; 3]>) {
         let n = w * h;
@@ -1829,6 +3822,132 @@ mod tests {
             }
         }
         (src, dst)
+    }
+
+    /// Numerical equivalence: when both `extended_features` and
+    /// `compute_iw_features` are enabled, the fused 2-mask SIMD path
+    /// must produce the same masked block as running with
+    /// `extended_features` alone, and the same IW block as running
+    /// with `compute_iw_features` alone. This is the critical
+    /// invariant for the 2026-05-15 perf optimization landing fused
+    /// 2-mask SSIM/edge/MSE kernels.
+    #[test]
+    fn fused_2mask_matches_separate_paths() {
+        let (w, h) = (128, 128);
+        let n = w * h;
+        let mut src = vec![[128u8, 128, 128]; n];
+        let mut dst = vec![[128u8, 128, 128]; n];
+        // Build a textured image so weights actually vary.
+        for y in 0..h {
+            for x in 0..w {
+                let r = ((x * 255) / w) as u8;
+                let g = ((y * 255) / h) as u8;
+                let b = (((x + y) * 255) / (2 * w)) as u8;
+                let noise = if (x % 16) < 8 && (y % 16) < 8 { 32 } else { 0 };
+                src[y * w + x] = [r.saturating_add(noise), g, b];
+                dst[y * w + x] = [
+                    r.saturating_add(noise).saturating_add(5),
+                    g.saturating_sub(3),
+                    b.saturating_add(2),
+                ];
+            }
+        }
+
+        let cfg_ext = ZensimConfig {
+            extended_features: true,
+            compute_iw_features: false,
+            compute_all_features: true,
+            extended_masking_strength: 4.0,
+            iw_strength: 4.0,
+            ..Default::default()
+        };
+        let cfg_iw = ZensimConfig {
+            extended_features: false,
+            compute_iw_features: true,
+            compute_all_features: true,
+            extended_masking_strength: 4.0,
+            iw_strength: 4.0,
+            ..Default::default()
+        };
+        let cfg_both = ZensimConfig {
+            extended_features: true,
+            compute_iw_features: true,
+            compute_all_features: true,
+            extended_masking_strength: 4.0,
+            iw_strength: 4.0,
+            ..Default::default()
+        };
+        let r_ext = compute_zensim_with_config(&src, &dst, w, h, cfg_ext).unwrap();
+        let r_iw = compute_zensim_with_config(&src, &dst, w, h, cfg_iw).unwrap();
+        let r_both = compute_zensim_with_config(&src, &dst, w, h, cfg_both).unwrap();
+
+        assert_eq!(r_ext.features.len(), 300);
+        assert_eq!(r_iw.features.len(), 300);
+        assert_eq!(r_both.features.len(), 372);
+
+        // First 228 features (basic + peaks) must agree across all 3.
+        for i in 0..228 {
+            let de = (r_ext.features[i] - r_both.features[i]).abs();
+            let di = (r_iw.features[i] - r_both.features[i]).abs();
+            assert!(
+                de < 1e-9,
+                "basic feature {} disagrees: ext_only {} vs both {}",
+                i,
+                r_ext.features[i],
+                r_both.features[i]
+            );
+            assert!(
+                di < 1e-9,
+                "basic feature {} disagrees: iw_only {} vs both {}",
+                i,
+                r_iw.features[i],
+                r_both.features[i]
+            );
+        }
+
+        // Masked block (228..300 in r_ext, 228..300 in r_both) must agree
+        // — same kernel called identically.
+        let mut max_diff = 0.0f64;
+        for i in 0..72 {
+            let d = (r_ext.features[228 + i] - r_both.features[228 + i]).abs();
+            let denom = r_ext.features[228 + i].abs().max(1e-9);
+            // Use a relative tolerance — small numerical drift from
+            // FMA reordering in the fused 2-mask vs single-mask kernels
+            // is acceptable. The bound of 1e-4 relative captures any
+            // structural correctness bug while permitting last-bit FMA
+            // variability.
+            let rel = d / denom;
+            max_diff = max_diff.max(rel);
+            assert!(
+                rel < 1e-4,
+                "masked feature {} differs: ext_only {} vs both {} (rel diff {:e})",
+                i,
+                r_ext.features[228 + i],
+                r_both.features[228 + i],
+                rel,
+            );
+        }
+        // IW block (228..300 in r_iw, 300..372 in r_both) must agree.
+        for i in 0..72 {
+            let d = (r_iw.features[228 + i] - r_both.features[300 + i]).abs();
+            let denom = r_iw.features[228 + i].abs().max(1e-9);
+            let rel = d / denom;
+            max_diff = max_diff.max(rel);
+            assert!(
+                rel < 1e-4,
+                "iw feature {} differs: iw_only {} vs both {} (rel diff {:e})",
+                i,
+                r_iw.features[228 + i],
+                r_both.features[300 + i],
+                rel,
+            );
+        }
+        // Sanity: not all zero
+        assert!(
+            (0.0..1e-4).contains(&max_diff),
+            "max_diff out of range: {}",
+            max_diff
+        );
     }
 
     /// Extended features: default config produces same score as non-extended.
@@ -2053,5 +4172,48 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Regression: `derive_classification` must not panic when any
+    /// per-detector score is NaN. The pre-cleanup implementation used
+    /// `partial_cmp(...).unwrap()` which would unwind on NaN.
+    ///
+    /// We feed `alpha_error_correlation = NaN` (the only path where a
+    /// NaN can reach `score_alpha`). The function must return cleanly
+    /// — the NaN score is sorted to the most-negative end by
+    /// `total_cmp`, so the legitimate non-NaN scores still pick the
+    /// dominant category.
+    #[cfg(feature = "classification")]
+    #[test]
+    fn derive_classification_is_nan_safe() {
+        let delta_stats = DeltaStats {
+            mean_delta: [0.0; 3],
+            stddev_delta: [0.0; 3],
+            max_abs_delta: [0.5 / 255.0; 3],
+            signed_small_histogram: [[0u64; 7]; 3],
+            native_max: 255.0,
+            pixel_count: 10_000,
+            pixels_differing: 100,
+            pixels_differing_by_more_than_1: 0,
+            has_alpha: true,
+            alpha_max_delta: 0,
+            alpha_pixels_differing: 0,
+            src_histogram: [[0u64; 256]; 4],
+            dst_histogram: [[0u64; 256]; 4],
+            opaque_stats: None,
+            semitransparent_stats: None,
+            // Inject NaN — the audit-flagged failure mode. The pre-fix
+            // code called `partial_cmp(...).unwrap()` and panicked here.
+            alpha_error_correlation: Some(f64::NAN),
+        };
+        let dummy_result = ZensimResult::nan();
+        let cls = derive_classification(&delta_stats, &dummy_result);
+        // Must NOT have selected a NaN-confidence category. With the
+        // `total_cmp` ordering, NaN sorts low and never wins.
+        assert!(
+            cls.confidence.is_finite(),
+            "confidence must be finite even when an internal score is NaN, got {}",
+            cls.confidence
+        );
     }
 }

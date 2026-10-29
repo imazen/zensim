@@ -34,12 +34,90 @@
 //! # Ok::<(), zensim::ZensimError>(())
 //! ```
 //!
+//! ## Encoder closed-loop pattern (per-window quality probe)
+//!
+//! For codec quantization controllers that want a per-window quality signal
+//! mid-encode (rather than one global score post-encode), pre-slice the
+//! source into row-windows that match the encoder's natural emission
+//! cadence, build a [`PrecomputedReference`] per window once, then call
+//! [`compute_with_ref_into`](crate::Zensim::compute_with_ref_into) per
+//! window with a shared [`ZensimScratch`] to amortize allocations.
+//!
+//! ```
+//! use zensim::{Zensim, ZensimProfile, RgbSlice, ZensimScratch};
+//! # let (source_pixels, width, height) = (vec![[0u8; 3]; 16 * 8], 16usize, 8usize);
+//! # const WINDOW_ROWS: usize = 4;
+//! let z = Zensim::new(ZensimProfile::latest());
+//!
+//! // Up front: pre-slice the source into row-windows. Build one
+//! // PrecomputedReference per window (each is small — only that
+//! // window's pyramid).
+//! let mut window_refs = Vec::new();
+//! let mut y = 0;
+//! while y < height {
+//!     let h = (height - y).min(WINDOW_ROWS);
+//!     if h < 8 { break; }  // skip tail slivers (they'd reflect-pad, costing accuracy)
+//!     let start = y * width;
+//!     let end = start + h * width;
+//!     let win = RgbSlice::new(&source_pixels[start..end], width, h);
+//!     window_refs.push((y, h, z.precompute_reference(&win)?));
+//!     y += WINDOW_ROWS;
+//! }
+//!
+//! // Per encode iMCU window i: compute canonical zensim on the slice,
+//! // reusing scratch buffers across all calls.
+//! let mut scratch = ZensimScratch::new();
+//! for (y0, h, pre) in &window_refs {
+//!     # let distorted_window: Vec<[u8; 3]> = vec![[0u8; 3]; (*h) * width];
+//!     let dst = RgbSlice::new(&distorted_window, width, *h);
+//!     let result = z.compute_with_ref_into(pre, &dst, &mut scratch)?;
+//!     // Feed result.score() into your AQ controller…
+//!     let _ = result.score();
+//! }
+//! # Ok::<(), zensim::ZensimError>(())
+//! ```
+//!
+//! ### Caveats — read before deploying as a control signal
+//!
+//! Empirical validation against full-image diffmap as ground-truth (see
+//! parked branch `explored/issue-16-option-d-slice-canonical-and-zenwebp-data`
+//! and the `slice_localized_distortion.rs` / `slice_real_codec_localization.rs`
+//! examples in `zensim-regress`):
+//!
+//! - **Truncated pyramid context.** A 64-row window's pyramid is 64→32→16→8
+//!   rows at scales 0–3. SSIM uses an 11×11 window (radius 5), so scale 3
+//!   has 0 valid SSIM rows in 8 input rows; scale 2 has ~6 valid rows of 16.
+//!   The features at coarser scales are dominated by mirror-padded boundary
+//!   data, not content. The trained weights at scales 1–3 carry ~94% of
+//!   the weight mass.
+//!
+//! - **On *synthetic* injected-distortion** (one window heavily damaged,
+//!   others clean): per-window canonical correctly identifies the damaged
+//!   window 100% of the time. The clean-vs-damaged gap dwarfs any
+//!   pad-noise contribution.
+//!
+//! - **On *real* codec output** (mozjpeg / zenjpeg sRGB / zenjpeg XYB /
+//!   zenavif at q60–q90): per-window canonical's top-1 ranking matches
+//!   ground-truth (full-image diffmap aggregated per window) only ~24%
+//!   of the time. Top-3 overlap is 1.71/3 ≈ 57%. Mean SROCC = 0.57.
+//!
+//! - **Treat the per-window signal as a *guidance* signal, not a per-window
+//!   precision oracle.** Pair with EMA smoothing across windows and an
+//!   iteration-boundary canonical check ([`Zensim::compute_with_ref`])
+//!   for the global score.
+//!
+//! - **Cost.** With K windows of ~`H/K` rows each, total per-iteration
+//!   compute is roughly the same as one full-image canonical compute,
+//!   distributed across the encoder's iMCU emissions. The
+//!   [`PrecomputedReference`] builds amortize across all encoder
+//!   iterations against the same source.
+//!
 //! ## RGBA support
 //!
 //! ```
 //! use zensim::{Zensim, ZensimProfile, RgbaSlice};
 //! # let (src_rgba, dst_rgba) = (vec![[0u8; 4]; 64], vec![[0u8; 4]; 64]);
-//! let z = Zensim::new(ZensimProfile::latest());
+//! let z = Zensim::new(ZensimProfile::codec_target());
 //! let source = RgbaSlice::new(&src_rgba, 8, 8);
 //! let distorted = RgbaSlice::new(&dst_rgba, 8, 8);
 //! let result = z.compute(&source, &distorted)?;
@@ -56,7 +134,7 @@
 //!
 //! let source = ZenpixelsSource::try_from_slice(&pixel_slice)?;
 //! let distorted = ZenpixelsSource::try_from_slice(&other_slice)?;
-//! let result = Zensim::new(ZensimProfile::latest()).compute(&source, &distorted)?;
+//! let result = Zensim::new(ZensimProfile::codec_target()).compute(&source, &distorted)?;
 //! ```
 //!
 //! Supported: Rgb8, Rgba8, Bgra8, Rgbx8, Bgrx8, Rgba16, RgbaF32 (sRGB/BT.709/linear).
@@ -80,14 +158,25 @@
 //! - **Alpha:** RGBA inputs are composited over a deterministic noise
 //!   background so alpha differences are detected without the structured-pattern
 //!   amplification of a checkerboard. Supports `Straight` and `Opaque` alpha modes.
-//! - **Dimensions:** Both images must be the same width × height, minimum 8×8.
+//! - **Dimensions:** Both images must be the same width × height. Any
+//!   non-zero size scores: sub-64px inputs (down to 1×1) are reflect-padded
+//!   to the pyramid minimum internally.
 //!
 //! ## Score semantics
 //!
-//! 100 = identical, higher = more similar. Score mapping:
-//! `100 - 18 × d^0.7` where `d` is the per-scale weighted feature distance.
-//! Calibrated from 0–100 on 344k training pairs; extreme distortions can
-//! score below 0 (uncalibrated outside the training range).
+//! 100 = identical, higher = more similar. How a raw result becomes a
+//! score depends on the profile:
+//!
+//! - [`ZensimProfile::E`] (the default, [`ZensimProfile::latest`]) and
+//!   [`ZensimProfile::ECodec`] ([`ZensimProfile::codec_target`]): a monotone
+//!   MLP over revision-7 features plus a calibrated output spline. Severe
+//!   damage can score below 0 (the spline extrapolates past its knots).
+//! - [`ZensimProfile::A`] (legacy): an MLP forward pass and a monotone output
+//!   spline, kept for callers calibrated to its scores.
+//! - [`ZensimProfile::PreviewV0_1`] / [`ZensimProfile::PreviewV0_2`]
+//!   (linear profiles): `100 - 18 × d^0.7` where `d` is the per-scale
+//!   weighted feature distance. Calibrated from 0–100 on 344k training
+//!   pairs; extreme distortions can score below 0.
 //!
 //! [`ZensimResult`] also provides [`approx_ssim2()`](ZensimResult::approx_ssim2),
 //! [`approx_dssim()`](ZensimResult::approx_dssim), and
@@ -97,41 +186,67 @@
 //!
 //! ## Determinism
 //!
-//! Deterministic for the same input on the same architecture. Cross-architecture
-//! results (e.g. AVX2 vs scalar vs AVX-512) may differ by small ULP due to
-//! different FMA contraction behavior.
+//! Deterministic for the same input on the same architecture. The revision-7
+//! profiles ([`ZensimProfile::E`], [`ZensimProfile::ECodec`]) use one fixed
+//! arithmetic order, so their scores are bit-identical across the x86 SIMD tiers,
+//! scalar code and thread counts. The older profiles may differ by a few ULP
+//! between architectures because of different FMA contraction.
 //!
 //! ## Design
 //!
 //! - **XYB color space** — cube root LMS, same perceptual space as ssimulacra2/butteraugli
 //! - **Modified SSIM** — ssimulacra2's variant: drops the luminance denominator
 //!   (no C1), uses `1 - (mu1-mu2)²` directly. Correct for perceptually-uniform spaces.
-//! - **19 features per channel per scale** — 13 basic (SSIM, edge artifact/detail
-//!   loss, MSE, high-frequency) + 6 peak features, all scored
 //! - **4-scale pyramid** — 1×, 2×, 4×, 8× via box downscale (ssimulacra2 uses 6)
-//! - **O(1)-per-pixel box blur** — single-pass with fused SIMD kernel
-//! - **228 trained weights** — optimized on 344k synthetic pairs across 6 codecs
+//! - **Per-pixel error maps pooled into features** — SSIM, edge artifact and
+//!   detail loss, high-frequency energy, and their peaks, per channel and scale
 //! - **AVX2/AVX-512 SIMD** throughout via [archmage](https://crates.io/crates/archmage)
 //!
-//! See the `metric` module source for the full feature extraction math.
+//! See the `metric` module source for the feature extraction math.
 
 #![forbid(unsafe_code)]
 
+pub(crate) mod bake_metadata;
 mod blur;
 mod color;
+pub(crate) mod derived_inputs;
+pub(crate) mod det_math;
 mod diffmap;
 mod error;
+pub(crate) mod featcanon;
+pub(crate) mod feature_defs;
+pub(crate) mod feature_layout;
+pub(crate) mod feature_plan;
+pub(crate) mod feature_set_id;
+pub(crate) mod feature_v2;
+#[cfg(feature = "threads")]
+pub(crate) mod feature_v2_blocks;
+pub(crate) mod feature_v2_stream;
+pub(crate) mod fold_engine;
 mod fused;
+pub(crate) mod hf_gain_form;
 pub mod mapping;
 mod metric;
+pub(crate) mod mlp;
 mod pool;
 pub mod profile;
+mod pu21;
+pub(crate) mod score_math;
 mod simd_ops;
 pub mod source;
+pub(crate) mod ssim_form;
 mod streaming;
+mod transfer;
 
 // --- Primary API ---
+/// Cooperative-cancellation vocabulary, re-exported from the
+/// [`enough`](https://docs.rs/enough) crate for use with
+/// [`Zensim::with_stop`]. Construct a real cancellable token with the
+/// sibling [`almost-enough`](https://docs.rs/almost-enough) crate's
+/// `Stopper` (any `impl Stop` works).
+pub use enough::{Stop, StopReason, Unstoppable};
 pub use error::ZensimError;
+pub use feature_v2::HdrEncoding;
 pub use metric::{
     FeatureView, Zensim, ZensimResult, dissimilarity_to_score, score_to_dissimilarity,
 };
@@ -164,7 +279,7 @@ pub use metric::{
     BlurKernel, CH_B, CH_X, CH_Y, DownscaleFilter, FEATURES_PER_CHANNEL_BASIC,
     FEATURES_PER_CHANNEL_EXTENDED, FEATURES_PER_CHANNEL_WITH_PEAKS, FEATURES_PER_SCALE, WEIGHTS,
     ZensimConfig, compute_zensim_with_config, compute_zensim_with_ref_and_config,
-    precompute_reference_with_scales, score_from_features,
+    precompute_reference_with_scales, score_from_features, try_score_from_features,
 };
 
 #[cfg(feature = "zenpixels")]
