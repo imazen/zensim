@@ -230,11 +230,13 @@ mod metric;
 pub(crate) mod mlp;
 mod pool;
 pub mod profile;
+mod pu21;
 pub(crate) mod score_math;
 mod simd_ops;
 pub mod source;
 pub(crate) mod ssim_form;
 mod streaming;
+mod transfer;
 
 // --- Primary API ---
 /// Cooperative-cancellation vocabulary, re-exported from the
@@ -244,6 +246,7 @@ mod streaming;
 /// `Stopper` (any `impl Stop` works).
 pub use enough::{Stop, StopReason, Unstoppable};
 pub use error::ZensimError;
+pub use feature_v2::HdrEncoding;
 pub use metric::{
     FeatureView, Zensim, ZensimResult, dissimilarity_to_score, score_to_dissimilarity,
 };

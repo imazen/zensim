@@ -446,6 +446,36 @@ impl ZensimV2Result {
 // Per-channel-per-scale computation — SINGLE PASS, O(1) accumulators
 // ============================================================================
 
+/// How a declared-HDR source's pixel values map to absolute display light
+/// (cd/m²) on the folded/append STREAMING HDR route (HDR_PLAN chunk 2).
+/// The declaration is explicit at the entry — the route never guesses a
+/// transfer from pixel bytes.
+///
+/// Passed to [`crate::Zensim::compute_hdr`].
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum HdrEncoding {
+    /// Pixels are already absolute linear light in cd/m² (e.g. decoded EXR).
+    Linear,
+    /// Pixels are PQ (SMPTE ST 2084) code values in `[0, 1]`, decoded per
+    /// channel through the display model (`min(EOTF_PQ, peak) + black +
+    /// reflection`). `peak_nits = 10000.0` decodes at spec peak with no
+    /// display clamp; `1000.0` matches pycvvdp's `standard_hdr_pq`.
+    Pq {
+        /// Display peak luminance, cd/m².
+        peak_nits: f32,
+    },
+    /// Pixels are HLG (ITU-R BT.2100) signal values in `[0, 1]`, decoded
+    /// through the reference OOTF (`F_D = peak·Y_s^(γ−1)·E_s`) with the
+    /// BT.2100 system gamma for `peak_nits`/`ambient_lux`.
+    Hlg {
+        /// Display peak luminance, cd/m².
+        peak_nits: f32,
+        /// Ambient illuminance, lux (5.0 = reference environment).
+        ambient_lux: f32,
+    },
+}
+
 /// Which FORMULA REVISION an extraction computes — re-exported so
 /// [`V2NewFeatureToggles::formula_revision`] is nameable by the callers that
 /// set it.

@@ -11,6 +11,7 @@
 //! The pairs come from `split_parity/pairs.rs` and the extra input surfaces from
 //! `split_parity/surfaces.rs`, byte-identical copies of the research files.
 
+include!("split_parity/hdr.rs");
 include!("split_parity/pairs.rs");
 include!("split_parity/surfaces.rs");
 
@@ -106,4 +107,81 @@ fn main() {
         }
     }
     extra_surfaces(&profiles, &pairs, &line);
+    hdr_surfaces(&line);
+}
+
+/// HDR cases through `Zensim::compute_hdr`, over the fixtures in
+/// `split_parity/hdr.rs`. Emits the same `hdrfeat` rows as the golden side.
+fn hdr_surfaces(line: &impl Fn(&str, &str, &str, String)) {
+    use zensim::HdrEncoding;
+    use zensim::source::{AlphaMode, ColorPrimaries, PixelFormat, StridedBytes};
+
+    for c in hdr_cases() {
+        let enc = match c.enc {
+            0 => HdrEncoding::Linear,
+            1 => HdrEncoding::Pq { peak_nits: 1000.0 },
+            2 => HdrEncoding::Pq {
+                peak_nits: 10_000.0,
+            },
+            _ => HdrEncoding::Hlg {
+                peak_nits: 1000.0,
+                ambient_lux: 5.0,
+            },
+        };
+        let fmt = if c.srgb16 {
+            PixelFormat::Srgb16Rgba
+        } else {
+            PixelFormat::LinearF32Rgba
+        };
+        let pri = if c.bt2020 {
+            ColorPrimaries::Bt2020
+        } else {
+            ColorPrimaries::Srgb
+        };
+        let mk = |dst: bool| {
+            let (bytes, stride) = gen_hdr_image(&c, dst);
+            let bytes: &'static [u8] = Box::leak(bytes.into_boxed_slice());
+            StridedBytes::try_with_alpha_mode(
+                bytes,
+                c.width,
+                c.height,
+                stride,
+                fmt,
+                AlphaMode::Opaque,
+            )
+            .expect("hdr fixture source")
+            .with_color_primaries(pri)
+        };
+        let src = mk(false);
+        let dst = mk(true);
+        let id = hdr_case_id(&c);
+        match Zensim::new(ZensimProfile::E)
+            .with_parallel(c.parallel)
+            .compute_hdr(&src, &dst, enc)
+        {
+            Ok(r) => {
+                let v = r.features();
+                line(
+                    "hdrfeat",
+                    c.enc_name,
+                    &format!("{id}:sum"),
+                    format!("{:016x}", f64s(v)),
+                );
+                for (i, f) in v.iter().enumerate() {
+                    line(
+                        "hdrfeat",
+                        c.enc_name,
+                        &format!("{id}:f{i}"),
+                        format!("{:016x}", f.to_bits()),
+                    );
+                }
+            }
+            Err(e) => line(
+                "hdrfeat",
+                c.enc_name,
+                &format!("{id}:sum"),
+                format!("ERR {e:?}"),
+            ),
+        }
+    }
 }

@@ -2869,6 +2869,104 @@ pub(crate) fn compute_folded_v1_372_streaming_stoppable(
     Ok((res.into_features(), mo.finish()))
 }
 
+/// Declared-HDR form of [`compute_folded_v1_372_streaming_stoppable`]
+/// (HDR_PLAN chunk 2): pixel values map to absolute display light per
+/// `encoding` (PQ / HLG display model, or already-linear cd/m²), then
+/// the UPIQ-validated PU-XYB front-end (opsin → PU21 `banding_glare`
+/// per channel, normalized so 100 cd/m² → 1.0 — SDR-range content
+/// lands on the scale the downstream formulas were tuned on) feeds
+/// the UNCHANGED streaming fold walk. Sources: `LinearF32Rgba` (f32)
+/// or `Srgb16Rgba` (code values; `Pq`/`Hlg` only), `AlphaMode::Opaque`,
+/// declared primaries converted to the opsin matrix's linear-sRGB basis
+/// without clipping absolute light to the SDR range.
+///
+/// The serving plan is resolved by the caller exactly like the SDR
+/// entry's `plan` argument (`FoldWalkExtras::compute`).
+#[allow(dead_code)] // only reachable via the crate-private `Zensim::compute_hdr`
+pub(crate) fn compute_folded720_hdr_streaming_extras(
+    source: &impl ImageSource,
+    distorted: &impl ImageSource,
+    encoding: HdrEncoding,
+    max_pixels: Option<usize>,
+    parallel: bool,
+    toggles: V2NewFeatureToggles,
+    scratch: &mut V2Scratch,
+    extras: FoldWalkExtras<'_>,
+) -> Result<ZensimV2Result, ZensimError> {
+    validate_hdr_pair(source, distorted, encoding, max_pixels)?;
+    let front_end = crate::feature_v2_stream::FrontEnd::Hdr(encoding);
+    if source.width() < crate::metric::MIN_PYRAMID_DIM
+        || source.height() < crate::metric::MIN_PYRAMID_DIM
+    {
+        let padded_src = crate::metric::reflect_pad_to_min(source);
+        let padded_dst = crate::metric::reflect_pad_to_min(distorted);
+        return Ok(foldapp_streaming_walk(
+            &padded_src,
+            &padded_dst,
+            parallel,
+            toggles,
+            front_end,
+            scratch,
+            extras,
+        ));
+    }
+    Ok(foldapp_streaming_walk(
+        source, distorted, parallel, toggles, front_end, scratch, extras,
+    ))
+}
+
+/// HDR-route admission: matched dims and pixel cap as every entry, plus
+/// the absolute-light contract — `Linear` takes `LinearF32Rgba` only;
+/// `Pq`/`Hlg` take `LinearF32Rgba` (f32 code values) or `Srgb16Rgba` (u16
+/// code values) — both with `AlphaMode::Opaque` (the alpha noise-background
+/// compositor is `[0,1]`-relative and NOT validated on absolute-light
+/// pixels). Declared primaries are converted to linear sRGB before opsin,
+/// preserving negative and above-one components (no SDR display clamp).
+/// Everything else: `ZensimError::UnsupportedPixelFormat` (the PR maps it
+/// to the dedicated HDR variant).
+#[allow(dead_code)] // only reachable via the crate-private `Zensim::compute_hdr`
+pub(crate) fn validate_hdr_pair(
+    source: &impl ImageSource,
+    distorted: &impl ImageSource,
+    encoding: HdrEncoding,
+    max_pixels: Option<usize>,
+) -> Result<(), ZensimError> {
+    crate::metric::validate_pair_dims(source, distorted)?;
+    crate::metric::check_within_max_pixels(source.width(), source.height(), max_pixels)?;
+    let valid_display = match encoding {
+        HdrEncoding::Linear => true,
+        HdrEncoding::Pq { peak_nits } => peak_nits.is_finite() && peak_nits > 0.0,
+        HdrEncoding::Hlg {
+            peak_nits,
+            ambient_lux,
+        } => {
+            peak_nits.is_finite()
+                && peak_nits > 0.0
+                && ambient_lux.is_finite()
+                && ambient_lux >= 0.0
+        }
+    };
+    if !valid_display {
+        return Err(ZensimError::UnsupportedPixelFormat);
+    }
+    let shape_ok = |fmt: crate::source::PixelFormat, alpha: crate::source::AlphaMode| {
+        let fmt_ok = match encoding {
+            HdrEncoding::Linear => fmt == crate::source::PixelFormat::LinearF32Rgba,
+            HdrEncoding::Pq { .. } | HdrEncoding::Hlg { .. } => {
+                fmt == crate::source::PixelFormat::LinearF32Rgba
+                    || fmt == crate::source::PixelFormat::Srgb16Rgba
+            }
+        };
+        fmt_ok && matches!(alpha, crate::source::AlphaMode::Opaque)
+    };
+    if !shape_ok(source.pixel_format(), source.alpha_mode())
+        || !shape_ok(distorted.pixel_format(), distorted.alpha_mode())
+    {
+        return Err(ZensimError::UnsupportedPixelFormat);
+    }
+    Ok(())
+}
+
 /// Whether a [`crate::streaming::PrecomputedReference`] can feed the fold's
 /// source side for a walk over `(w, h)` COMPUTE dims — the ref-cached form's
 /// admission test, and **the single owner of that predicate**.
@@ -2973,7 +3071,7 @@ pub(crate) struct MeanOffsetRows {
 }
 
 impl MeanOffsetRows {
-    fn at_revision(width: usize, height: usize, revision: FormulaRevision) -> Self {
+    pub(crate) fn at_revision(width: usize, height: usize, revision: FormulaRevision) -> Self {
         // Rev5 exposes no global XYB offset: the supported model inputs do
         // not consume it. Keep a zero metadata value without an image pass.
         let height = if revision >= FormulaRevision::Rev5 {

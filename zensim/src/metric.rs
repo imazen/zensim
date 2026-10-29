@@ -888,6 +888,7 @@ pub struct ClassifiedResult {
 
 // --- Zensim config struct (primary API) ---
 
+use crate::feature_v2::HdrEncoding;
 use crate::profile::{ProfileParams, ZensimProfile};
 use crate::source::ImageSource;
 
@@ -1485,6 +1486,113 @@ impl Zensim {
         );
         self.check_stop()?;
         Ok(result.with_profile(self.profile))
+    }
+
+    /// Score an HDR pair. Pixel values map to absolute display light as
+    /// `encoding` declares (already-linear cd/m², or PQ/HLG through a display
+    /// model); a PU21 front-end then feeds the same feature walk as SDR input,
+    /// and this profile's model scores the result.
+    ///
+    /// Sources are [`PixelFormat::LinearF32Rgba`] (f32 light; any encoding) or
+    /// [`PixelFormat::Srgb16Rgba`] (16-bit code values; [`HdrEncoding::Pq`] and
+    /// [`HdrEncoding::Hlg`] only), with [`AlphaMode::Opaque`]. Declared
+    /// primaries are honoured without clipping light to the SDR range.
+    ///
+    /// # Errors
+    ///
+    /// [`ZensimError::UnsupportedPixelFormat`] for any other format or alpha
+    /// mode, invalid display parameters, or the size and cancellation errors of
+    /// [`Self::compute`].
+    ///
+    /// [`PixelFormat::LinearF32Rgba`]: crate::PixelFormat::LinearF32Rgba
+    /// [`PixelFormat::Srgb16Rgba`]: crate::PixelFormat::Srgb16Rgba
+    /// [`AlphaMode::Opaque`]: crate::AlphaMode::Opaque
+    pub fn compute_hdr(
+        &self,
+        source: &impl ImageSource,
+        distorted: &impl ImageSource,
+        encoding: HdrEncoding,
+    ) -> Result<ZensimResult, ZensimError> {
+        let params = self.profile.params();
+        validate_pair(source, distorted)?;
+        let config = config_from_params(params, self.parallel_now());
+        let plan = if config.revision() >= crate::feature_defs::FormulaRevision::Rev5 {
+            use crate::feature_defs::family_slots;
+            use crate::feature_set_id::ComputeToken;
+            let want = family_slots(ComputeToken::Basic, config.num_scales)
+                .union(&family_slots(ComputeToken::Peaks, config.num_scales))
+                .union(&family_slots(ComputeToken::V2, config.num_scales));
+            Some(
+                crate::feature_plan::Plan::derive_with_layout_at(
+                    &want,
+                    crate::feature_layout::Layout::identity(720),
+                    config.revision(),
+                )
+                .map_err(|_| ZensimError::ModelLoadFailed {
+                    reason: "cannot derive the full supported Rev5 extraction plan",
+                })?,
+            )
+        } else {
+            None
+        };
+        let toggles = plan.as_ref().map_or_else(
+            || crate::feature_v2::V2NewFeatureToggles {
+                v1_only: true,
+                ..Default::default()
+            },
+            |p| p.toggles(),
+        );
+        let mut scratch = crate::feature_v2::V2Scratch::new();
+        let mut mo = crate::feature_v2::MeanOffsetRows::at_revision(
+            source.width(),
+            source.height(),
+            toggles.formula_revision,
+        );
+        let mut features = crate::feature_v2::compute_folded720_hdr_streaming_extras(
+            source,
+            distorted,
+            encoding,
+            self.max_pixels,
+            self.parallel_now(),
+            toggles,
+            &mut scratch,
+            crate::feature_v2::FoldWalkExtras {
+                compute: plan.as_ref().map(|p| p.compute),
+                mean_offset: Some(&mut mo),
+                ..Default::default()
+            },
+        )?
+        .into_features();
+        if let Some(p) = plan {
+            p.check_emit_covered(features.len())
+                .map_err(|_| ZensimError::ModelLoadFailed {
+                    reason: "PU fold did not materialize the bake's declared reads",
+                })?;
+            features.resize(
+                p.walk_width()
+                    .max(crate::fold_engine::v1_feature_width(&config)),
+                0.0,
+            );
+        } else {
+            features.truncate(crate::fold_engine::v1_feature_width(&config));
+        }
+        let (score, raw_distance) =
+            score_v1_layout_features(&mut features, params.weights, &config, config.num_scales);
+        let mut result =
+            ZensimResult::new(score, raw_distance, features, self.profile, mo.finish());
+        if images_byte_identical(source, distorted) {
+            result.score = 100.0;
+            result.raw_distance = 0.0;
+            result = result.mark_identical();
+        }
+        self.check_stop()?;
+        apply_mlp_scoring(
+            &mut result,
+            params,
+            source.width() as u32,
+            source.height() as u32,
+        )?;
+        Ok(result)
     }
 }
 

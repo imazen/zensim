@@ -66,6 +66,15 @@ block (`zentrain.repro`) and the sampler statistics (`zentrain.sample_coverage`)
 feature declaration, formula revision, derived-input declaration and calibration spline are
 unchanged; both versions score identically on every surface of the split parity run.
 
+## HDR input
+
+`Zensim::compute_hdr(source, distorted, encoding)` scores HDR pairs. `HdrEncoding::Linear` takes
+`LinearF32Rgba` pixels in absolute cd/m²; `HdrEncoding::Pq { peak_nits }` and `HdrEncoding::Hlg { peak_nits,
+ambient_lux }` take `Srgb16Rgba` code values (or `LinearF32Rgba` signal values) and decode them through a display
+model. Declared primaries are converted without clipping light to the SDR range, and a PU21 front-end (100 cd/m²
+maps to 1.0) feeds the same revision-7 feature walk as SDR input. The current profiles were trained on SDR content;
+an HDR-trained profile is in development.
+
 ## Speed and memory
 
 Measured 2026-10-28 on an AMD Ryzen 9 9950X3D (AVX-512), on the research crate this one was

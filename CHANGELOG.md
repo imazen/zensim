@@ -28,6 +28,8 @@
 - `Zensim::with_stop`, `ZensimError::Cancelled` and the `Stop`, `StopReason`, `Unstoppable` re-exports from `enough`.
 - `ZensimError::ModelLoadFailed`, `ModelForwardFailed`, `UnsupportedPixelFormat`, `FeatureWeightsLengthMismatch`.
 - `PrecomputedReference::width` / `height`; `try_score_from_features` (`training` feature).
+- `Zensim::compute_hdr` and `HdrEncoding` (`Linear`, `Pq`, `Hlg`): HDR input in absolute display light through a PU21
+  front-end and the revision-7 feature walk; features bit-identical to the research crate.
 
 #### Changed
 - Share diffmap scoring and mask/sqrt/crop postprocessing across RGB and planar paths,
