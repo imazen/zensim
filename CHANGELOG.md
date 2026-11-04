@@ -3,12 +3,13 @@
 ## [Unreleased]
 
 ### QUEUED BREAKING CHANGES
+- zensim 0.3.0: remove the development-only `LegacyA` profile and its revision-1 372-feature MLP serving path.
 - zensim 0.3.0: `compute_hdr` feeds the cube-root front end at 203 cd/m²; HDR scores change (`0b596aa0`).
 - zensim 0.3.0: research profiles `E` and `ECodec` are withdrawn; `codec_target()` returns `A` (`fdce4ac2`).
 <!-- Breaking changes that ship together in the next major (or minor for 0.x).
      Persist across patch releases. Only clear when the breaking release ships. -->
-- zensim 0.3.0: `ZensimProfile::A` is the adopted general model (the earlier development `A` is
-  `LegacyA`, string id `zensim-legacy-a`); `latest()` returns `A`. Published 0.2.7 had only the
+- zensim 0.3.0: `ZensimProfile::A` is the adopted general model (the earlier development `A` was renamed
+  `LegacyA`, then removed before release); `latest()` returns `A`. Published 0.2.7 had only the
   two preview variants, which are unchanged. Default scores change (`38b16050`).
 - zensim 0.3.0: `ZensimError` and `profile::ProfileParams` become `#[non_exhaustive]`; `ZensimError` gains variants.
 - zensim 0.3.0: the 0.2.x linear profiles' scores shift by up to about 1.5e-2 (kernel fusion and summation order),
@@ -28,9 +29,8 @@
 - `ZensimProfile::A` (`zensim-a`, returned by `latest()`): the general-purpose model adopted on 2026-11-04, with
   full-resolution chroma inputs, trained with the human-rating legs narrowed to TID2013 and MDID
   and continued on the JPEG AIC-2026 public training set with rehearsal (`docs/PROFILES.md`).
-- Canonical profile string parsing via `FromStr`, including `zensim-a` and `zensim-legacy-a`.
+- Canonical profile string parsing via `FromStr`, including `zensim-a`.
 - `ZensimProfile::codec_target()`: selects the adopted `A` model for codec-quality targets.
-- `ZensimProfile::LegacyA` (`zensim-legacy-a`): the legacy MLP profile of the 0.3.0 development line.
 - `Zensim::with_max_pixels` / `max_pixels` and `ZensimError::ImageTooLarge`: a pixel-count cap for untrusted input.
 - `Zensim::with_stop`, `ZensimError::Cancelled` and the `Stop`, `StopReason`, `Unstoppable` re-exports from `enough`.
 - `ZensimError::ModelLoadFailed`, `ModelForwardFailed`, `UnsupportedPixelFormat`, `FeatureWeightsLengthMismatch`.

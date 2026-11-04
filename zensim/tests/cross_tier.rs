@@ -8,7 +8,7 @@
 //!
 //! Run with: `cargo test -p zensim --test cross_tier -- --test-threads=1`
 
-#![allow(deprecated)] // exercises the legacy `ZensimProfile::LegacyA`
+#![allow(deprecated)] // exercises the adopted `ZensimProfile::A`
 
 use archmage::testing::{CompileTimePolicy, for_each_token_permutation};
 use zensim::{RgbSlice, Zensim, ZensimProfile, ZensimResult};
@@ -124,7 +124,7 @@ fn score_reproducibility_across_tiers() {
     let mut results: Vec<(String, Vec<String>, ZensimResult)> = Vec::new();
 
     let report = for_each_token_permutation(CompileTimePolicy::Warn, |perm| {
-        let z = Zensim::new(ZensimProfile::LegacyA);
+        let z = Zensim::new(ZensimProfile::A);
         let s = RgbSlice::new(&src, w, h);
         let d = RgbSlice::new(&dst, w, h);
         let result = z.compute(&s, &d).expect("compute failed");
@@ -306,7 +306,7 @@ fn score_reproducibility_512x512() {
     let mut results: Vec<(String, Vec<String>, ZensimResult)> = Vec::new();
 
     let report = for_each_token_permutation(CompileTimePolicy::Warn, |perm| {
-        let z = Zensim::new(ZensimProfile::LegacyA);
+        let z = Zensim::new(ZensimProfile::A);
         let s = RgbSlice::new(&src, w, h);
         let d = RgbSlice::new(&dst, w, h);
         let result = z.compute(&s, &d).expect("compute failed");

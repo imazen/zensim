@@ -314,13 +314,6 @@ fn extra_surfaces(
                 c.num_scales = 3;
                 v.push(("scales3", c));
                 let mut c = base;
-                c.extended_features = true;
-                v.push(("extended", c));
-                let mut c = base;
-                c.extended_features = true;
-                c.compute_iw_features = true;
-                v.push(("extended_iw", c));
-                let mut c = base;
                 c.compute_all_features = true;
                 v.push(("all_features", c));
                 let mut c = base;

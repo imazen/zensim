@@ -36,7 +36,6 @@ fn score(profile: ZensimProfile, p: &SplitPair) -> f64 {
 fn by_name(name: &str) -> ZensimProfile {
     match name {
         "A" => ZensimProfile::A,
-        "LegacyA" => ZensimProfile::LegacyA,
         "PreviewV0_1" => ZensimProfile::PreviewV0_1,
         "PreviewV0_2" => ZensimProfile::PreviewV0_2,
         _ => unreachable!(),
@@ -59,33 +58,19 @@ const GOLDEN: &[(&str, &str, u64)] = &[
     ("A", "31x17-text-shift", 0x40562d2f88e71244),
     ("A", "512x384-photo-blocks", 0x404dcd8ed6bee9bc),
     ("A", "1024x768-photo-noise", 0x404a54e9256bcb0f),
-    ("LegacyA", "64x64-photo-noise", 0x404df8e8f9af74e6),
     ("PreviewV0_2", "64x64-photo-noise", 0x4053c2809278bdab),
-    ("LegacyA", "64x64-edges-blur", 0xc001d4a1dbbf9ad3),
     ("PreviewV0_2", "64x64-edges-blur", 0x402fe8667b189400),
-    ("LegacyA", "65x63-text-blocks", 0x40351061fa16b761),
     ("PreviewV0_2", "65x63-text-blocks", 0xc042853a97107170),
-    ("LegacyA", "128x96-photo-posterize", 0x404ed25181330dd5),
     ("PreviewV0_2", "128x96-photo-posterize", 0x40537ea0198c0b60),
-    ("LegacyA", "200x150-edges-shift", 0x40549b2c10c8cf58),
     ("PreviewV0_2", "200x150-edges-shift", 0x40553e6ff2624cbd),
-    ("LegacyA", "200x150-photo-blur", 0x405276e2c552885f),
     ("PreviewV0_2", "200x150-photo-blur", 0x40536d00e6303f17),
-    ("LegacyA", "256x256-text-noise", 0x404fce495f5f703d),
     ("PreviewV0_2", "256x256-text-noise", 0x4054b03976a363b0),
-    ("LegacyA", "256x256-photo-pixels", 0x40580f0dd03070e0),
     ("PreviewV0_2", "256x256-photo-pixels", 0x4058dde8b46bdf4a),
-    ("LegacyA", "333x251-edges-blocks", 0xc05224a3ea2fef19),
     ("PreviewV0_2", "333x251-edges-blocks", 0xc061ff02ae3ac7b4),
-    ("LegacyA", "333x251-photo-identity", 0x4059000000000000),
     ("PreviewV0_2", "333x251-photo-identity", 0x4059000000000000),
-    ("LegacyA", "16x16-photo-noise", 0x40500aefe491ef04),
     ("PreviewV0_2", "16x16-photo-noise", 0x405520a00c68709c),
-    ("LegacyA", "31x17-text-shift", 0x4056840035ddea76),
     ("PreviewV0_2", "31x17-text-shift", 0x40588bb8484bed5e),
-    ("LegacyA", "512x384-photo-blocks", 0x404f83040febe95a),
     ("PreviewV0_2", "512x384-photo-blocks", 0x4052bdd01c513e9e),
-    ("LegacyA", "1024x768-photo-noise", 0x40462562e87bc4cb),
     ("PreviewV0_2", "1024x768-photo-noise", 0x404e743b38b5e556),
 ];
 
@@ -120,7 +105,7 @@ fn golden_scores_match_the_research_reference() {
 #[test]
 fn identical_images_score_100() {
     let _token = archmage::testing::lock_token_testing();
-    for name in ["A", "LegacyA", "PreviewV0_1", "PreviewV0_2"] {
+    for name in ["A", "PreviewV0_1", "PreviewV0_2"] {
         for id in [
             "8x8-photo-identity",
             "65x63-edges-identity",
@@ -233,11 +218,7 @@ fn all_features_agree_with_compute_on_every_slot_compute_fills() {
         let p = pair(id);
         let src = RgbSlice::new(bytemuck::cast_slice(&p.src), p.width, p.height);
         let dst = RgbSlice::new(bytemuck::cast_slice(&p.dst), p.width, p.height);
-        for profile in [
-            ZensimProfile::A,
-            ZensimProfile::LegacyA,
-            ZensimProfile::PreviewV0_2,
-        ] {
+        for profile in [ZensimProfile::A, ZensimProfile::PreviewV0_2] {
             let z = Zensim::new(profile);
             let served = z.compute(&src, &dst).unwrap();
             let all = z.compute_all_features(&src, &dst).unwrap();
@@ -269,28 +250,18 @@ fn latest_and_codec_target_select_the_rev7_profiles() {
 /// legacy reference retains its existing cross-architecture rounding tolerance;
 /// exact same-host rename parity is recorded in docs/PROFILES.md.
 #[test]
-fn canonical_names_select_the_adopted_and_legacy_models() {
+fn canonical_names_select_the_shipped_models() {
     let _token = archmage::testing::lock_token_testing();
     for profile in [
         ZensimProfile::A,
-        ZensimProfile::LegacyA,
         ZensimProfile::PreviewV0_1,
         ZensimProfile::PreviewV0_2,
     ] {
         assert_eq!(profile.to_string().parse(), Ok(profile));
     }
     assert_eq!("zensim-a".parse(), Ok(ZensimProfile::A));
-    let legacy = "zensim-legacy-a".parse::<ZensimProfile>().unwrap();
-    assert_eq!(legacy, ZensimProfile::LegacyA);
+    assert!("zensim-legacy-a".parse::<ZensimProfile>().is_err());
     assert!("zensim-f".parse::<ZensimProfile>().is_err());
     assert!("zensim-e".parse::<ZensimProfile>().is_err());
     assert!("zensim-e-codec".parse::<ZensimProfile>().is_err());
-    for &(_, id, bits) in GOLDEN.iter().filter(|&&(name, _, _)| name == "LegacyA") {
-        let want = f64::from_bits(bits);
-        let got = score(legacy, &pair(id));
-        assert!(
-            (got - want).abs() <= 1e-6 * want.abs().max(1.0),
-            "LegacyA {id}"
-        );
-    }
 }

@@ -47,3 +47,7 @@ profile-fixtures:
 # Requires an outer run-heavy systemd scope; CPU_IDS must name one CPU class.
 profile-test-pinned cpu_ids:
     bash scripts/profile_test_cpuset.sh "{{cpu_ids}}" cargo test --workspace --all-targets
+
+# Runtime pruning checks; the outer caller supplies run-heavy and the shared lock.
+profile-runtime-test:
+    cargo test --workspace --lib --tests --all-features --no-fail-fast

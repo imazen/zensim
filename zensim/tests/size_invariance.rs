@@ -6,7 +6,7 @@
 //!      (the hard invariant — must not vary with size), and
 //!   2. images score all the way down to 1×1 with NO error.
 
-#![allow(deprecated)] // exercises the legacy `ZensimProfile::LegacyA`
+#![allow(deprecated)] // exercises the adopted `ZensimProfile::A`
 
 use zensim::{RgbSlice, Zensim, ZensimProfile};
 
@@ -15,7 +15,7 @@ fn solid(n: usize, c: [u8; 3]) -> Vec<[u8; 3]> {
 }
 
 fn profiles() -> [ZensimProfile; 1] {
-    [ZensimProfile::LegacyA]
+    [ZensimProfile::A]
 }
 
 #[test]
@@ -65,7 +65,7 @@ fn scores_down_to_1x1_without_error() {
 #[test]
 fn non_square_sub64_scores() {
     // 1:3 and degenerate non-square tiny images must also score.
-    let z = Zensim::new(ZensimProfile::LegacyA);
+    let z = Zensim::new(ZensimProfile::A);
     for (w, h) in [(1usize, 3usize), (3, 9), (8, 40), (40, 8), (1, 1), (2, 200)] {
         let r = vec![[100u8, 110, 120]; w * h];
         let d = vec![[130u8, 90, 140]; w * h];
@@ -80,7 +80,7 @@ fn non_square_sub64_scores() {
 #[test]
 fn large_images_unchanged_by_padding() {
     // The pad path is a NO-OP at >= 64px: a 64x64 and 65x65 score normally.
-    let z = Zensim::new(ZensimProfile::LegacyA);
+    let z = Zensim::new(ZensimProfile::A);
     for n in [64usize, 65, 100] {
         let r = solid(n, [50, 60, 70]);
         let d = solid(n, [55, 58, 75]);
@@ -99,7 +99,7 @@ fn large_images_unchanged_by_padding() {
 fn streaming_ref_constant_diff_size_invariant() {
     // The hard invariant (constant color difference → identical score at every
     // size) must hold through the precomputed-reference path too.
-    let z = Zensim::new(ZensimProfile::LegacyA);
+    let z = Zensim::new(ZensimProfile::A);
     let mut scores = Vec::new();
     for n in [1usize, 4, 16, 32, 63, 64, 128] {
         let r = solid(n, [100, 120, 140]);

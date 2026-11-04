@@ -366,18 +366,6 @@ struct V1BasicSums {
     ssim_max: f64,
     edge_art_max: f64,
     edge_det_max: f64,
-    masked_ssim_d: crate::featcanon::SumVar,
-    masked_ssim_d4: crate::featcanon::SumVar,
-    masked_ssim_d2: crate::featcanon::SumVar,
-    masked_art4: crate::featcanon::SumVar,
-    masked_det4: crate::featcanon::SumVar,
-    masked_mse: crate::featcanon::SumVar,
-    iw_ssim_d: crate::featcanon::SumVar,
-    iw_ssim_d4: crate::featcanon::SumVar,
-    iw_ssim_d2: crate::featcanon::SumVar,
-    iw_art4: crate::featcanon::SumVar,
-    iw_det4: crate::featcanon::SumVar,
-    iw_mse: crate::featcanon::SumVar,
 }
 
 impl V1BasicSums {
@@ -404,18 +392,6 @@ impl V1BasicSums {
             ssim_max: 0.0,
             edge_art_max: 0.0,
             edge_det_max: 0.0,
-            masked_ssim_d: SumVar::f64_elems(crate::featcanon::mode(revision)),
-            masked_ssim_d4: SumVar::f64_elems(crate::featcanon::mode(revision)),
-            masked_ssim_d2: SumVar::f64_elems(crate::featcanon::mode(revision)),
-            masked_art4: SumVar::f64_elems(crate::featcanon::mode(revision)),
-            masked_det4: SumVar::f64_elems(crate::featcanon::mode(revision)),
-            masked_mse: SumVar::f64_elems(crate::featcanon::mode(revision)),
-            iw_ssim_d: SumVar::f64_elems(crate::featcanon::mode(revision)),
-            iw_ssim_d4: SumVar::f64_elems(crate::featcanon::mode(revision)),
-            iw_ssim_d2: SumVar::f64_elems(crate::featcanon::mode(revision)),
-            iw_art4: SumVar::f64_elems(crate::featcanon::mode(revision)),
-            iw_det4: SumVar::f64_elems(crate::featcanon::mode(revision)),
-            iw_mse: SumVar::f64_elems(crate::featcanon::mode(revision)),
         }
     }
 }
@@ -449,18 +425,6 @@ impl V1BasicSums {
         self.ssim_max = self.ssim_max.max(o.ssim_max);
         self.edge_art_max = self.edge_art_max.max(o.edge_art_max);
         self.edge_det_max = self.edge_det_max.max(o.edge_det_max);
-        self.masked_ssim_d.merge_from(&o.masked_ssim_d);
-        self.masked_ssim_d4.merge_from(&o.masked_ssim_d4);
-        self.masked_ssim_d2.merge_from(&o.masked_ssim_d2);
-        self.masked_art4.merge_from(&o.masked_art4);
-        self.masked_det4.merge_from(&o.masked_det4);
-        self.masked_mse.merge_from(&o.masked_mse);
-        self.iw_ssim_d.merge_from(&o.iw_ssim_d);
-        self.iw_ssim_d4.merge_from(&o.iw_ssim_d4);
-        self.iw_ssim_d2.merge_from(&o.iw_ssim_d2);
-        self.iw_art4.merge_from(&o.iw_art4);
-        self.iw_det4.merge_from(&o.iw_det4);
-        self.iw_mse.merge_from(&o.iw_mse);
     }
 
     /// Merge one strip's channel partials. The term-level accumulation axis
@@ -503,17 +467,13 @@ impl V1BasicSums {
     /// `streaming::ScaleAccumulators::finalize` + `metric.rs`'s pass-2/3/4
     /// pushes (`.abs()` on the masked/IW ssim + art/det L4 slots, none on
     /// the peaks / mse).
-    fn finalize_pools_into(
+    fn finalize_peaks_into(
         &self,
         n: usize,
         peaks: &mut [f64],
-        masked: &mut [f64],
-        iw: &mut [f64],
         revision: crate::feature_defs::FormulaRevision,
     ) {
         debug_assert_eq!(peaks.len(), 6);
-        debug_assert_eq!(masked.len(), 6);
-        debug_assert_eq!(iw.len(), 6);
         let one_over_n = 1.0 / n as f64;
         let root_form = crate::det_math::RootForm::at_revision(Some(revision));
         peaks[0] = self.ssim_max;
@@ -528,39 +488,6 @@ impl V1BasicSums {
         peaks[5] = (self.edge_det8.fin() * one_over_n)
             .max(0.0)
             .eighth_root(root_form);
-        masked[0] = (self.masked_ssim_d.fin() * one_over_n).abs();
-        masked[1] = (self.masked_ssim_d4.fin() * one_over_n)
-            .max(0.0)
-            .quarter_root(root_form)
-            .abs();
-        masked[2] = (self.masked_ssim_d2.fin() * one_over_n)
-            .max(0.0)
-            .sqrt()
-            .abs();
-        masked[3] = (self.masked_art4.fin() * one_over_n)
-            .max(0.0)
-            .quarter_root(root_form)
-            .abs();
-        masked[4] = (self.masked_det4.fin() * one_over_n)
-            .max(0.0)
-            .quarter_root(root_form)
-            .abs();
-        masked[5] = self.masked_mse.fin() * one_over_n;
-        iw[0] = (self.iw_ssim_d.fin() * one_over_n).abs();
-        iw[1] = (self.iw_ssim_d4.fin() * one_over_n)
-            .max(0.0)
-            .quarter_root(root_form)
-            .abs();
-        iw[2] = (self.iw_ssim_d2.fin() * one_over_n).max(0.0).sqrt().abs();
-        iw[3] = (self.iw_art4.fin() * one_over_n)
-            .max(0.0)
-            .quarter_root(root_form)
-            .abs();
-        iw[4] = (self.iw_det4.fin() * one_over_n)
-            .max(0.0)
-            .quarter_root(root_form)
-            .abs();
-        iw[5] = self.iw_mse.fin() * one_over_n;
     }
 
     /// Finalize into one channel's 13 basic features, replicating v1's
@@ -629,10 +556,7 @@ const V1_BANDS_PER_STRIP: usize = STRIP_ROWS / V1_BAND_ROWS;
 const V1_BAND_OVERLAP: usize = 5;
 
 /// v1's masking / IW strengths (`metric::config_from_params`:
-/// `extended_masking_strength: 4.0`, `iw_strength: 4.0`) — the fold's pool
 /// replay uses the same constants so the block reproduces v1's numbers.
-const V1_MASK_K: f32 = 4.0;
-const V1_IW_K: f32 = 4.0;
 
 /// What a v1 band does with its [`FoldPoolScratch`] — the band-level
 /// resolution of [`V1PoolsMode`].
@@ -648,9 +572,6 @@ enum BandPoolWork {
     /// No pool arithmetic at all. The scratch is present only so a
     /// [`FoldHSource::SelfBlur`] band can own its four H planes.
     HOnly,
-    /// Every pool slot: activity chain, sigma store, and all three
-    /// `*_inline_both` kernels.
-    Full,
 }
 
 #[cfg(test)]
@@ -667,41 +588,10 @@ thread_local! {
 /// bands, strips and scales (the widest scale sizes it once).
 #[derive(Debug, Clone, Default)]
 struct FoldPoolScratch {
-    /// V-blurred `mu1` / `mu2` (the fused kernel's `store_mu` side-output).
-    stable_sd: Vec<f32>,
-    mu1_v: Vec<f32>,
-    mu2_v: Vec<f32>,
-    /// `|src − H_blur(src)|` (v1's `bufs.mask` role).
-    act_raw: Vec<f32>,
-    /// One-pass-blurred activity (v1's `bufs.mul_buf` role).
-    act: Vec<f32>,
-    /// V-blurred `ssq_h` / `s12_h` (v1's `bufs.sigma1_sq` / `bufs.sigma12`);
-    /// `ssq_v` doubles as the activity blur's temp before it is filled.
-    ssq_v: Vec<f32>,
-    s12_v: Vec<f32>,
-    /// BAND-LOCAL H-blurred planes, for the self-blur band shape
-    /// ([`FoldHSource::SelfBlur`]). Only allocated when that shape runs.
     h: [Vec<f32>; 4],
 }
 
 impl FoldPoolScratch {
-    fn ensure(&mut self, n: usize) {
-        for b in [
-            &mut self.mu1_v,
-            &mut self.mu2_v,
-            &mut self.act_raw,
-            &mut self.act,
-            &mut self.ssq_v,
-            &mut self.s12_v,
-        ] {
-            if b.len() < n {
-                b.resize(n, 0.0);
-            }
-        }
-    }
-
-    /// Grow the band-local H planes to `n` elements. Separate from
-    /// [`Self::ensure`] so the precomputed-H shape never allocates them.
     fn ensure_h(&mut self, n: usize) {
         for b in self.h.iter_mut() {
             if b.len() < n {
@@ -805,12 +695,10 @@ fn fold_v1_one_band(
             &mut [],
             false,
             free,
-            crate::fused::ExtPoolsWork::default(),
-            &[],
         ));
         return b1;
     }
-    if let Some((ps, work)) = pools.as_mut().map(|(p, f)| (&mut **p, *f)) {
+    if let Some((ps, _work)) = pools.as_mut().map(|(p, f)| (&mut **p, *f)) {
         let band_n = h_local * width;
         // Size to the WIDEST band this plane can ever hold, not to this band's
         // own height (fold-footprint lane). `ensure` grows through
@@ -834,98 +722,14 @@ fn fold_v1_one_band(
         if self_blur {
             ps.ensure_h(band_cap_n);
         }
-        if work == BandPoolWork::HOnly {
-            // PEAKS mode. Identical arithmetic to the `pools == None` arm
-            // below — every store flag off, no activity, no masked/IW kernel
-            // — run on whichever H planes this band is using. The peak sums
-            // the caller wants are the kernel's unconditional L8/max tier,
-            // so this costs exactly what `V1PoolsMode::Off` costs and the
-            // emitted peak slots are bit-identical to `Full`'s.
-            if self_blur {
-                let [h0, h1, h2, h3] = &mut ps.h;
-                crate::blur::fused_blur_h_ssim_at_revision(
-                    &src[span.clone()],
-                    &dst[span.clone()],
-                    &mut h0[..band_n],
-                    &mut h1[..band_n],
-                    &mut h2[..band_n],
-                    &mut h3[..band_n],
-                    width,
-                    h_local,
-                    BLUR_RADIUS,
-                    free.revision(),
-                );
-            }
-            let (mu1_h, mu2_h, ssq_h, s12_h, span_h) = if self_blur {
-                (
-                    &ps.h[0][..band_n],
-                    &ps.h[1][..band_n],
-                    &ps.h[2][..band_n],
-                    &ps.h[3][..band_n],
-                    0..band_n,
-                )
-            } else {
-                let FoldHSource::Precomputed([a, b, c, d]) = h_src else {
-                    unreachable!("SelfBlur handled above")
-                };
-                (a, b, c, d, span.clone())
-            };
-            sums.accumulate(&crate::fused::fused_vblur_features_ssim(
-                &mu1_h[span_h.clone()],
-                &mu2_h[span_h.clone()],
-                &ssq_h[span_h.clone()],
-                &s12_h[span_h],
-                &src[span.clone()],
-                &dst[span],
-                width,
-                h_local,
-                inner_start,
-                inner_h,
-                BLUR_RADIUS,
-                &mut empty_mu1,
-                &mut empty_mu2,
-                false,
-                &mut empty_sd,
-                false,
-                &mut [],
-                &mut [],
-                false,
-                free,
-                crate::fused::ExtPoolsWork::default(),
-                &[],
-            ));
-            return b1;
-        }
-        #[cfg(test)]
-        POOL_TEST_WIDTHS.with_borrow_mut(|widths| {
-            if let Some(widths) = widths {
-                widths.push(width);
-            }
-        });
-        let full = work == BandPoolWork::Full;
-        let stable = free.revision() >= crate::feature_defs::FormulaRevision::Rev5;
-        if stable && full {
-            ps.stable_sd.resize(band_cap_n, 0.0);
-        }
-        ps.ensure(band_cap_n);
-        // ONE destructure, so the band-local H planes can be READ while the
-        // pool planes stay mutable — disjoint fields of the same `&mut`.
-        let FoldPoolScratch {
-            stable_sd,
-            mu1_v,
-            mu2_v,
-            act_raw,
-            act,
-            ssq_v,
-            s12_v,
-            h,
-        } = ps;
-        let [h0, h1, h2, h3] = h;
+        // PEAKS mode. Identical arithmetic to the `pools == None` arm
+        // below — every store flag off, no activity, no masked/IW kernel
+        // — run on whichever H planes this band is using. The peak sums
+        // the caller wants are the kernel's unconditional L8/max tier,
+        // so this costs exactly what `V1PoolsMode::Off` costs and the
+        // emitted peak slots are bit-identical to `Full`'s.
         if self_blur {
-            // The band's OWN H blur, over exactly the rows it consumes.
-            // Bit-identical to reading those rows out of a whole-window call
-            // (`phase_a_blur_bands_are_bit_exact`); the point is that these
-            // four planes never leave this task.
+            let [h0, h1, h2, h3] = &mut ps.h;
             crate::blur::fused_blur_h_ssim_at_revision(
                 &src[span.clone()],
                 &dst[span.clone()],
@@ -939,170 +743,43 @@ fn fold_v1_one_band(
                 free.revision(),
             );
         }
-        let (mu1_h, mu2_h, ssq_h, s12_h, span_h) = match h_src {
-            FoldHSource::Vertical(_) => unreachable!("shared vertical planes handled above"),
-            FoldHSource::Precomputed([a, b, c, d]) => (a, b, c, d, span.clone()),
-            FoldHSource::SelfBlur => (
-                &h0[..band_n],
-                &h1[..band_n],
-                &h2[..band_n],
-                &h3[..band_n],
+        let (mu1_h, mu2_h, ssq_h, s12_h, span_h) = if self_blur {
+            (
+                &ps.h[0][..band_n],
+                &ps.h[1][..band_n],
+                &ps.h[2][..band_n],
+                &ps.h[3][..band_n],
                 0..band_n,
-            ),
-        };
-        // ORDER: activity FIRST, fused kernel SECOND. The activity blur
-        // borrows `ssq_v` as its scratch temp, and the fused kernel then
-        // overwrites `ssq_v`'s INNER rows with the real V-blurred sigma
-        // (`store_sigma`) — so the two uses are disjoint in time and the
-        // temp costs no extra buffer. Reordering is sum-neutral: the
-        // `sums` fields written here (masked/IW) are disjoint from the
-        // ones `accumulate` writes (basic).
-        //
-        // v1 computes `|src − H_blur(src)|` with its own H kernel
-        // (`box_blur_h_into_abs_diff`); the fold already holds the
-        // H-blurred src as `mu1_h` (the shared fused H-pass plane), so the
-        // activity is one abs-diff pass — the pool parity gate proves the
-        // two H kernels agree bit-for-bit on these planes.
-        crate::simd_ops::abs_diff_into(
-            &src[span.clone()],
-            &mu1_h[span_h.clone()],
-            &mut act_raw[..band_n],
-        );
-        let fused_ext = stable;
-        if fused_ext {
-            crate::blur::box_blur_h(
-                &act_raw[..band_n],
-                &mut act[..band_n],
-                width,
-                h_local,
-                BLUR_RADIUS,
-            );
+            )
         } else {
-            crate::blur::box_blur_1pass_into(
-                &act_raw[..band_n],
-                &mut act[..band_n],
-                &mut ssq_v[..band_n],
-                width,
-                h_local,
-                BLUR_RADIUS,
-            );
-        }
-        let ext = crate::fused::ExtPoolsWork {
-            on: fused_ext,
-            mask: true,
-            iw: true,
-            k_mask: V1_MASK_K,
-            k_iw: V1_IW_K,
+            let FoldHSource::Precomputed([a, b, c, d]) = h_src else {
+                unreachable!("SelfBlur handled above")
+            };
+            (a, b, c, d, span.clone())
         };
-        // `store_sigma` replaces the two `box_blur_v_from_copy(ssq_h →
-        // ssq_v)` / `(s12_h → s12_v)` band sweeps the `Full` arm used to
-        // run after this call: the fused kernel already carries the same
-        // running V-blur sums in registers and divides by the same
-        // `1.0 / diam`, so the stored planes are BIT-IDENTICAL to what
-        // that second sweep produced (and it writes only the inner rows —
-        // the only rows the masked/IW SSIM kernel reads). `Carriers`
-        // needs no sigma, so it stores none and `ssq_v` simply stays the
-        // activity temp.
-        let acc = crate::fused::fused_vblur_features_ssim(
+        sums.accumulate(&crate::fused::fused_vblur_features_ssim(
             &mu1_h[span_h.clone()],
             &mu2_h[span_h.clone()],
             &ssq_h[span_h.clone()],
-            &s12_h[span_h.clone()],
+            &s12_h[span_h],
             &src[span.clone()],
-            &dst[span.clone()],
+            &dst[span],
             width,
             h_local,
             inner_start,
             inner_h,
             BLUR_RADIUS,
-            &mut mu1_v[..band_n],
-            &mut mu2_v[..band_n],
-            true,
-            if stable && full {
-                &mut stable_sd[..band_n]
-            } else {
-                &mut empty_sd
-            },
-            stable && full,
-            &mut ssq_v[..band_n],
-            &mut s12_v[..band_n],
-            full,
+            &mut empty_mu1,
+            &mut empty_mu2,
+            false,
+            &mut empty_sd,
+            false,
+            &mut [],
+            &mut [],
+            false,
             free,
-            ext,
-            if fused_ext { &act[..band_n] } else { &[] },
-        );
-        sums.accumulate(&acc);
-        if fused_ext {
-            if full {
-                sums.masked_mse.add64(0, acc.masked_mse);
-                sums.iw_mse.add64(0, acc.iw_mse);
-                sums.masked_ssim_d.add64(0, acc.masked_ssim_d);
-                sums.masked_ssim_d4.add64(0, acc.masked_ssim_d4);
-                sums.masked_ssim_d2.add64(0, acc.masked_ssim_d2);
-                sums.iw_ssim_d.add64(0, acc.iw_ssim_d);
-                sums.iw_ssim_d4.add64(0, acc.iw_ssim_d4);
-                sums.iw_ssim_d2.add64(0, acc.iw_ssim_d2);
-            }
-            sums.masked_art4.add64(0, acc.masked_art4);
-            sums.masked_det4.add64(0, acc.masked_det4);
-            sums.iw_art4.add64(0, acc.iw_art4);
-            sums.iw_det4.add64(0, acc.iw_det4);
-            return b1;
-        }
-        let inner = inner_start * width..(inner_start + inner_h) * width;
-        let inner_src = &src[span.start + inner.start..span.start + inner.end];
-        let inner_dst = &dst[span.start + inner.start..span.start + inner.end];
-        let inner_mu1 = &mu1_v[inner.clone()];
-        let inner_mu2 = &mu2_v[inner.clone()];
-        let act_inner = &act[inner.clone()];
-        if full {
-            // The masked/IW SSIM + MSE slots — the sigma planes are
-            // already in `ssq_v` / `s12_v` (the fused kernel's
-            // `store_sigma` side-output above), so this arm no longer runs
-            // its own two V-blur band sweeps.
-            let (mse_m, mse_i) = crate::simd_ops::build_inline_mse(
-                act_inner, V1_MASK_K, V1_IW_K, inner_src, inner_dst,
-            );
-            sums.masked_mse.add64(0, mse_m);
-            sums.iw_mse.add64(0, mse_i);
-            let ((sd_m, sd4_m, sd2_m), (sd_i, sd4_i, sd2_i)) = if stable {
-                // `stable_sd` is sized under `stable && full` above and read
-                // here under `stable` — equivalent only because this arm IS
-                // the `full` one. Pinned rather than assumed: moving this
-                // pooling out of `if full` would otherwise read a zeroed
-                // buffer and quietly emit zero masked/IW SSIM.
-                debug_assert!(full && stable_sd.len() >= inner.end);
-                crate::simd_ops::ssim_signal_inline_both(
-                    &stable_sd[inner.clone()],
-                    act_inner,
-                    V1_MASK_K,
-                    V1_IW_K,
-                )
-            } else {
-                crate::simd_ops::ssim_channel_inline_both(
-                    inner_mu1,
-                    inner_mu2,
-                    &ssq_v[inner.clone()],
-                    &s12_v[inner.clone()],
-                    act_inner,
-                    V1_MASK_K,
-                    V1_IW_K,
-                )
-            };
-            sums.masked_ssim_d.add64(0, sd_m);
-            sums.masked_ssim_d4.add64(0, sd4_m);
-            sums.masked_ssim_d2.add64(0, sd2_m);
-            sums.iw_ssim_d.add64(0, sd_i);
-            sums.iw_ssim_d4.add64(0, sd4_i);
-            sums.iw_ssim_d2.add64(0, sd2_i);
-        }
-        let ((art4_m, det4_m), (art4_i, det4_i)) = crate::simd_ops::edge_diff_channel_inline_both(
-            inner_src, inner_dst, inner_mu1, inner_mu2, act_inner, V1_MASK_K, V1_IW_K,
-        );
-        sums.masked_art4.add64(0, art4_m);
-        sums.masked_det4.add64(0, det4_m);
-        sums.iw_art4.add64(0, art4_i);
-        sums.iw_det4.add64(0, det4_i);
+        ));
+        return b1;
     } else {
         // No pool scratch => no band-local H buffer either, so this arm only
         // serves `FoldHSource::Precomputed`. `fold_v1_basic_bands` refuses the
@@ -1131,8 +808,6 @@ fn fold_v1_one_band(
             &mut [],
             false,
             free,
-            crate::fused::ExtPoolsWork::default(),
-            &[],
         ));
     }
     b1
@@ -2730,7 +2405,6 @@ fn stream_fold_v1(
             // Peaks: the scratch travels only so a self-blur band owns
             // its H planes — no pool arithmetic runs (`HOnly`).
             V1PoolsMode::Peaks => Some((&mut acc.pool_scratch[..], BandPoolWork::HOnly)),
-            V1PoolsMode::Full => Some((&mut acc.pool_scratch[..], BandPoolWork::Full)),
         },
         band_parallel,
         free,
@@ -2793,7 +2467,7 @@ fn blockiness_sparse_strip_wide(
     }
 }
 
-pub(crate) fn compute_folded_v1_372_streaming_stoppable(
+pub(crate) fn compute_folded_prefix_streaming_stoppable(
     source: &impl ImageSource,
     distorted: &impl ImageSource,
     max_pixels: Option<usize>,
@@ -2801,7 +2475,7 @@ pub(crate) fn compute_folded_v1_372_streaming_stoppable(
     scratch: &mut V2Scratch,
     // The serving PLAN, resolved by `fold_engine::score_plan` from the
     // profile's bakes. `None` = the unconditional pre-2026-08-31 behaviour
-    // (`V1PoolsMode::Full`, v1-only, v1 layout) — spelled out below as a
+    // (`V1PoolsMode::Peaks`, v1-only, v1 layout) — spelled out below as a
     // literal rather than reconstructed from a plan, so the default path is
     // the SAME code, not merely an equivalent one.
     plan: Option<&crate::feature_plan::Plan>,
@@ -2814,7 +2488,7 @@ pub(crate) fn compute_folded_v1_372_streaming_stoppable(
         // bake declaring a layout wider than 372 becomes servable at all.
         Some(p) => p.toggles(),
         None => V2NewFeatureToggles {
-            v1_pools: V1PoolsMode::Full,
+            v1_pools: V1PoolsMode::Peaks,
             v1_only: true,
             ..V2NewFeatureToggles::default()
         },
@@ -2869,7 +2543,7 @@ pub(crate) fn compute_folded_v1_372_streaming_stoppable(
     Ok((res.into_features(), mo.finish()))
 }
 
-/// Declared-HDR form of [`compute_folded_v1_372_streaming_stoppable`]
+/// Declared-HDR form of [`compute_folded_prefix_streaming_stoppable`]
 /// (HDR_PLAN chunk 2): pixel values map to absolute display light per
 /// `encoding` (PQ / HLG display model, or already-linear cd/m²), then
 /// the anchored cube-root front end (linear nits / reference white,
@@ -3002,7 +2676,7 @@ pub(crate) fn cached_ref_feed_usable(
     true
 }
 
-pub(crate) fn compute_folded_v1_372_with_ref_stoppable(
+pub(crate) fn compute_folded_prefix_with_ref_stoppable(
     precomputed: &crate::streaming::PrecomputedReference,
     distorted: &impl ImageSource,
     parallel: bool,
@@ -3017,7 +2691,7 @@ pub(crate) fn compute_folded_v1_372_with_ref_stoppable(
     let (cw, ch) = (precomputed.scales[0].1, precomputed.scales[0].2);
     let toggles = plan.map_or(
         V2NewFeatureToggles {
-            v1_pools: pool_mode.unwrap_or(V1PoolsMode::Full),
+            v1_pools: pool_mode.unwrap_or(V1PoolsMode::Peaks),
             v1_only: true,
             ..V2NewFeatureToggles::default()
         },
@@ -3576,7 +3250,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
         // phase A entirely and makes every band a self-contained task — the
         // shape `streaming::process_channel_strip` has always had.
         //
-        // `V1PoolsMode::Full` or `Peaks` is required because the band-local
+        // `V1PoolsMode::Peaks` or `Peaks` is required because the band-local
         // H buffer lives in the band's `FoldPoolScratch`, and one of those is
         // what every fold-backed SCORE asks for. (`Peaks` hands the band the
         // scratch for the H planes alone — see `BandPoolWork::HOnly`.)
@@ -3845,46 +3519,11 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                     compute.formula_revision,
                 );
                 if toggles.v1_pools != V1PoolsMode::Off {
-                    // v1's block-major 372 layout: [basic 156][peaks 72]
-                    // [masked 72][iw 72], each pool block scale-major then
-                    // channel-major, 6 per (scale, ch) (`metric.rs` passes
-                    // 2/3/4). `n_scales`-generic: 13/6/6/6 per (scale, ch).
                     let cell = (scale * 3 + ch) * 6;
                     let peaks0 = n_scales * 39 + cell;
-                    let masked0 = n_scales * 57 + cell;
-                    let iw0 = n_scales * 75 + cell;
                     let mut peaks = [0.0f64; 6];
-                    let mut masked = [0.0f64; 6];
-                    let mut iw = [0.0f64; 6];
-                    acc.v1[scale].finalize_pools_into(
-                        n,
-                        &mut peaks,
-                        &mut masked,
-                        &mut iw,
-                        compute.formula_revision,
-                    );
-                    if toggles.v1_pools == V1PoolsMode::Full {
-                        features_v12[peaks0..peaks0 + 6].copy_from_slice(&peaks);
-                        features_v12[masked0..masked0 + 6].copy_from_slice(&masked);
-                        features_v12[iw0..iw0 + 6].copy_from_slice(&iw);
-                    } else if toggles.v1_pools == V1PoolsMode::Peaks {
-                        // Peaks only; the masked/IW sums were never
-                        // accumulated, so their slots stay the structural 0.
-                        features_v12[peaks0..peaks0 + 6].copy_from_slice(&peaks);
-                    } else {
-                        // Carriers: only the ten `fused944native` slots go
-                        // live (peak slot 4 = art_l8, masked/iw slot 3 =
-                        // art_4th); everything else stays the structural 0.
-                        for &slot in V1PoolsMode::CARRIER_SLOTS.iter() {
-                            if slot == peaks0 + 4 {
-                                features_v12[slot] = peaks[4];
-                            } else if slot == masked0 + 3 {
-                                features_v12[slot] = masked[3];
-                            } else if slot == iw0 + 3 {
-                                features_v12[slot] = iw[3];
-                            }
-                        }
-                    }
+                    acc.v1[scale].finalize_peaks_into(n, &mut peaks, compute.formula_revision);
+                    features_v12[peaks0..peaks0 + 6].copy_from_slice(&peaks);
                 }
             }
         }

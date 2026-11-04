@@ -75,7 +75,6 @@ pub(crate) enum KernelId {
     /// v1's peak tier (max + L8), unconditional inside the fused kernel.
     V1Peaks,
     /// v1's shared activity chain feeding masked and IW together.
-    V1MaskIw,
     /// The v2-348 dense block kernel.
     V2Dense,
     /// The v2 gradient kernel (GMS, ringing, banding, edge width).
@@ -218,17 +217,6 @@ const fn v1(family: ComputeToken, name: &'static str) -> SignalDef {
     }
 }
 
-/// [`v1`] with an explicit revision list — for slots whose era membership is
-/// not implied by their statistic (the fused-extension pools). The F18
-/// defect is still derived from the statistic exactly as [`v1`] derives it.
-const fn v1_rev(family: ComputeToken, name: &'static str) -> SignalDef {
-    SignalDef {
-        family: Family::Supported(family),
-        name,
-        form: Form::Difference,
-    }
-}
-
 /// A v1 signal carrying a named defect and its proposed revision.
 const fn v1_with_defect(family: ComputeToken, name: &'static str) -> SignalDef {
     SignalDef {
@@ -317,43 +305,6 @@ pub(crate) static PEAKS: [SignalDef; 6] = {
         v1_defect(F, 3, "ssim_l8", L8, K),
         v1(F, "edge_art_l8"),
         v1(F, "edge_det_l8"),
-    ]
-};
-
-/// The 6 v1 masked signals per (scale, channel).
-pub(crate) static MASKED: [SignalDef; 6] = {
-    use ComputeToken::Masked as F;
-    use KernelId::V1MaskIw as K;
-    use Statistic::{L2, L4, Mean};
-    [
-        // F4: the per-pixel SSIM dissimilarity these three pool is uncapped
-        // and carries no C1. f241 (masked ssim_4th) and f313 (iw ssim_4th)
-        // are the two worst slots the defect audit scanned.
-        v1_defect(F, 0, "ssim_mean", Mean, K),
-        v1_defect(F, 1, "ssim_4th", L4, K),
-        v1_defect(F, 2, "ssim_2nd", L2, K),
-        v1_rev(F, "edge_art_4th"),
-        v1_rev(F, "edge_det_4th"),
-        v1_rev(F, "mse"),
-    ]
-};
-
-/// The 6 v1 IW signals per (scale, channel) — same shape as [`MASKED`],
-/// opposite pooling polarity.
-pub(crate) static IW: [SignalDef; 6] = {
-    use ComputeToken::Iw as F;
-    use KernelId::V1MaskIw as K;
-    use Statistic::{L2, L4, Mean};
-    [
-        // F4: the per-pixel SSIM dissimilarity these three pool is uncapped
-        // and carries no C1. f241 (masked ssim_4th) and f313 (iw ssim_4th)
-        // are the two worst slots the defect audit scanned.
-        v1_defect(F, 0, "ssim_mean", Mean, K),
-        v1_defect(F, 1, "ssim_4th", L4, K),
-        v1_defect(F, 2, "ssim_2nd", L2, K),
-        v1_rev(F, "edge_art_4th"),
-        v1_rev(F, "edge_det_4th"),
-        v1_rev(F, "mse"),
     ]
 };
 
@@ -479,16 +430,6 @@ pub(crate) static BLOCKS: &[BlockDef] = &[
         replication: Replication::PerChannel,
     },
     BlockDef {
-        family: Family::Supported(ComputeToken::Masked),
-        signals: &MASKED,
-        replication: Replication::PerChannel,
-    },
-    BlockDef {
-        family: Family::Supported(ComputeToken::Iw),
-        signals: &IW,
-        replication: Replication::PerChannel,
-    },
-    BlockDef {
         family: Family::Supported(ComputeToken::V2),
         signals: &V2,
         replication: Replication::PerChannel,
@@ -506,8 +447,12 @@ impl BlockDef {
 }
 
 /// Retired slots stay unassigned so later feature IDs keep their meaning.
-fn reserved_before(_family: Family) -> usize {
-    0
+fn reserved_before(family: Family, n_scales: usize) -> usize {
+    if family == Family::Supported(ComputeToken::V2) {
+        n_scales * 3 * 12
+    } else {
+        0
+    }
 }
 
 /// The base slot id of `family` at `n_scales`, and its block.
@@ -518,7 +463,7 @@ pub(crate) fn block_base(
     let family = family.into();
     let mut base = 0usize;
     for b in BLOCKS {
-        base += reserved_before(b.family);
+        base += reserved_before(b.family, n_scales);
         if b.family == family {
             return Some((base, b));
         }
@@ -531,7 +476,7 @@ pub(crate) fn block_base(
 pub(crate) fn full_width(n_scales: usize) -> usize {
     BLOCKS
         .iter()
-        .map(|b| reserved_before(b.family) + b.width(n_scales))
+        .map(|b| reserved_before(b.family, n_scales) + b.width(n_scales))
         .sum()
 }
 
@@ -541,7 +486,7 @@ pub(crate) fn full_width(n_scales: usize) -> usize {
 pub(crate) fn def_at(id: usize, n_scales: usize) -> Option<FeatureDef> {
     let mut base = 0usize;
     for block in BLOCKS {
-        base += reserved_before(block.family);
+        base += reserved_before(block.family, n_scales);
         if id < base {
             return None;
         }
@@ -566,21 +511,8 @@ pub(crate) fn def_at(id: usize, n_scales: usize) -> Option<FeatureDef> {
     None
 }
 
-/// The ten `fused944native` CARRIER slots.
-///
-/// A hand-picked subset of peaks/masked/iw rather than a derivable rule — the
-/// slots the `fused944native` tables actually carry (peak `art_l8`, and the
-/// masked/IW `art_4th` at the scales the fused edge kernel reaches). Declared
-/// here so the registry is complete on a `--no-default-features` build, and
-/// gated equal to `V1PoolsMode::CARRIER_SLOTS` — the owner — by
-/// [`tests::carrier_slots_match_the_feature_v2_owner`].
-pub(crate) const CARRIER_SLOTS: [usize; 10] = [178, 190, 196, 226, 231, 237, 243, 303, 321, 333];
-
-/// Every slot of a family at `n_scales`.
-/// Carriers is a subset of the v1 pools, so it has no separate block.
 pub(crate) fn family_slots(family: impl Into<Family>, n_scales: usize) -> SlotSet {
     match family.into() {
-        Family::Supported(ComputeToken::Carriers) => SlotSet::from_slots(CARRIER_SLOTS),
         other => match block_base(other, n_scales) {
             Some((base, block)) => SlotSet::from_ranges([(base, base + block.width(n_scales))]),
             None => SlotSet::default(),
@@ -602,8 +534,6 @@ mod tests {
         let expect = [
             (Family::Supported(ComputeToken::Basic), 0usize, 156usize),
             (Family::Supported(ComputeToken::Peaks), 156, 72),
-            (Family::Supported(ComputeToken::Masked), 228, 72),
-            (Family::Supported(ComputeToken::Iw), 300, 72),
             (Family::Supported(ComputeToken::V2), 372, 348),
         ];
         for (family, base, width) in expect {
@@ -628,21 +558,5 @@ mod tests {
                 );
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod owner_gates {
-    use super::*;
-    use crate::feature_v2;
-
-    /// The carrier list is the owner's list.
-    #[test]
-    fn carrier_slots_match_the_feature_v2_owner() {
-        assert_eq!(
-            CARRIER_SLOTS,
-            feature_v2::V1PoolsMode::CARRIER_SLOTS,
-            "carrier slot list disagrees with V1PoolsMode::CARRIER_SLOTS"
-        );
     }
 }

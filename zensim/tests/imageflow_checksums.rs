@@ -1,6 +1,6 @@
 #![cfg(feature = "classification")]
 #![allow(deprecated)]
-// exercises the legacy `ZensimProfile::LegacyA`
+// exercises the adopted `ZensimProfile::A`
 //! Imageflow visual regression checksum analysis.
 //!
 //! Downloads old/new image pairs from imageflow's S3 bucket and runs
@@ -153,7 +153,7 @@ fn imageflow_checksum_analysis() {
             .into_owned()
     });
 
-    let zensim = Zensim::new(ZensimProfile::LegacyA);
+    let zensim = Zensim::new(ZensimProfile::A);
     let commits = manifest["commits"].as_array().expect("commits array");
 
     let mut tsv = String::new();

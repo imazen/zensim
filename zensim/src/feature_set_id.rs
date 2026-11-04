@@ -19,28 +19,16 @@ use core::fmt;
 pub enum ComputeToken {
     /// v1 basic fold, `f0..155`.
     Basic,
-    /// The ten `fused944native` carrier slots (`V1PoolsMode::Carriers`).
-    Carriers,
     /// v1 soft-peak pool, `f156..227` (`V1PoolsMode::Peaks`).
     Peaks,
-    /// v1 masked pool, `f228..299`.
-    Masked,
-    /// v1 IW pool, `f300..371`.
-    Iw,
     /// v2-348 dense block, `f372..719`.
     V2,
 }
 
 impl ComputeToken {
     /// Every token, in the canonical registry order the short form renders in.
-    pub const ALL: &'static [ComputeToken] = &[
-        ComputeToken::Basic,
-        ComputeToken::Carriers,
-        ComputeToken::Peaks,
-        ComputeToken::Masked,
-        ComputeToken::Iw,
-        ComputeToken::V2,
-    ];
+    pub const ALL: &'static [ComputeToken] =
+        &[ComputeToken::Basic, ComputeToken::Peaks, ComputeToken::V2];
 
     /// The token's wire spelling (charset `[a-z0-9_]+`, per the
     /// `zenanalyze-api` name rule).
@@ -48,10 +36,7 @@ impl ComputeToken {
     pub const fn as_str(self) -> &'static str {
         match self {
             ComputeToken::Basic => "basic",
-            ComputeToken::Carriers => "carriers",
             ComputeToken::Peaks => "peaks",
-            ComputeToken::Masked => "masked",
-            ComputeToken::Iw => "iw",
             ComputeToken::V2 => "v2",
         }
     }

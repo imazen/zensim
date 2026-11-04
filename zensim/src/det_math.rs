@@ -191,6 +191,7 @@ pub trait DetPow: Copy {
     /// `self ^ n`, for the non-dyadic exponents the score mapping uses.
     fn det_powf(self, n: Self, form: PowForm) -> Self;
     /// `e ^ self` — the bounded squash and every head sigmoid.
+    #[cfg(test)]
     fn det_exp(self, form: PowForm) -> Self;
     /// `log2(self)` — the MLP size axes.
     fn det_log2(self, form: PowForm) -> Self;
@@ -205,6 +206,7 @@ impl DetPow for f64 {
         }
     }
     #[inline(always)]
+    #[cfg(test)]
     fn det_exp(self, form: PowForm) -> Self {
         match form {
             PowForm::LibmPowf => self.exp(),

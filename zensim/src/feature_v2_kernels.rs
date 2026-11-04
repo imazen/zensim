@@ -529,33 +529,11 @@ pub struct V2NewFeatureToggles {
 /// Which of v1's pool slots (`f156..372`) the folded walk emits live.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum V1PoolsMode {
-    /// Structural zeros (the production folded regimes).
+    /// Structural zeros in the unused peak positions.
     #[default]
     Off,
-    /// **The peak block only** (`f156..228`) — masked and IW stay 0.
-    ///
-    /// Costs the SAME as [`Self::Off`]: the peak accumulators (`ssim_d8`,
-    /// `edge_art8`, `edge_det8` and the three running maxima) are produced
-    /// UNCONDITIONALLY by `fused::fused_vblur_features_ssim` on every path
-    /// and merged unconditionally by `V1BasicSums::accumulate`, so `Off` has
-    /// been paying for them all along and simply declined to emit them. What
-    /// this mode skips relative to [`Self::Full`] is the masked/IW pass
-    /// group — the band activity chain (`abs_diff_into` +
-    /// `box_blur_1pass_into`), the fused kernel's `store_mu`/`store_sigma`
-    /// side-outputs, and the three `*_inline_both` kernels — which is the
-    /// whole measurable cost of the pool block.
-    ///
-    /// The band scratch is still handed to the band so the memory-traffic
-    /// self-blur shape (`FoldHSource::SelfBlur`) stays available; it owns
-    /// only the four H planes there, never the pool planes.
+    /// Emit the legacy peak block (`f156..228`).
     Peaks,
-    /// All 216 slots: peaks (72) + masked (72) + IW (72), v1-exact.
-    Full,
-}
-
-impl V1PoolsMode {
-    /// The ten carrier slots (`Carriers`), in v1's 372 layout.
-    pub const CARRIER_SLOTS: [usize; 10] = [178, 190, 196, 226, 231, 237, 243, 303, 321, 333];
 }
 
 impl Default for V2NewFeatureToggles {
@@ -652,9 +630,6 @@ pub(crate) struct ComputeSet {
     pub omit_edges: bool,
     /// v1's masked/IW/soft-peak pool slots — the 13.6 % pass of item E.
     pub v1_pools: V1PoolsMode,
-    /// Scales that run the shared masked/IW activity chain in Full mode.
-    /// Public extraction retains all scales; declared-ID plans narrow this.
-    pub v1_full_scales: u8,
     /// Scales at which any v1-era slot (basic, peaks, masked, IW) is read.
     /// Public extraction keeps all scales; declared-ID plans narrow it, and the
     /// walk skips a scale's strips whole when neither this nor `v2_scales`
@@ -696,21 +671,8 @@ impl ComputeSet {
         }
     }
 
-    /// Only Full has a per-scale restriction. Peaks keeps the same basic
-    /// and peak accumulators while omitting the activity/weighted-pool chain.
-    pub(crate) fn pools_at(&self, scale: usize) -> V1PoolsMode {
-        if self.v1_pools == V1PoolsMode::Full && self.v1_full_scales & (1 << scale) == 0 {
-            V1PoolsMode::Peaks
-        } else {
-            self.v1_pools
-        }
-    }
-
-    pub(crate) fn full_pool_scales(&self) -> u8 {
-        match self.v1_pools {
-            V1PoolsMode::Full => self.v1_full_scales,
-            _ => 0,
-        }
+    pub(crate) fn pools_at(&self, _scale: usize) -> V1PoolsMode {
+        self.v1_pools
     }
 
     /// The ONE derivation from the public request type. Every `&&
@@ -728,7 +690,6 @@ impl ComputeSet {
             local_only: false,
             omit_edges: false,
             v1_pools: t.v1_pools,
-            v1_full_scales: Self::ALL_SCALES,
             v1_scales: Self::ALL_SCALES,
             v2_scales: Self::ALL_SCALES,
             v2_blocks,
@@ -748,7 +709,6 @@ impl ComputeSet {
         if self.v1_pools != V1PoolsMode::Off {
             self.v1_pools = V1PoolsMode::Peaks;
         }
-        self.v1_full_scales = Self::ALL_SCALES;
     }
 
     pub(crate) fn fused_work(&self, ch: usize, scale: usize) -> crate::fused::FusedWork {
@@ -795,7 +755,7 @@ impl ComputeSet {
     pub(crate) fn self_blur_eligible(&self) -> bool {
         !self.v2_blocks
             && self.v1_basic
-            && matches!(self.v1_pools, V1PoolsMode::Full | V1PoolsMode::Peaks)
+            && matches!(self.v1_pools, V1PoolsMode::Peaks)
     }
 
     pub(crate) fn populated_slots(
@@ -824,8 +784,7 @@ impl ComputeSet {
         }
         let basic = n_scales * 3 * crate::metric::FEATURES_PER_CHANNEL_BASIC;
         let peaks_end = n_scales * 3 * crate::metric::FEATURES_PER_CHANNEL_WITH_PEAKS;
-        let masked_end = n_scales * 3 * crate::metric::FEATURES_PER_CHANNEL_EXTENDED;
-        let v1_total = masked_end + n_scales * 3 * crate::metric::FEATURES_PER_CHANNEL_IW;
+        let v1_total = n_scales * 93;
         let v2_end = v1_total + n_scales * 3 * FEATURES_PER_CHANNEL_V2_TOTAL;
 
         let mut ranges: Vec<(usize, usize)> = Vec::new();
@@ -835,7 +794,6 @@ impl ComputeSet {
         match self.v1_pools {
             V1PoolsMode::Off => {}
             V1PoolsMode::Peaks => ranges.push((basic, peaks_end)),
-            V1PoolsMode::Full => ranges.push((basic, v1_total)),
         }
         if self.v2_blocks {
             ranges.push((v1_total, v2_end));
@@ -859,10 +817,7 @@ impl ComputeSet {
                             crate::feature_defs::Channel::X | crate::feature_defs::Channel::B
                         )
                 })
-                && !(self.v1_pools == V1PoolsMode::Full
-                    && (peaks_end..v1_total).contains(&id)
-                    && crate::feature_defs::def_at(id, n_scales)
-                        .is_some_and(|d| self.pools_at(usize::from(d.scale)) != V1PoolsMode::Full))
+
         }))
     }
 
@@ -894,7 +849,7 @@ impl ComputeSet {
         (!self.v2_blocks || self.v2_scales & 1 == 0 || self.chroma_local_families())
             && matches!(
                 self.v1_pools,
-                V1PoolsMode::Off | V1PoolsMode::Peaks | V1PoolsMode::Full
+                V1PoolsMode::Off | V1PoolsMode::Peaks
             )
     }
 

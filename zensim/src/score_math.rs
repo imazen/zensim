@@ -1,122 +1,6 @@
-//! Shared score mapping and neural-output arithmetic.
-//!
-//! Callers pass the power form explicitly; feature extraction and score mapping
-//! keep their arithmetic choices separate.
-
+//! Legacy linear score mapping, shared by the preview scorers.
 use crate::det_math::{DetPow, PowForm};
 
-/// Pool-statistic sigma floor shared by both mixing heads.
-///
-/// Mirrors `zensim-train-core::pool_head::POOL_STD_FLOOR`. It is inlined
-/// rather than imported so the zensim runtime keeps no dependency on the
-/// trainer crate; `metric.rs` previously carried it TWICE (once per head) and
-/// `zensim-validate` a third time.
-pub const POOL_STD_FLOOR: f64 = 0.0026;
-
-/// Borrowed per-sample-α head parameters.
-///
-/// `y = α · y_rank + (1 − α) · y_pool` with `α = σ(h · w_alpha + b_alpha)`
-/// computed PER SAMPLE from the hidden vector. Payload layout and provenance:
-/// `zensim-train-core::per_sample_alpha_head`.
-#[derive(Debug, Clone, Copy)]
-pub struct PerSampleAlphaParams<'a> {
-    /// Gate weights, one per hidden unit.
-    pub w_alpha: &'a [f32],
-    /// Gate bias.
-    pub b_alpha: f32,
-    /// Rank-head weights, one per hidden unit.
-    pub rank_w: &'a [f32],
-    /// Rank-head bias.
-    pub rank_b: f32,
-    /// Pool-head reducer weights over `[μ, σ, max, p-norm]`.
-    pub reducer_w: [f32; 4],
-    /// Pool-head reducer bias.
-    pub reducer_b: f32,
-    /// The pool head's p-norm exponent.
-    pub p_norm: f32,
-}
-
-/// Apply the per-sample-α head to a hidden vector `h`.
-///
-/// Returns `f64::NAN` when `h` is empty or either weight vector disagrees
-/// with its length. **That is a widening, and it is deliberate**: the
-/// validate-side mirror already returned NaN on mismatch, while `metric.rs`
-/// carried `debug_assert_eq!` plus an unchecked index — so in release a
-/// `w_alpha` length mismatch was an out-of-bounds panic there. Both shapes
-/// are unreachable through either caller (each parse guarantees both vectors
-/// are `n_hidden` long, and `metric.rs` re-checks `rank_w` before calling),
-/// so no reachable path changes; the checked form is simply the one that
-/// cannot be worse.
-///
-/// Read the [`PowForm`] ONCE above your own loop and pass it in — see the
-/// module docs.
-pub fn per_sample_alpha_head(h: &[f32], p: &PerSampleAlphaParams<'_>, form: PowForm) -> f64 {
-    let n = h.len();
-    if n == 0 || p.rank_w.len() != n || p.w_alpha.len() != n {
-        return f64::NAN;
-    }
-
-    let mut y_rank = p.rank_b as f64;
-    let mut alpha_logit = p.b_alpha as f64;
-    let mut sum = 0.0_f64;
-    let mut max_v = f64::NEG_INFINITY;
-    let mut sum_p = 0.0_f64;
-    let pn = p.p_norm as f64;
-    for (j, &hj) in h.iter().enumerate() {
-        let hjf = hj as f64;
-        y_rank += hjf * p.rank_w[j] as f64;
-        alpha_logit += hjf * p.w_alpha[j] as f64;
-        sum += hjf;
-        if hjf > max_v {
-            max_v = hjf;
-        }
-        sum_p += hjf.abs().det_powf(pn, form);
-    }
-    let nf = n as f64;
-    let mu = sum / nf;
-    let mut var = 0.0_f64;
-    for &hj in h.iter() {
-        let d = hj as f64 - mu;
-        var += d * d;
-    }
-    let sigma = (var / nf).sqrt().max(POOL_STD_FLOOR);
-    let p_norm_stat = (sum_p / nf).det_powf(1.0 / pn, form);
-
-    let y_pool = mu * p.reducer_w[0] as f64
-        + sigma * p.reducer_w[1] as f64
-        + max_v * p.reducer_w[2] as f64
-        + p_norm_stat * p.reducer_w[3] as f64
-        + p.reducer_b as f64;
-
-    // sigmoid with clamp (matches the trainer's `sigmoid` helper).
-    let alpha = {
-        let xc = alpha_logit.clamp(-20.0, 20.0);
-        1.0 / (1.0 + (-xc).det_exp(form))
-    };
-    alpha * y_rank + (1.0 - alpha) * y_pool
-}
-
-/// The tanh-pinned `[0, 100]` sigmoid wrap: `100 · σ(y_pre / scale)`.
-///
-/// Matches `zensim-train-core::per_sample_alpha_head::
-/// bake_per_sample_alpha_head_v3_with_tanh` at training time.
-///
-/// NaN in, NaN out — by arithmetic, not by a guard: `f64::clamp` propagates
-/// NaN, `exp(NaN)` is NaN, and `100 · NaN` is NaN. A caller that wants to
-/// short-circuit on NaN may still do so; that is a shape choice, not a
-/// numerical one.
-pub fn tanh_output_pin(y_pre: f64, scale: f64, form: PowForm) -> f64 {
-    let xc = (y_pre / scale).clamp(-30.0, 30.0);
-    let s = 1.0 / (1.0 + (-xc).det_exp(form));
-    100.0 * s
-}
-
-/// Map a raw weighted distance to the quality score: `100 − a · d^b`.
-///
-/// Nominally 0–100 but UNCLAMPED below zero — the magnitude below zero is
-/// informative (it separates "slightly wrong" from "completely wrong"), so
-/// clamping is the caller's policy, not this function's. `d ≤ 0` returns
-/// exactly `100.0`.
 pub fn distance_to_score_mapped(raw_distance: f64, a: f64, b: f64, form: PowForm) -> f64 {
     if raw_distance <= 0.0 {
         100.0
@@ -125,21 +9,6 @@ pub fn distance_to_score_mapped(raw_distance: f64, a: f64, b: f64, form: PowForm
     }
 }
 
-/// Fritsch–Carlson monotone-preserving derivatives at each knot.
-///
-/// Standard PCHIP recipe: a weighted harmonic mean of adjacent slopes where
-/// they share a sign (zero at an extremum), with three-point endpoint
-/// estimates clamped to preserve monotonicity.
-///
-/// # Panics
-///
-/// Panics if `xs.len() < 2` or `ys.len() != xs.len()` — both are parse-time
-/// invariants of every caller (`n_knots >= 2`, strictly increasing `x`).
-///
-/// Contains no transcendental, so it does not take a [`PowForm`]: it is
-/// `+ − × ÷` only, which IEEE-754 requires to be correctly rounded, and is
-/// therefore already libc-independent (`det_math`'s exposure table records
-/// the same audit for the spline).
 pub fn pchip_derivs(xs: &[f64], ys: &[f64]) -> Vec<f64> {
     let n = xs.len();
     assert_eq!(ys.len(), n, "pchip_derivs: xs/ys length mismatch");
@@ -260,63 +129,6 @@ pub fn pchip_eval_capped(x: f64, xs: &[f64], ys: &[f64], derivs: &[f64]) -> f64 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// A deterministic stand-in for a bake's hidden vector: `n` values
-    /// spanning the sign and magnitude range a post-LeakyReLU layer produces.
-    fn hidden(n: usize, seed: u64) -> Vec<f32> {
-        let mut s = seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1;
-        (0..n)
-            .map(|_| {
-                s ^= s << 13;
-                s ^= s >> 7;
-                s ^= s << 17;
-                // (-4, 4), with the negative tail LeakyReLU actually emits.
-                let u = (s >> 11) as f64 / ((1u64 << 53) as f64);
-                ((u * 8.0 - 4.0) as f32) * if s & 0x10 == 0 { 1.0 } else { 0.1 }
-            })
-            .collect()
-    }
-
-    fn psa_params<'a>(w: &'a [f32], r: &'a [f32]) -> PerSampleAlphaParams<'a> {
-        PerSampleAlphaParams {
-            w_alpha: w,
-            b_alpha: -0.25,
-            rank_w: r,
-            rank_b: 3.5,
-            reducer_w: [0.7, -1.3, 0.4, 0.9],
-            reducer_b: -2.0,
-            p_norm: 6.0,
-        }
-    }
-
-    /// The two arms are a rounding question, never a semantic one.
-    #[test]
-    fn the_two_pow_arms_stay_close_on_the_heads() {
-        for seed in 0..2_000u64 {
-            let n = 8 + (seed as usize % 121);
-            let h = hidden(n, seed);
-            let w = hidden(n, seed ^ 0xAAAA);
-            let r = hidden(n, seed ^ 0x5555);
-            let p = psa_params(&w, &r);
-            let a = per_sample_alpha_head(&h, &p, PowForm::LibmPowf);
-            let b = per_sample_alpha_head(&h, &p, PowForm::PureRust);
-            assert!(a.is_finite() && b.is_finite(), "seed {seed}: non-finite");
-            let rel = (a - b).abs() / a.abs().max(b.abs()).max(1.0);
-            assert!(rel < 1e-12, "seed {seed}: {a} vs {b} (rel {rel:e})");
-        }
-    }
-
-    #[test]
-    fn tanh_pin_is_zero_to_hundred_and_propagates_nan() {
-        for form in [PowForm::LibmPowf, PowForm::PureRust] {
-            assert!((tanh_output_pin(0.0, 1.0, form) - 50.0).abs() < 1e-12);
-            assert!(tanh_output_pin(f64::NAN, 1.0, form).is_nan());
-            for i in -1000..=1000 {
-                let y = tanh_output_pin(i as f64 * 0.5, 3.0, form);
-                assert!((0.0..=100.0).contains(&y), "out of band at {i}: {y}");
-            }
-        }
-    }
 
     #[test]
     fn distance_mapping_is_exactly_a_hundred_at_or_below_zero() {

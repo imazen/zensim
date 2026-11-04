@@ -40,7 +40,6 @@ fn main() {
     let profiles = [
         ("PreviewV0_1", ZensimProfile::PreviewV0_1),
         ("PreviewV0_2", ZensimProfile::PreviewV0_2),
-        ("LegacyA", ZensimProfile::LegacyA),
         ("A", ZensimProfile::A),
     ];
     let hex = |x: f64| format!("{:016x}", x.to_bits());

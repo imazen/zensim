@@ -13,7 +13,6 @@ categories = ["multimedia::images", "computer-vision"]
 # in `src/` must be listed here or the published crate does not compile.
 include = [
     "src/**/*.rs",
-    "weights/v47_strict_qat_native_byid_2026-09-06.bin",
     "weights/rev7_mix_h128_2026-11-03.bin",
 ]
 

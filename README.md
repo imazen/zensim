@@ -24,7 +24,6 @@ candidates against one reference with `precompute_reference` and `compute_with_r
 | Profile | Name | Use |
 |---|---|---|
 | `A` (`latest()`, `codec_target()`) | `zensim-a` | General purpose, the default: compression, noise, blur, colour and contrast changes |
-| `LegacyA` | `zensim-legacy-a` | Legacy development model, for callers whose thresholds are calibrated to it |
 | `PreviewV0_1`, `PreviewV0_2` | | The linear profiles of zensim 0.1 and 0.2 |
 
 `A` is a monotone network over multi-scale SSIM, edge, detail-loss and

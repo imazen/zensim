@@ -170,8 +170,6 @@
 //! - [`ZensimProfile::A`] ([`ZensimProfile::latest`] and [`ZensimProfile::codec_target`]): a monotone
 //!   MLP over revision-7 features plus a calibrated output spline. Severe
 //!   damage can score below 0 (the spline extrapolates past its knots).
-//! - [`ZensimProfile::LegacyA`] (legacy): an MLP forward pass and a monotone output
-//!   spline, kept for callers calibrated to its scores.
 //! - [`ZensimProfile::PreviewV0_1`] / [`ZensimProfile::PreviewV0_2`]
 //!   (linear profiles): `100 - 18 × d^0.7` where `d` is the per-scale
 //!   weighted feature distance. Calibrated from 0–100 on 344k training
@@ -275,8 +273,8 @@ pub use streaming::{PrecomputedReference, ZensimScratch};
 #[cfg(feature = "training")]
 pub use metric::{
     BlurKernel, CH_B, CH_X, CH_Y, DownscaleFilter, FEATURES_PER_CHANNEL_BASIC,
-    FEATURES_PER_CHANNEL_EXTENDED, FEATURES_PER_CHANNEL_WITH_PEAKS, FEATURES_PER_SCALE, WEIGHTS,
-    ZensimConfig, compute_zensim_with_config, compute_zensim_with_ref_and_config,
+    FEATURES_PER_CHANNEL_WITH_PEAKS, FEATURES_PER_SCALE, WEIGHTS, ZensimConfig,
+    compute_zensim_with_config, compute_zensim_with_ref_and_config,
     precompute_reference_with_scales, score_from_features, try_score_from_features,
 };
 

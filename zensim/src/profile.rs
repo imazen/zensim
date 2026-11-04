@@ -26,17 +26,9 @@ pub enum ZensimProfile {
     /// through zensim 0.2.x; the 0.2.7 compatibility note on
     /// [`Self::PreviewV0_1`] applies here too.
     PreviewV0_2,
-    /// Legacy MLP profile `LegacyA` (`zensim-legacy-a`), previously named `A`
-    /// in the 0.3.0 development line: 372 features at the first formula revision,
-    /// a monotone network and a calibrated output spline. It was the
-    /// codec-quality target of an earlier 0.3.0 development stage and
-    /// is kept for callers whose thresholds are calibrated to its scores. New code
-    /// should use [`Self::latest`] or [`Self::codec_target`]. This profile is
-    /// deprecated in 0.3.0; use `latest()`. It was never part of the 0.2.7 API.
-    LegacyA,
     /// General-purpose profile `A` (`zensim-a`), returned by [`Self::latest`]
     /// since 0.3.0. Adopted on 2026-11-04 (research name `mixF3`, `F` in the
-    /// research crate); the earlier development profile `A` is now [`Self::LegacyA`].
+    /// research crate).
     ///
     /// A monotone MLP with full-resolution chroma signals over 492
     /// revision-7 damage features and 492 fragility products, every damage
@@ -75,7 +67,6 @@ impl ZensimProfile {
         match self {
             Self::PreviewV0_1 => "zensim-preview-v0.1",
             Self::PreviewV0_2 => "zensim-preview-v0.2",
-            Self::LegacyA => "zensim-legacy-a",
             Self::A => "zensim-a",
             #[cfg(any(feature = "training", test))]
             Self::LegacyLinearV0_2 => "zensim-legacy-linear-v0.2",
@@ -87,7 +78,6 @@ impl ZensimProfile {
         match self {
             Self::PreviewV0_1 => &PROFILE_PREVIEW_V0_1,
             Self::PreviewV0_2 => &PROFILE_PREVIEW_V0_2,
-            Self::LegacyA => &PROFILE_LEGACY_A,
             Self::A => &PROFILE_A,
             #[cfg(any(feature = "training", test))]
             Self::LegacyLinearV0_2 => &PROFILE_LEGACY_LINEAR_V0_2,
@@ -113,7 +103,6 @@ impl core::str::FromStr for ZensimProfile {
         match name {
             "zensim-preview-v0.1" => Ok(Self::PreviewV0_1),
             "zensim-preview-v0.2" => Ok(Self::PreviewV0_2),
-            "zensim-legacy-a" => Ok(Self::LegacyA),
             "zensim-a" => Ok(Self::A),
             #[cfg(any(feature = "training", test))]
             "zensim-legacy-linear-v0.2" => Ok(Self::LegacyLinearV0_2),
@@ -169,28 +158,6 @@ pub struct ProfileParams {
     /// to a `static` byte array once the training pipeline lands).
     pub(crate) mlp_bytes: Option<fn() -> &'static [u8]>,
 
-    /// When `true`, the runtime computes the **extended-features**
-    /// block (228 → 300 features — adds 72 masked features) per pair
-    /// via `Zensim::compute_extended_features`. Required when the
-    /// profile's MLP bake has `n_inputs > 228`. Default `false` keeps
-    /// the V_18 / V_20 IS 228-feature fast path.
-    ///
-    /// The masking pass reuses the already-computed flatness map, so
-    /// extended-features overhead is moderate (~10–30 % per-pair compute
-    /// vs standard). Distinct from `compute_iw_features` which adds
-    /// a separate weighted pool (more expensive).
-    ///
-    /// Added 2026-05-15 to enable V_20 extended-shaping profile
-    /// (PreviewV0_5_Extended at 300-feat input) after the V_20a IW
-    /// (372-feat) path was falsified for CID22 transfer.
-    pub(crate) extended_features: bool,
-
-    /// When `true`, the runtime also computes the **IW pool** block
-    /// (300 → 372 features — adds 72 IW-weighted features per Wang &
-    /// Li 2011). Implies `extended_features = true` for the standard
-    /// IW layout. Default `false`.
-    pub(crate) compute_iw_features: bool,
-
     /// EXP-CROSS-CODEC-V10 (2026-05-20): when `true`, the final score
     /// is returned **without clamping or soft-clamping** — the
     /// PCHIP spline's linear extrapolation past the knot endpoints
@@ -229,8 +196,7 @@ impl ProfileParams {
             // their static `ProfileParams` definitions.
             skip_score_mapping: false,
             mlp_bytes: None,
-            extended_features: false,
-            compute_iw_features: false,
+
             extrapolate_score: false,
         }
     }
@@ -250,8 +216,7 @@ static PROFILE_PREVIEW_V0_1: ProfileParams = ProfileParams {
     score_mapping_b: 0.7,
     skip_score_mapping: false,
     mlp_bytes: None,
-    extended_features: false,
-    compute_iw_features: false,
+
     extrapolate_score: false,
 };
 
@@ -270,75 +235,8 @@ static PROFILE_PREVIEW_V0_2: ProfileParams = ProfileParams {
     score_mapping_b: 0.7,
     skip_score_mapping: false,
     mlp_bytes: None,
-    extended_features: false,
-    compute_iw_features: false,
+
     extrapolate_score: false,
-};
-
-/// `ZensimProfile::LegacyA` (formerly `A`) bake bytes — **rotated 2026-05-27 to
-/// `v47-strict-QAT-native`** (`v47_strict_qat_native_2026-05-27.bin`, 27 KB,
-/// sha256 `d0ef7a30…`). This is a bake rotation of the `Profile::A` slot, not
-/// an API change — the `A` name and the metric architecture are
-/// unchanged.
-///
-/// **Why rotated:** the prior V39 bake (`v39_v32plus_spline…`, still backing
-/// `PreviewV0_4`) is *not a correct similarity metric* — it scores
-/// `identity = 0` on every reference and its codec dial is non-invertible
-/// (q-sweep 67.7 % monotone / 53.6 % tied; high-quality encodes collapse to
-/// score 0). v47-strict is **masked-monotone-by-construction** (W1 ≥ 0 on the
-/// 300 sign-safe features, rank_w ≤ 0, α ≡ 1): 0 inversions, 0 above-identity,
-/// `identity = 97.69` (the dial max). Best codec dial measured — q-sweep
-/// **94.33 % monotone / 0.33 % tied**, clean monotone median q5→q95
-/// (1.40→88.50). Global ordering verified: identity 97.69 > honest-q20
-/// 40.36 > channel-invert 12.21 > block-zero 0.00 (the regression-test
-/// ordering V39 inverts).
-///
-/// 372-input MLP (372 → 128 → 64 + per-sample-α + tanh pin), f16+zerobias
-/// encoder + f32 identity passthrough, with a monotone PCHIP dial spline
-/// (`zentrain.output_calibration_spline`, fit in-pass on the projected+
-/// quantized net). Produced by ONE `zensim_mlp_train --manifest
-/// zensim/weights/manifests/v47_strict_qat.toml` pass (QAT-native, no Python
-/// post-step).
-///
-/// **Held-out panel** (vs the prior V39, which it replaces): CID22 0.8657,
-/// KADID 0.7933, TID 0.7927, KonJND 0.4185, AIC-3 0.7680, AIC-4 0.8854.
-/// Costs vs V39 are rank-SROCC on the non-compression analytic-distortion
-/// corpora (KADID/TID −0.13, integrity guards) + KonJND (f16 drops PJND
-/// precision) — V39's higher rank there is moot because its dial is
-/// non-invertible. Methodology (all 8 sub-points):
-/// `benchmarks/v0_qat_native_methodology_2026-05-27.md`. q-sweep:
-/// `benchmarks/qsweep_qat_native_vs_v39_2026-05-27.md`. The prior V39 bytes
-/// were relocated to
-/// `zensim-experimental/weights/v39_v32plus_spline_seed17_2026-05-25.bin`
-/// (backing `zensim_experimental::preview_v0_4()`) for reproducibility.
-pub(crate) fn mlp_bake_a_v47_qat() -> &'static [u8] {
-    include_bytes!("../weights/v47_strict_qat_native_byid_2026-09-06.bin")
-}
-
-/// Profile `LegacyA` params. Its bake identity is recorded in `docs/PROFILES.md`.
-static PROFILE_LEGACY_A: ProfileParams = ProfileParams {
-    // Linear weights are unused on the MLP path but kept non-empty so
-    // any caller that introspects `params.weights` length without
-    // checking `mlp_bytes.is_some()` sees a sensible (V0_2-equivalent)
-    // value.
-    weights: &WEIGHTS_PREVIEW_V0_2,
-    blur_radius: 5,
-    blur_passes: 1,
-    num_scales: 4,
-    // v47-strict-QAT bake carries its own monotone PCHIP spline calibration
-    // via the `zentrain.output_calibration_spline` metadata — the raw MLP
-    // output is dial-honest after the spline applies. No legacy
-    // `100 - 18·d^0.7` transform needed.
-    score_mapping_a: 18.0,
-    score_mapping_b: 0.7,
-    skip_score_mapping: true,
-    mlp_bytes: Some(mlp_bake_a_v47_qat),
-    // v47-strict is a 372-feature bake (extended + IW-pool features).
-    extended_features: true,
-    compute_iw_features: true,
-    // Hard clamp at [0, 100] post-spline (spline output is already
-    // calibrated into the dial range; clamp catches numerical drift).
-    extrapolate_score: true,
 };
 
 /// Legacy linear weights and score mapping used by the custom-configuration
@@ -353,8 +251,7 @@ static PROFILE_LEGACY_LINEAR_V0_2: ProfileParams = ProfileParams {
     score_mapping_b: 0.7,
     skip_score_mapping: false,
     mlp_bytes: None,
-    extended_features: false,
-    compute_iw_features: false,
+
     extrapolate_score: false,
 };
 
@@ -378,8 +275,7 @@ const fn rev7_params(bake: fn() -> &'static [u8]) -> ProfileParams {
         score_mapping_b: 0.7,
         skip_score_mapping: true,
         mlp_bytes: Some(bake),
-        extended_features: true,
-        compute_iw_features: true,
+
         extrapolate_score: true,
     }
 }

@@ -22,7 +22,7 @@
 //! | job | owner |
 //! |---|---|
 //! | sub-64 reflect-pad, byte-identical short-circuit | [`crate::metric`], shared, unchanged |
-//! | extraction | the fold (`compute_folded_v1_372_streaming_impl`) |
+//! | extraction | the fold (`compute_folded_prefix_streaming_impl`) |
 //! | `mean_offset` | the fold, via `feature_v2::MeanOffsetRows` |
 //! | sanitize + weight dot + score mapping | [`crate::metric::score_v1_layout_features`], shared |
 //! | bake forward, α/hybrid head, tanh pin, PCHIP output spline, per-codec affine, clamp disposition | [`crate::metric::apply_mlp_scoring_with_codec`], untouched |
@@ -78,7 +78,7 @@ pub(crate) fn is_fold_backable(config: &ZensimConfig) -> bool {
         // `compute_extended_features` call sets `extended_features`; the
         // plain linear `PreviewV0_1`/`PreviewV0_2` `compute()` path is the
         // one this excludes, and it stays on buffered.
-        && (config.compute_all_features || config.extended_features)
+        && config.compute_all_features
 }
 
 /// v1's feature width for a config — the same `(extended, iw)` table
@@ -90,13 +90,7 @@ pub(crate) fn is_fold_backable(config: &ZensimConfig) -> bool {
 /// and truncation is the whole conversion from the fold's 372. That claim is
 /// gated (`fold_narrow_config_is_a_prefix_of_wide`), not assumed.
 pub(crate) fn v1_feature_width(config: &ZensimConfig) -> usize {
-    let fpc = match (config.extended_features, config.compute_iw_features) {
-        (true, true) => {
-            crate::metric::FEATURES_PER_CHANNEL_EXTENDED + crate::metric::FEATURES_PER_CHANNEL_IW
-        }
-        (true, false) => crate::metric::FEATURES_PER_CHANNEL_EXTENDED,
-        (false, _) => crate::metric::FEATURES_PER_CHANNEL_WITH_PEAKS,
-    };
+    let fpc = crate::metric::FEATURES_PER_CHANNEL_WITH_PEAKS;
     config.num_scales * 3 * fpc
 }
 
@@ -107,11 +101,11 @@ pub(crate) fn compute_fold_backed_stoppable(
     weights: &[f64],
     scratch: &mut V2Scratch,
     // The serving plan; `None` = today's unconditional v1 walk at
-    // `V1PoolsMode::Full`. See `score_plan`.
+    // `V1PoolsMode::Peaks`. See `score_plan`.
     plan: Option<&crate::feature_plan::Plan>,
     stop: Option<&dyn enough::Stop>,
 ) -> Result<ZensimResult, ZensimError> {
-    let (mut features, mean_offset) = crate::feature_v2::compute_folded_v1_372_streaming_stoppable(
+    let (mut features, mean_offset) = crate::feature_v2::compute_folded_prefix_streaming_stoppable(
         source,
         distorted,
         None,
@@ -244,7 +238,7 @@ pub(crate) fn compute_fold_backed_with_ref_stoppable_plan(
     plan: Option<&crate::feature_plan::Plan>,
     stop: Option<&dyn enough::Stop>,
 ) -> Option<ZensimResult> {
-    let (mut features, mean_offset) = crate::feature_v2::compute_folded_v1_372_with_ref_stoppable(
+    let (mut features, mean_offset) = crate::feature_v2::compute_folded_prefix_with_ref_stoppable(
         precomputed,
         distorted,
         config.allow_multithreading,
@@ -448,8 +442,7 @@ pub(crate) fn score_plan(
         plan.compute.coarse_y_only_scales = 0;
         plan.compute.local_only = false;
         plan.compute.omit_edges = false;
-        plan.compute.v1_pools = crate::feature_v2::V1PoolsMode::Full;
-        plan.compute.v1_full_scales = crate::feature_v2::ComputeSet::ALL_SCALES;
+        plan.compute.v1_pools = crate::feature_v2::V1PoolsMode::Peaks;
         plan.compute.v1_scales = crate::feature_v2::ComputeSet::ALL_SCALES;
         plan.emit = plan
             .compute

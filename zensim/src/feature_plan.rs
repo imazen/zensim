@@ -166,13 +166,7 @@ impl Plan {
                 .intersect(&want)
                 .is_empty()
         };
-        // v1 pool families: v1's pool modes turn masked and IW on together
-        // (they share one activity chain, one sigma store and three
-        // `*_inline_both` kernels), so the only compute boundary inside
-        // `f156..372` is peaks vs masked-and-IW.
-        let v1_pools = if touches(ComputeToken::Masked) || touches(ComputeToken::Iw) {
-            V1PoolsMode::Full
-        } else if touches(ComputeToken::Peaks) || touches(ComputeToken::Carriers) {
+        let v1_pools = if touches(ComputeToken::Peaks) {
             V1PoolsMode::Peaks
         } else {
             V1PoolsMode::Off
@@ -192,18 +186,6 @@ impl Plan {
             local_only: false,
             omit_edges: false,
             v1_pools,
-            v1_full_scales: if v1_pools == V1PoolsMode::Full {
-                let weighted = crate::feature_defs::family_slots(ComputeToken::Masked, ns)
-                    .union(&crate::feature_defs::family_slots(ComputeToken::Iw, ns));
-                weighted.intersect(&want).iter_slots().fold(0, |mask, id| {
-                    mask | (1
-                        << crate::feature_defs::def_at(id, ns)
-                            .expect("registered pool ID")
-                            .scale)
-                })
-            } else {
-                ComputeSet::ALL_SCALES
-            },
             // Scales read by v1 features.
             v1_scales: {
                 want.iter_slots()
@@ -248,8 +230,7 @@ impl Plan {
         // v2-bearing requests over basic/peaks/v2 only (channel-local families): skip X/B work at every scale
         // whose X/B slots are never read. `edge_width_change` at scale s also reads s+1's gradient sums.
         let peaks_end = ns * 3 * crate::metric::FEATURES_PER_CHANNEL_WITH_PEAKS;
-        let v2_start = ns * 3 * crate::metric::FEATURES_PER_CHANNEL_EXTENDED
-            + ns * 3 * crate::metric::FEATURES_PER_CHANNEL_IW;
+        let v2_start = ns * 93;
         let v2_end = v2_start + ns * 3 * crate::feature_v2::FEATURES_PER_CHANNEL_V2_TOTAL;
         let basic_peaks_v2_only = kernel_want
             .iter_slots()
@@ -317,14 +298,11 @@ impl Plan {
         let mut compute = ComputeSet::from_toggles(probe.toggles());
         // Channel selection is private plan data, separate from public family
         // toggles. Normalization preserves it only for supported families.
-        compute.v1_full_scales = requested.v1_full_scales;
         compute.v1_scales = requested.v1_scales;
         compute.v2_scales = requested.v2_scales;
         compute.omit_pjnd_fragility = requested.omit_pjnd_fragility;
         compute.full_res_xb = requested.full_res_xb || !compute.allows_full_res_y_subset();
-        compute.coarse_y_only_scales = if (!compute.v2_blocks || compute.chroma_local_families())
-            && compute.v1_pools != V1PoolsMode::Full
-        {
+        compute.coarse_y_only_scales = if !compute.v2_blocks || compute.chroma_local_families() {
             requested.coarse_y_only_scales
         } else {
             0
@@ -488,11 +466,6 @@ impl Plan {
             local_only: a.local_only && b.local_only,
             omit_edges: a.omit_edges && b.omit_edges,
             v1_pools: pools_union(a.v1_pools, b.v1_pools),
-            v1_full_scales: if pools_union(a.v1_pools, b.v1_pools) == V1PoolsMode::Full {
-                a.full_pool_scales() | b.full_pool_scales()
-            } else {
-                ComputeSet::ALL_SCALES
-            },
             v1_scales: (if a.v1_basic || a.v1_pools != V1PoolsMode::Off {
                 a.v1_scales
             } else {
@@ -528,7 +501,6 @@ fn pools_union(a: V1PoolsMode, b: V1PoolsMode) -> V1PoolsMode {
     let rank = |m: V1PoolsMode| match m {
         V1PoolsMode::Off => 0u8,
         V1PoolsMode::Peaks => 2,
-        V1PoolsMode::Full => 3,
     };
     if rank(a) >= rank(b) { a } else { b }
 }
@@ -651,16 +623,26 @@ mod toggle_gates {
     /// planning — the servability regression this whole design exists to
     /// prevent.
     #[test]
+    fn retired_revision_one_pools_are_uncomputable() {
+        for id in 228..372 {
+            assert!(
+                Plan::derive(&SlotSet::from_slots([id]), 720).is_err(),
+                "f{id}"
+            );
+        }
+    }
+
+    #[test]
     fn normalization_is_a_fixed_point() {
         let cases: [(SlotSet, usize); 5] = [
             (SlotSet::from_ranges([(0, 156)]), 372),
-            (SlotSet::from_ranges([(0, 372)]), 372),
+            (SlotSet::from_ranges([(0, 228)]), 372),
             (SlotSet::from_ranges([(0, 228)]), 944),
             (
                 SlotSet::from_ranges([(0, 228)]).union(&SlotSet::default()),
                 944,
             ),
-            (SlotSet::from_ranges([(0, 720)]), 720),
+            (SlotSet::from_ranges([(0, 228), (372, 720)]), 720),
         ];
         for (want, width) in cases {
             let p = Plan::derive(&want, width).expect("plan");
@@ -691,7 +673,7 @@ mod toggle_gates {
         let ns = crate::NUM_SCALES;
         let cases = [
             (SlotSet::from_ranges([(0, 156)]), 372usize),
-            (SlotSet::from_ranges([(0, 372)]), 372),
+            (SlotSet::from_ranges([(0, 228)]), 372),
             (
                 SlotSet::from_ranges([(0, 228)]).union(&SlotSet::default()),
                 944,

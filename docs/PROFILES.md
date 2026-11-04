@@ -9,7 +9,6 @@ the record for the revision-7 models is
 | Public profile | Research / development name | Status |
 |---|---|---|
 | `A` (`zensim-a`) | research `F`, `mixF3` (zensimx adoption record, 2026-11-04) | Adopted general model; `latest()` and `codec_target()` |
-| `LegacyA` (`zensim-legacy-a`) | earlier 0.3.0 development `A` | Preserved scores; never shipped in 0.2.7 |
 | `PreviewV0_1`, `PreviewV0_2` | published 0.1/0.2 linear profiles | Unchanged |
 
 The published 0.2.7 API had only `PreviewV0_1` and `PreviewV0_2`; neither is renamed.
@@ -18,7 +17,6 @@ Research names stay unchanged.
 | Profile | Bake | SHA-256 | Features |
 |---|---|---|---|
 | `A` | `weights/rev7_mix_h128_2026-11-03.bin` | `d5e2a56db35c32620d9f9d9c19ba3bc78bd8fea2b8cd933cde8447428d85e62a` | 492 revision-7 damage features (with full-resolution chroma) + 492 fragility products |
-| `LegacyA` | `weights/v47_strict_qat_native_byid_2026-09-06.bin` | `de0ddb3dc78b8b0a4fc99645f949acb73e7e08bec9ed4d86793605d882e9176a` | 372 revision-1 features |
 | `PreviewV0_1`, `PreviewV0_2` | linear weights in `src/profile.rs` | | 228 revision-1 features |
 
 The revision-7 research models `E` and `ECodec` stay in [imazen/zensimx](https://github.com/imazen/zensimx) and are not published.
@@ -96,7 +94,7 @@ and [reference source and commands](../benchmarks/hdr_cube_root_203_reference_20
 
 For public `A` (research `F` / `mixF3`), run the research `split_parity_golden` example with
 the adopted bake as its general model; it prints those rows under the first bake's label (`E`),
-so relabel them `A` before the diff. Relabel the research development `A` rows `LegacyA`; preview names stay unchanged.
+so relabel them `A` before the diff. Preview names stay unchanged; exclude the research development `A` rows.
 Compare only profiles retained by the public crate, using each matching bake separately.
 
 The crate was cut from imazen/zensimx on 2026-10-28. `examples/split_parity_check.rs` prints the

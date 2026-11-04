@@ -209,48 +209,6 @@ pub struct ZensimConfig {
     /// to determine which weights should be nonzero).
     pub compute_all_features: bool,
 
-    /// Compute extended features (25 per channel instead of 13; default: false).
-    ///
-    /// When true, adds 12 extra features per channel per scale:
-    /// - 6 masked features (SSIM/edge/MSE weighted by source flatness)
-    /// - 6 percentile/max features (worst-case SSIM/edge errors)
-    ///
-    /// The masking strength for extended features is controlled by
-    /// `extended_masking_strength`.
-    pub extended_features: bool,
-
-    /// Masking strength for extended masked features (default: 4.0).
-    ///
-    /// Only used when `extended_features` is true. Controls the flatness mask:
-    /// `mask[i] = 1 / (1 + k * blur(|src - mu|))`.
-    ///
-    /// Higher values = more aggressive masking of textured regions.
-    /// Typical range: 2.0–8.0.
-    pub extended_masking_strength: f32,
-
-    /// Compute information-content-weighted (IW) features (Wang & Li
-    /// 2011, IW-SSIM). When `true`, emits a per-scale per-channel block
-    /// of 6 features (`iw_ssim_mean / iw_ssim_4th / iw_ssim_2nd /
-    /// iw_art_4th / iw_det_4th / iw_mse`) pooled with weights derived
-    /// from the source image's local activity — the OPPOSITE polarity
-    /// of the `extended_features` masked block (which suppresses
-    /// texture). Texture-rich regions get MORE weight, mirroring
-    /// Wang's GSM-on-wavelet info-content estimator.
-    ///
-    /// At `num_scales = 4` and 3 channels, enabling this adds 72
-    /// features (228 → 300 in the basic profile).
-    ///
-    /// **Zero overhead when `false`** — the per-pixel work is gated by
-    /// a constant-per-call branch in the SIMD loop; the branch
-    /// predictor sees a fixed direction.
-    pub compute_iw_features: bool,
-
-    /// IW weighting strength: `iw_weight[i] = 1.0 + k * blur(|src - mu|)`.
-    /// Only used when `compute_iw_features` is true. Higher values
-    /// concentrate the pool more aggressively on textured / edge
-    /// regions. Default: 4.0 (mirrors `extended_masking_strength`).
-    pub iw_strength: f32,
-
     /// Maximum number of downscale levels (default: 4).
     ///
     /// Each level halves resolution. 4 scales covers 1×, 2×, 4×, 8× — sufficient
@@ -300,10 +258,7 @@ impl Default for ZensimConfig {
             blur_kernel: BlurKernel::default(),
             downscale_filter: DownscaleFilter::default(),
             compute_all_features: false,
-            extended_features: false,
-            extended_masking_strength: 4.0,
-            compute_iw_features: false,
-            iw_strength: 4.0,
+
             num_scales: crate::NUM_SCALES,
             score_mapping_a: 18.0,
             score_mapping_b: 0.7,
@@ -357,7 +312,6 @@ pub fn try_score_from_features(
     // Layout: [scored × N_scales] [peaks × N_scales] [masked × N_scales]
     // 156 = 39×4, 228 = 57×4, 300 = 75×4 — all divide by 4 scales.
     let per_scale_candidates = [
-        FEATURES_PER_CHANNEL_EXTENDED * 3,   // 75
         FEATURES_PER_CHANNEL_WITH_PEAKS * 3, // 57
         FEATURES_PER_CHANNEL_BASIC * 3,      // 39
     ];
@@ -494,15 +448,6 @@ pub(crate) struct ScaleStats {
     /// High-frequency energy gain (L2): max(0, Σ(dst-mu_dst)²/Σ(src-mu_src)² - 1) per channel.
     /// Measures added local detail energy (ringing, sharpening artifacts).
     pub(crate) hf_energy_gain: [f64; 3],
-    // --- Extended features (only populated when extended_features=true) ---
-    /// Masked SSIM: [mean, 4th, 2nd] per channel = 9 values
-    pub(crate) masked_ssim: [f64; 9],
-    /// Masked edge artifact L4 per channel = 3 values
-    pub(crate) masked_art_4th: [f64; 3],
-    /// Masked edge detail_lost L4 per channel = 3 values
-    pub(crate) masked_det_4th: [f64; 3],
-    /// Masked MSE per channel = 3 values
-    pub(crate) masked_mse: [f64; 3],
     /// Max SSIM error per channel = 3 values
     pub(crate) ssim_max: [f64; 3],
     /// Max edge artifact per channel = 3 values
@@ -515,17 +460,6 @@ pub(crate) struct ScaleStats {
     pub(crate) art_p95: [f64; 3],
     /// L8 power pool edge detail_lost per channel = 3 values: (Σd⁸/N)^(1/8)
     pub(crate) det_p95: [f64; 3],
-    // --- IW (information-content-weighted) features (only populated when
-    //     compute_iw_features=true). Texture-EMPHASISING counterpart to
-    //     the masked_* block. Wang & Li 2011 IW-SSIM. ---
-    /// IW SSIM: [mean, 4th, 2nd] per channel = 9 values
-    pub(crate) iw_ssim: [f64; 9],
-    /// IW edge artifact L4 per channel = 3 values
-    pub(crate) iw_art_4th: [f64; 3],
-    /// IW edge detail_lost L4 per channel = 3 values
-    pub(crate) iw_det_4th: [f64; 3],
-    /// IW MSE per channel = 3 values
-    pub(crate) iw_mse: [f64; 3],
 }
 
 /// Result from a zensim comparison.
@@ -2243,18 +2177,14 @@ fn compute_with_config_core(
 /// are zeros either way — what changes is the LENGTH, which is what the bake
 /// checks. `min_width = 0` is exactly today's behaviour.
 fn identical_result_at(config: &ZensimConfig, min_width: usize) -> ZensimResult {
-    let fpc = match (config.extended_features, config.compute_iw_features) {
-        (true, true) => FEATURES_PER_CHANNEL_EXTENDED + FEATURES_PER_CHANNEL_IW,
-        (true, false) => FEATURES_PER_CHANNEL_EXTENDED,
-        (false, _) => FEATURES_PER_CHANNEL_WITH_PEAKS,
-    };
+    let fpc = FEATURES_PER_CHANNEL_WITH_PEAKS;
     let num_features = (config.num_scales * 3 * fpc).max(min_width);
     ZensimResult::new(
         100.0,
         0.0,
         vec![0.0; num_features],
         // Placeholder tag (overridden by the compute* caller); the
-        // canonical codec-target profile, never the legacy `LegacyA`.
+        // canonical codec-target profile.
         ZensimProfile::codec_target(),
         [0.0; 3],
     )
@@ -2280,10 +2210,7 @@ pub(crate) fn config_from_params(params: &ProfileParams, parallel: bool) -> Zens
         // MLP-scored profiles need the full feature vector populated;
         // the linear path can skip features it doesn't use.
         compute_all_features: params.mlp_bytes.is_some(),
-        extended_features: params.extended_features,
-        extended_masking_strength: 4.0,
-        compute_iw_features: params.compute_iw_features,
-        iw_strength: 4.0,
+
         num_scales: params.num_scales,
         score_mapping_a: params.score_mapping_a,
         score_mapping_b: params.score_mapping_b,
@@ -2326,27 +2253,6 @@ pub(crate) fn apply_mlp_scoring_with_codec(
     let Some(loader) = params.mlp_bytes else {
         return Ok(());
     };
-    // **Score-disposition guard (D9).** A bake carrying
-    // `zentrain.output_calibration_spline` emits an already-calibrated
-    // 0-100 score. Scoring it with `skip_score_mapping == false` applies
-    // the legacy `100 - A*d^B` DISTANCE mapping on top of that spline,
-    // sending every realistic score deeply negative; the default hard
-    // clamp then pins it to exactly 0.0. The observed signature is a
-    // model that looks catastrophically broken: identity 100, the very
-    // worst quality point scoring ~9, and every other point exactly
-    // 0.000000 (ADD156 ship audit 2026-08-31, defect D9 — reproduced
-    // first try, because the naive builder configuration IS the wrong
-    // one: `ProfileParams::builder()` defaults BOTH `skip_score_mapping`
-    // and `extrapolate_score` to `false`).
-    //
-    // Silently-wrong pixels/scores are a shipping bug, never a tolerated
-    // tradeoff, so we refuse the combination instead of returning the
-    // zero. The check runs only when `skip_score_mapping == false`, which
-    // no spline-carrying profile in this crate sets, so the shipped path
-    // pays nothing.
-    if !params.skip_score_mapping {
-        check_score_disposition(loader)?;
-    }
     // **Identity-image short-circuit guard.** When the byte-identical
     // short-circuit in `compute_with_config_inner` /
     // `compute_zensim_with_config` fires, it produces
@@ -2420,52 +2326,6 @@ pub(crate) fn dispose_mlp_raw(raw: f64, params: &crate::profile::ProfileParams) 
     }
 }
 
-// ============================================================================
-// Per-sample-α head runtime dispatch (V_24-per-sample-α bakes)
-// ============================================================================
-//
-// Bakes trained with `train_mlp_per_sample_alpha_head_with_tv` in
-// zensim-train-core attach a `zentrain.per_sample_alpha_head`
-// metadata entry. The bake's final layer is a `n_hidden × n_hidden`
-// identity matrix (passthrough), so the predictor's output IS the
-// post-LeakyReLU hidden vector `h`. The runtime then mixes a rank
-// head (`y_rank = h · rank_w + rank_b`) and a pool head (`y_pool =
-// stats(h) · reducer_w + reducer_b`) via a per-sample gate
-// `α = σ(h · w_α + b_α)`:
-//
-//     y_final = α · y_rank + (1 − α) · y_pool
-//
-// Payload layout (f32 little-endian):
-//   [w_α[0..n_hidden]] [b_α] [rank_w[0..n_hidden]] [rank_b]
-//   [reducer_w[0..4]] [reducer_b] [p_norm]
-// Total size = (2·n_hidden + 8) × 4 bytes.
-//
-// The pool sigma floor mirrors `zensim-train-core::pool_head::POOL_STD_FLOOR`
-// and is owned once by `crate::score_math::POOL_STD_FLOOR` (it used to be
-// declared here TWICE, once per head, and a third time in `zensim-validate`).
-
-/// Apply the tanh-pinned [0, 100] sigmoid wrap: `y_score = 100 · σ(y_pre / scale)`.
-/// Matches `zensim_train_core::per_sample_alpha_head::bake_per_sample_alpha_head_v3_with_tanh`
-/// at training time and bit-exact with the train-time pin (single-precision sigmoid
-/// pin via clamp [−30, 30] in y_pre/scale, sigmoid in f64).
-fn apply_tanh_output_pin(y_pre: f64, scale: f64) -> f64 {
-    crate::score_math::tanh_output_pin(y_pre, scale, active_pow_form())
-}
-
-/// Evaluate the PCHIP spline at `x`, clamped to `≤ 100` on the UPPER
-/// side only.
-///
-/// A perceptual score can never exceed 100 (nothing is more similar than
-/// identical), so the upper extrapolation is clamped at 100 — this is the
-/// correct-by-construction upper bound that fixes the `> 100` defect
-/// (root cause: V39's degenerate spline linearly extrapolated past 100).
-/// The LOWER extrapolation is allowed to go **negative** so that inputs more
-/// dissimilar than a simple low-quality encode score below zero (a desired
-/// property of the codec-target dial — "worse than the worst codec output" is
-/// meaningful signal, not a tie at 0), but is FLOORED one calibrated-dial-range
-/// below the bottom knot as an OOD safety net (a pathological raw that slips
-/// past the winsor guard can't produce a wild score). The result stays monotone
-/// (min/max with a constant preserves order).
 fn apply_output_calibration_spline(x: f64, spline: &OutputCalibrationSpline) -> f64 {
     // ONE owner (`crate::score_math::pchip_eval_capped`), reached identically
     // from `zensim-validate::output_calibration_spline`. The mirror there had
@@ -2475,149 +2335,6 @@ fn apply_output_calibration_spline(x: f64, spline: &OutputCalibrationSpline) -> 
     // runtime reported exactly 100. LATENT: 0 of the 49 bakes on disk declare
     // one. Not Hermite overshoot; Fritsch-Carlson forbids that.
     crate::score_math::pchip_eval_capped(x, &spline.xs, &spline.ys, &spline.derivs)
-}
-
-// ============================================================================
-// Min-max monotone head runtime dispatch (Sill 1998; 2026-07-16)
-// ============================================================================
-//
-// A min-max monotone bake REPLACES the MLP layer stack: the score is
-// `min over K groups  max over J pieces  (w[g][h]·x + b[g][h])` on the
-// standardized+transformed feature vector, with each `w` sign-constrained so
-// the score is monotone in codec quality BY CONSTRUCTION (see
-// `zensim_validate::mlp_train::minmax_monotone`). Because there is no matmul
-// forward, the runtime BYPASSES `Predictor::predict`: it reads the bake's
-// scaler + feature-transforms directly, applies transform→scale→clamp±8→min-max,
-// then the shared PCHIP output spline. The ±8 clamp mirrors the trainer's
-// standardize clamp (`train_minmax`) so runtime scoring is bit-exact with the
-// held-out eval that qualified the bake.
-//
-// Payload layout (little-endian):
-//   `[u32 k, u32 j, u32 n, w[k·j·n] f32, b[k·j] f32]`
-// so `12 + 4·(k·j·n + k·j)` bytes. `n` MUST equal the bake's `n_inputs`.
-
-impl PerSampleAlphaMeta {
-    /// Borrowed view for [`crate::score_math`], the owner of the arithmetic.
-    /// Free — no allocation, no copy of either weight vector.
-    fn params(&self) -> crate::score_math::PerSampleAlphaParams<'_> {
-        crate::score_math::PerSampleAlphaParams {
-            w_alpha: &self.w_alpha,
-            b_alpha: self.b_alpha,
-            rank_w: &self.rank_w,
-            rank_b: self.rank_b,
-            reducer_w: self.reducer_w,
-            reducer_b: self.reducer_b,
-            p_norm: self.p_norm,
-        }
-    }
-}
-
-/// Apply the per-sample-α runtime to a hidden vector `h`. Returns
-/// the final mixed score `y`. Bit-exact match with
-/// `zensim_train_core::per_sample_alpha_head::apply_per_sample_alpha_head_runtime`
-/// (asserted by the canonical regression test in
-/// `tests/per_sample_alpha_runtime.rs`).
-fn apply_per_sample_alpha_runtime(h: &[f32], meta: &PerSampleAlphaMeta) -> f64 {
-    debug_assert_eq!(meta.rank_w.len(), h.len());
-    debug_assert_eq!(meta.w_alpha.len(), h.len());
-    debug_assert!(!h.is_empty());
-    // ONE owner (`crate::score_math`), reached identically from here and from
-    // `zensim-validate`'s bake-evaluation runtime. The arithmetic used to live
-    // in both places, bit-exact in PROSE only, with no test binding them — and
-    // F19's `PowForm` made that a live wrong-number risk the moment
-    // `SHIPPED_REVISION` flips. See `score_math`'s module docs.
-    crate::score_math::per_sample_alpha_head(h, &meta.params(), active_pow_form())
-}
-
-// ============================================================================
-// Hybrid-head runtime dispatch (V_24-hybrid bakes)
-// ============================================================================
-//
-// Bakes trained with `train_mlp_hybrid_head_with_tv` in
-// zensim-train-core attach a `zentrain.hybrid_head` metadata
-// entry. Like the per-sample-α head, the bake's final layer is an
-// `n_hidden × n_hidden` identity matrix (passthrough), so the
-// predictor's output IS the post-LeakyReLU hidden vector `h`. The
-// runtime then mixes a rank head (`y_rank = h · rank_w + rank_b`)
-// and a pool head (`y_pool = stats(h) · reducer_w + reducer_b`)
-// via a single LEARNED SCALAR gate `α = σ(α_logit)` (different
-// from the per-sample-α head, where α is computed per-sample from
-// the hidden vector):
-//
-//     y_final = α · y_rank + (1 − α) · y_pool
-//
-// Payload layout (f32 little-endian):
-//   [rank_w[0..n_hidden]] [rank_b] [α_logit]
-//   [reducer_w[0..4]] [reducer_b] [p_norm]
-// Total size = (n_hidden + 8) × 4 bytes.
-//
-// The pool sigma floor is owned by `crate::score_math::POOL_STD_FLOOR`.
-
-/// Forward one bake over `features` and return the raw output scalar.
-/// Handles the three accepted input-width shapes (n_inputs == features,
-/// n_inputs == features+4 with size-axes, n_inputs < features prefix)
-/// and dispatches to `predict_transformed` when the bake declares
-/// non-trivial `feature_transforms` metadata (V_20+ input-shaping
-/// bakes); otherwise uses the plain `predict` path with zero overhead.
-///
-/// Bakes carrying `zentrain.per_sample_alpha_head` metadata
-/// (V_24-per-sample-α architecture) take a separate dispatch path:
-/// the forward returns `h` (the post-LeakyReLU hidden vector, since
-/// the bake's layer 2 is an identity passthrough) and the runtime
-/// mixes a rank-head + pool-head pair via a per-sample sigmoid gate.
-/// See `apply_per_sample_alpha_runtime` above for the formula and
-/// payload layout.
-///
-/// Bakes carrying `zentrain.hybrid_head` metadata (V_24-hybrid
-/// architecture) take a similar dispatch path, but the α gate is a
-/// single learned SCALAR (`α = σ(α_logit)`) shared across all
-/// samples rather than computed per-sample. See
-/// `apply_hybrid_head_runtime` above for the formula and payload
-/// layout.
-/// True iff `bytes` parses as a bake carrying a
-/// `zentrain.output_calibration_spline` metadata entry — i.e. its raw
-/// output is already a calibrated 0-100 score rather than a distance.
-///
-/// A parse failure returns `false`: the forward pass that follows will
-/// surface the real parse error with a better diagnostic than this guard
-/// could, and this helper must never turn a load problem into a
-/// configuration complaint.
-fn bake_carries_output_spline(bytes: &'static [u8]) -> bool {
-    cached_profile_model(bytes)
-        .map(|model| {
-            model
-                .metadata()
-                .get(OUTPUT_CALIBRATION_SPLINE_KEY)
-                .is_some()
-        })
-        .unwrap_or(false)
-}
-
-/// Refuse a profile configuration that would silently produce garbage
-/// scores (ADD156 ship audit 2026-08-31, defect **D9**).
-///
-/// Every bake whose raw output feeds [`dispose_mlp_raw`] is checked: if it
-/// carries an output-calibration spline while the profile asks for the
-/// legacy distance mapping, the two calibrations compose into nonsense and
-/// the hard clamp hides it as an exact `0.0`. Fail loud, naming the
-/// setting that is missing.
-///
-/// The ensemble CLASSIFIER bake is deliberately not checked — its output is
-/// a routing logit that never reaches the score disposition.
-fn check_score_disposition(primary: fn() -> &'static [u8]) -> Result<(), ZensimError> {
-    const MISCONFIGURED: &str = "bake carries zentrain.output_calibration_spline \
-         (its raw output is already a calibrated 0-100 score) but \
-         ProfileParams::skip_score_mapping is false, so the legacy 100-A*d^B \
-         distance mapping would be applied on top of the spline and clamp \
-         virtually every score to exactly 0 — set .skip_score_mapping(true), \
-         and .extrapolate_score(true) to keep the negative tail";
-
-    if bake_carries_output_spline(primary()) {
-        return Err(ZensimError::ModelForwardFailed {
-            reason: MISCONFIGURED,
-        });
-    }
-    Ok(())
 }
 
 /// The parsed [`crate::mlp::Model`] of a `&'static` profile bake, interned by
@@ -2743,8 +2460,6 @@ fn forward_model_with_codec(
 ) -> Result<f64, ZensimError> {
     let n_inputs = model.caller_input_width();
     let needs_transforms = model.has_nontrivial_feature_transforms();
-    let per_sample_alpha = bundle.per_sample_alpha.as_deref();
-    let tanh_pin_scale = bundle.tanh_pin_scale;
     let output_spline = bundle.output_spline.as_deref();
 
     // Resolve dense slot gathering before selecting a model head.
@@ -2780,14 +2495,7 @@ fn forward_model_with_codec(
             layout.gather(features, gathered);
         }
         derived.fill_f32(gathered, f32_features);
-        return bake_dispatch_one(
-            predictor,
-            f32_features,
-            needs_transforms,
-            per_sample_alpha,
-            tanh_pin_scale,
-            output_spline,
-        );
+        return bake_dispatch_one(predictor, f32_features, needs_transforms, output_spline);
     }
 
     // Min-max monotone head (Sill 1998): the score REPLACES the layer forward,
@@ -2797,14 +2505,7 @@ fn forward_model_with_codec(
     // standardize clamp so runtime scoring is bit-exact with the qualifying eval.
 
     let dispatch = |p: &mut crate::mlp::Predictor<'_>, x: &[f32]| -> Result<f64, ZensimError> {
-        bake_dispatch_one(
-            p,
-            x,
-            needs_transforms,
-            per_sample_alpha,
-            tanh_pin_scale,
-            output_spline,
-        )
+        bake_dispatch_one(p, x, needs_transforms, output_spline)
     };
     prep_bake_input_f32(feats, n_inputs, width, height, f32_features)?;
     dispatch(predictor, f32_features)
@@ -2856,8 +2557,6 @@ fn bake_dispatch_one(
     p: &mut crate::mlp::Predictor<'_>,
     x: &[f32],
     needs_transforms: bool,
-    per_sample_alpha: Option<&PerSampleAlphaMeta>,
-    tanh_pin_scale: Option<f64>,
     output_spline: Option<&OutputCalibrationSpline>,
 ) -> Result<f64, ZensimError> {
     let out = if needs_transforms {
@@ -2870,43 +2569,16 @@ fn bake_dispatch_one(
             reason: "Predictor::predict failed",
         })?
     };
-    finish_network_output(out, per_sample_alpha, tanh_pin_scale, output_spline)
-}
-
-fn finish_network_output(
-    out: &[f32],
-    per_sample_alpha: Option<&PerSampleAlphaMeta>,
-    tanh_pin_scale: Option<f64>,
-    output_spline: Option<&OutputCalibrationSpline>,
-) -> Result<f64, ZensimError> {
-    let y_pre = if let Some(meta) = per_sample_alpha {
-        // `out` is the hidden vector h (n_hidden floats). Apply
-        // the per-sample-α runtime formula.
-        if out.len() != meta.rank_w.len() {
-            // Shape mismatch between metadata's declared n_hidden
-            // and bake's n_outputs — bake is malformed.
-            return Err(ZensimError::ModelForwardFailed {
-                reason: "per-sample-α metadata n_hidden does not match bake output length",
-            });
-        }
-        apply_per_sample_alpha_runtime(out, meta)
-    } else {
-        out.first()
-            .copied()
-            .ok_or(ZensimError::ModelForwardFailed {
-                reason: "model has no score output",
-            })? as f64
-    };
-    let y_after_pin = if let Some(scale) = tanh_pin_scale {
-        apply_tanh_output_pin(y_pre, scale)
-    } else {
-        y_pre
-    };
-    Ok(if let Some(spline) = output_spline {
-        apply_output_calibration_spline(y_after_pin, spline)
-    } else {
-        y_after_pin
-    })
+    out.first()
+        .copied()
+        .map(|value| {
+            output_spline.map_or(value as f64, |s| {
+                apply_output_calibration_spline(value as f64, s)
+            })
+        })
+        .ok_or(ZensimError::ModelForwardFailed {
+            reason: "model has no score output",
+        })
 }
 
 /// Extend features with log2 pixel count, minimum dimension, maximum dimension,
@@ -2969,45 +2641,6 @@ pub const FEATURES_PER_CHANNEL_BASIC: usize = 13;
 /// but excluded from the default feature vector for profile compatibility.
 pub const FEATURES_PER_CHANNEL_WITH_PEAKS: usize = 19;
 
-/// Extended features per channel per scale: 25 features (19 with peaks + 6 masked).
-///
-/// ```text
-///  Index  Name               Pooling  Source
-///  ─────  ─────────────────  ───────  ──────────────────
-///  0–12   (same as basic 13)
-///  13–18  (same as peak features: max/l8)
-///  19     masked_ssim_mean   mean     SSIM × flatness mask
-///  20     masked_ssim_4th    L4       SSIM × flatness mask
-///  21     masked_ssim_2nd    L2       SSIM × flatness mask
-///  22     masked_art_4th     L4       edge artifact × flatness mask
-///  23     masked_det_4th     L4       edge detail_lost × flatness mask
-///  24     masked_mse         mean     (src-dst)² × flatness mask
-/// ```
-///
-/// Total features = `num_scales × 3 channels × 25` = 300 at 4 scales.
-pub const FEATURES_PER_CHANNEL_EXTENDED: usize = 25;
-
-/// Information-content-weighted (IW) features per channel per scale.
-/// Wang & Li 2011 — IW-SSIM. Same 6 feature slots as the `masked_*`
-/// block but with the weight polarity flipped: texture-rich regions
-/// get MORE weight.
-///
-/// ```text
-///  Index  Name               Pooling  Source
-///  ─────  ─────────────────  ───────  ──────────────────
-///  0      iw_ssim_mean       mean     SSIM × iw_weight
-///  1      iw_ssim_4th        L4       SSIM × iw_weight
-///  2      iw_ssim_2nd        L2       SSIM × iw_weight
-///  3      iw_art_4th         L4       edge artifact × iw_weight
-///  4      iw_det_4th         L4       edge detail_lost × iw_weight
-///  5      iw_mse             mean     (src-dst)² × iw_weight
-/// ```
-///
-/// Enabled via `ZensimConfig::compute_iw_features`. At `num_scales = 4`
-/// and 3 channels, adds 72 features → total profile becomes 300
-/// (basic + peaks + IW).
-pub const FEATURES_PER_CHANNEL_IW: usize = 6;
-
 /// Named view over a flat feature vector.
 ///
 /// Provides ergonomic access to features by name, scale, and channel
@@ -3048,14 +2681,11 @@ impl<'a> FeatureView<'a> {
     pub fn new(features: &'a [f64], n_scales: usize) -> Option<Self> {
         let basic_total = n_scales * 3 * FEATURES_PER_CHANNEL_BASIC;
         let peaks_total = n_scales * 3 * 6;
-        let masked_total = n_scales * 3 * 6;
 
         let (scored_total, peaks_total) = if features.len() == basic_total {
             // Legacy basic-only layout (backward compat)
             (basic_total, 0)
-        } else if features.len() == basic_total + peaks_total
-            || features.len() == basic_total + peaks_total + masked_total
-        {
+        } else if features.len() == basic_total + peaks_total {
             (basic_total, peaks_total)
         } else {
             return None;
@@ -3077,11 +2707,6 @@ impl<'a> FeatureView<'a> {
     /// Whether peak features (max/L8) are present.
     pub fn has_peaks(&self) -> bool {
         self.peaks_total > 0
-    }
-
-    /// Whether masked features are present.
-    pub fn has_masked(&self) -> bool {
-        self.features.len() > self.scored_total + self.peaks_total
     }
 
     // --- Scored features (always present) ---
@@ -3177,40 +2802,6 @@ impl<'a> FeatureView<'a> {
         self.peak_idx(scale, ch, 5).map(|i| self.features[i])
     }
 
-    // --- Masked features (require extended_features) ---
-
-    fn masked_idx(&self, scale: usize, ch: usize, offset: usize) -> Option<usize> {
-        if !self.has_masked() {
-            return None;
-        }
-        Some(self.scored_total + self.peaks_total + scale * 3 * 6 + ch * 6 + offset)
-    }
-
-    /// Masked SSIM error, mean pooling.
-    pub fn masked_ssim_mean(&self, scale: usize, ch: usize) -> Option<f64> {
-        self.masked_idx(scale, ch, 0).map(|i| self.features[i])
-    }
-    /// Masked SSIM error, L4 norm.
-    pub fn masked_ssim_4th(&self, scale: usize, ch: usize) -> Option<f64> {
-        self.masked_idx(scale, ch, 1).map(|i| self.features[i])
-    }
-    /// Masked SSIM error, L2 norm.
-    pub fn masked_ssim_2nd(&self, scale: usize, ch: usize) -> Option<f64> {
-        self.masked_idx(scale, ch, 2).map(|i| self.features[i])
-    }
-    /// Masked edge artifact, L4 norm.
-    pub fn masked_art_4th(&self, scale: usize, ch: usize) -> Option<f64> {
-        self.masked_idx(scale, ch, 3).map(|i| self.features[i])
-    }
-    /// Masked edge detail lost, L4 norm.
-    pub fn masked_det_4th(&self, scale: usize, ch: usize) -> Option<f64> {
-        self.masked_idx(scale, ch, 4).map(|i| self.features[i])
-    }
-    /// Masked MSE.
-    pub fn masked_mse(&self, scale: usize, ch: usize) -> Option<f64> {
-        self.masked_idx(scale, ch, 5).map(|i| self.features[i])
-    }
-
     /// Get the scored features slice (first N features, WEIGHTS-compatible).
     pub fn scored_features(&self) -> &[f64] {
         &self.features[..self.scored_total]
@@ -3222,15 +2813,6 @@ impl<'a> FeatureView<'a> {
             None
         } else {
             Some(&self.features[self.scored_total..self.scored_total + self.peaks_total])
-        }
-    }
-
-    /// Get the masked features slice, if present.
-    pub fn masked_features(&self) -> Option<&[f64]> {
-        if !self.has_masked() {
-            None
-        } else {
-            Some(&self.features[self.scored_total + self.peaks_total..])
         }
     }
 }
@@ -3274,15 +2856,11 @@ pub fn compute_zensim_with_config(
         // bug history (the 372-input compute_iw_features path was
         // discovered when a 372-input bake failed with InvalidDataLength
         // because the short-circuit only counted basic+extended = 300).
-        let fpc = match (config.extended_features, config.compute_iw_features) {
-            (true, true) => FEATURES_PER_CHANNEL_EXTENDED + FEATURES_PER_CHANNEL_IW,
-            (true, false) => FEATURES_PER_CHANNEL_EXTENDED,
-            (false, _) => FEATURES_PER_CHANNEL_WITH_PEAKS,
-        };
+        let fpc = FEATURES_PER_CHANNEL_WITH_PEAKS;
         let num_features = config.num_scales * 3 * fpc;
         // This entry point scores via the plain WEIGHTS (V0_2 linear)
         // distance, never an MLP forward pass — tag with the honest
-        // legacy-linear profile rather than `LegacyA` (the MLP-scored
+        // legacy-linear profile rather than an MLP-scored profile (the
         // profile).
         return Ok(ZensimResult::new(
             100.0,
@@ -3400,31 +2978,11 @@ pub(crate) fn combine_scores(
     config: &ZensimConfig,
     mean_offset: [f64; 3],
 ) -> ZensimResult {
-    let extended = config.extended_features;
-    let iw = config.compute_iw_features;
-
-    // Feature vector layout (in order they appear in the Vec):
-    //   [0..N_basic)        — 13/ch × 3ch × n_scales (basic features)
-    //   [N_basic..N_peaks)  — 6/ch × 3ch × n_scales peak features (always included)
-    //   [N_peaks..N_masked) — 6/ch × 3ch × n_scales masked features (if extended)
-    //   [N_masked..N_iw)    — 6/ch × 3ch × n_scales IW features (if compute_iw_features)
-    //
-    // Both basic and peak features are scored: features[0..WEIGHTS.len()]
-    // produces the dot product used for the final score. Masked + IW are
-    // training-only feature additions consumed by MLP-scored profiles.
     let n_scales = scale_stats.len();
     let basic_per_ch = FEATURES_PER_CHANNEL_BASIC; // 13
     let basic_total = n_scales * basic_per_ch * 3;
     let peak_total = n_scales * 6 * 3;
-    let masked_total = if extended { n_scales * 6 * 3 } else { 0 };
-    let iw_total = if iw {
-        n_scales * FEATURES_PER_CHANNEL_IW * 3
-    } else {
-        0
-    };
-    let total = basic_total + peak_total + masked_total + iw_total;
-
-    let mut features = Vec::with_capacity(total);
+    let mut features = Vec::with_capacity(basic_total + peak_total);
 
     // Pass 1: scored features (13/ch, weight-compatible order)
     for ss in scale_stats.iter() {
@@ -3457,35 +3015,6 @@ pub(crate) fn combine_scores(
         }
     }
 
-    // Pass 3: masked features (6/ch — expensive, training only)
-    if extended {
-        for ss in scale_stats.iter() {
-            for c in 0..3 {
-                features.push(ss.masked_ssim[c * 3].abs());
-                features.push(ss.masked_ssim[c * 3 + 1].abs());
-                features.push(ss.masked_ssim[c * 3 + 2].abs());
-                features.push(ss.masked_art_4th[c].abs());
-                features.push(ss.masked_det_4th[c].abs());
-                features.push(ss.masked_mse[c]);
-            }
-        }
-    }
-
-    // Pass 4: IW (information-content-weighted) features (6/ch —
-    // texture-emphasising counterpart to masked). Wang & Li 2011.
-    if iw {
-        for ss in scale_stats.iter() {
-            for c in 0..3 {
-                features.push(ss.iw_ssim[c * 3].abs());
-                features.push(ss.iw_ssim[c * 3 + 1].abs());
-                features.push(ss.iw_ssim[c * 3 + 2].abs());
-                features.push(ss.iw_art_4th[c].abs());
-                features.push(ss.iw_det_4th[c].abs());
-                features.push(ss.iw_mse[c]);
-            }
-        }
-    }
-
     let (score, raw_distance) =
         score_v1_layout_features(&mut features, weights, config, scale_stats.len());
     debug_assert_eq!(
@@ -3495,7 +3024,7 @@ pub(crate) fn combine_scores(
 
     // Placeholder profile tag — every `Zensim::compute*` caller overrides
     // it via `with_profile(self.profile)` before returning to the user.
-    // Uses the canonical codec-target profile (`A`), never the legacy `LegacyA`.
+    // Uses the canonical codec-target profile (`A`).
     ZensimResult::new(
         score,
         raw_distance,
@@ -3509,39 +3038,6 @@ pub(crate) fn combine_scores(
 mod tests {
     use super::*;
 
-    #[test]
-    #[allow(deprecated)]
-    fn public_configs_preserve_revision_route_invariants() {
-        use crate::feature_defs::FormulaRevision;
-        for profile in [
-            ZensimProfile::PreviewV0_1,
-            ZensimProfile::PreviewV0_2,
-            ZensimProfile::LegacyA,
-            ZensimProfile::A,
-            ZensimProfile::LegacyLinearV0_2,
-        ] {
-            let params = profile.params();
-            let config = config_from_params(params, false);
-            if config.revision() >= FormulaRevision::Rev5 {
-                assert!(params.mlp_bytes.is_some(), "{profile:?}");
-                assert!(crate::fold_engine::is_fold_backable(&config), "{profile:?}");
-            }
-        }
-        let custom = ProfileParams::custom(&[], 3, 3, 2, 1.0, 1.0);
-        assert_eq!(
-            config_from_params(&custom, false).revision(),
-            FormulaRevision::Rev1
-        );
-        assert_eq!(ZensimConfig::default().revision(), FormulaRevision::Rev1);
-    }
-
-    /// OOD safety net (2026-07-10): the output-calibration spline's lower
-    /// extrapolation is floored one calibrated-dial-range below the bottom
-    /// knot, so a pathological out-of-distribution raw that slips past the
-    /// winsor guard produces a bounded score instead of a wild one (a raw of
-    /// −8.63 previously → ~−1131). Legitimate / modest negatives (the neg-tail)
-    /// are preserved; only the wild extreme is clamped. Mirrors
-    /// `zensim_validate::output_calibration_spline`.
     #[test]
     fn output_spline_lower_extrapolation_floored_ood_safety_net() {
         // 2-knot identity-ish (0,0)-(100,100): floor = ys[0] - (ys[n-1]-ys[0])
@@ -3568,6 +3064,31 @@ mod tests {
             assert!(y >= prev - 1e-9, "non-monotone at x={x}");
             prev = y;
         }
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn public_configs_preserve_revision_route_invariants() {
+        use crate::feature_defs::FormulaRevision;
+        for profile in [
+            ZensimProfile::PreviewV0_1,
+            ZensimProfile::PreviewV0_2,
+            ZensimProfile::A,
+            ZensimProfile::LegacyLinearV0_2,
+        ] {
+            let params = profile.params();
+            let config = config_from_params(params, false);
+            if config.revision() >= FormulaRevision::Rev5 {
+                assert!(params.mlp_bytes.is_some(), "{profile:?}");
+                assert!(crate::fold_engine::is_fold_backable(&config), "{profile:?}");
+            }
+        }
+        let custom = ProfileParams::custom(&[], 3, 3, 2, 1.0, 1.0);
+        assert_eq!(
+            config_from_params(&custom, false).revision(),
+            FormulaRevision::Rev1
+        );
+        assert_eq!(ZensimConfig::default().revision(), FormulaRevision::Rev1);
     }
 
     /// Verify compute_all_features produces same score as default (weight-skipped) path.
@@ -3638,9 +3159,9 @@ mod tests {
 
     /// `compute_zensim_with_config` scores via plain linear `WEIGHTS`
     /// (V0_2), never an MLP forward pass — it must NOT claim the
-    /// MLP-scored `ZensimProfile::LegacyA` tag (a prior bug hardcoded `LegacyA` here).
+    /// MLP-scored profile tag.
     /// Covers both the general path and the identical-images
-    /// short-circuit, which had its own separate hardcoded `LegacyA`.
+    /// short-circuit.
     #[test]
     fn compute_zensim_with_config_tags_legacy_linear_profile_not_a() {
         let w = 128;
@@ -3661,7 +3182,7 @@ mod tests {
         assert_eq!(
             result.profile(),
             crate::profile::ZensimProfile::LegacyLinearV0_2,
-            "linear-scored result must not be tagged as MLP-scored profile LegacyA"
+            "linear-scored result must not be tagged as an MLP-scored profile"
         );
 
         // Identical-images short-circuit path (its own hardcoded tag).
@@ -3670,7 +3191,7 @@ mod tests {
         assert_eq!(
             identical.profile(),
             crate::profile::ZensimProfile::LegacyLinearV0_2,
-            "identical-images short-circuit must not be tagged as MLP-scored profile LegacyA"
+            "identical-images short-circuit must not be tagged as an MLP-scored profile"
         );
         assert_eq!(identical.score(), 100.0);
     }
@@ -3697,485 +3218,8 @@ mod tests {
         assert_eq!(
             result.profile(),
             crate::profile::ZensimProfile::LegacyLinearV0_2,
-            "linear-scored result must not be tagged as MLP-scored profile LegacyA"
+            "linear-scored result must not be tagged as an MLP-scored profile"
         );
-    }
-
-    /// V0_20a IW pool integration: `compute_iw_features=true` must
-    /// emit 72 additional features (228 → 300 at 4 scales × 3 ch × 6),
-    /// AND those features must differ from the masked block when both
-    /// are enabled (weight polarity is opposite).
-    #[test]
-    fn compute_iw_features_emits_300_when_enabled() {
-        let w = 128;
-        let h = 128;
-        let n = w * h;
-        let mut src = vec![[128u8, 128, 128]; n];
-        let mut dst = vec![[128u8, 128, 128]; n];
-        for y in 0..h {
-            for x in 0..w {
-                let r = ((x * 255) / w) as u8;
-                let g = ((y * 255) / h) as u8;
-                // Add a textured patch so the IW weights actually vary.
-                let noise = if (x % 16) < 8 && (y % 16) < 8 { 32 } else { 0 };
-                src[y * w + x] = [r.saturating_add(noise), g, 128];
-                dst[y * w + x] = [r.saturating_add(noise).saturating_add(5), g, 125];
-            }
-        }
-
-        // Off → 228 features (basic + peaks, masked OFF, iw OFF)
-        let off = compute_zensim_with_config(
-            &src,
-            &dst,
-            w,
-            h,
-            ZensimConfig {
-                compute_all_features: true,
-                ..Default::default()
-            },
-        )
-        .unwrap();
-        assert_eq!(off.features.len(), 228);
-
-        // IW only → 228 + 72 = 300 features
-        let iw_only = compute_zensim_with_config(
-            &src,
-            &dst,
-            w,
-            h,
-            ZensimConfig {
-                compute_all_features: true,
-                compute_iw_features: true,
-                iw_strength: 4.0,
-                ..Default::default()
-            },
-        )
-        .unwrap();
-        assert_eq!(iw_only.features.len(), 300);
-
-        // First 228 must match exactly (IW must not perturb basic/peaks).
-        for i in 0..228 {
-            let d = (off.features[i] - iw_only.features[i]).abs();
-            assert!(
-                d < 1e-9,
-                "IW must not affect basic/peak features; index {} differs by {}",
-                i,
-                d,
-            );
-        }
-
-        // IW block must produce non-zero output (we have textured patches).
-        let iw_block_nonzero = iw_only.features[228..]
-            .iter()
-            .filter(|f| f.abs() > 1e-12)
-            .count();
-        assert!(iw_block_nonzero > 0, "IW block was all zeros");
-
-        // When both extended_features and compute_iw_features are on,
-        // total = 228 + 72 (masked) + 72 (IW) = 372. Masked and IW
-        // pools have OPPOSITE weight polarity, so the two 72-feature
-        // blocks must differ.
-        let both = compute_zensim_with_config(
-            &src,
-            &dst,
-            w,
-            h,
-            ZensimConfig {
-                compute_all_features: true,
-                extended_features: true,
-                compute_iw_features: true,
-                iw_strength: 4.0,
-                extended_masking_strength: 4.0,
-                ..Default::default()
-            },
-        )
-        .unwrap();
-        assert_eq!(both.features.len(), 372);
-
-        let mut masked_iw_diff_count = 0usize;
-        for i in 0..72 {
-            let masked = both.features[228 + i];
-            let iw = both.features[228 + 72 + i];
-            if (masked - iw).abs() > 1e-9 {
-                masked_iw_diff_count += 1;
-            }
-        }
-        assert!(
-            masked_iw_diff_count >= 60,
-            "masked vs IW features should differ; only {}/72 differed",
-            masked_iw_diff_count,
-        );
-    }
-
-    /// Helper: create a gradient test image pair.
-    fn make_gradient_pair(w: usize, h: usize) -> (Vec<[u8; 3]>, Vec<[u8; 3]>) {
-        let n = w * h;
-        let mut src = vec![[128u8, 128, 128]; n];
-        let mut dst = vec![[128u8, 128, 128]; n];
-        for y in 0..h {
-            for x in 0..w {
-                let r = ((x * 255) / w) as u8;
-                let g = ((y * 255) / h) as u8;
-                let b = 128;
-                src[y * w + x] = [r, g, b];
-                dst[y * w + x] = [
-                    r.saturating_add(10),
-                    g.saturating_sub(5),
-                    b.saturating_add(3),
-                ];
-            }
-        }
-        (src, dst)
-    }
-
-    /// Numerical equivalence: when both `extended_features` and
-    /// `compute_iw_features` are enabled, the fused 2-mask SIMD path
-    /// must produce the same masked block as running with
-    /// `extended_features` alone, and the same IW block as running
-    /// with `compute_iw_features` alone. This is the critical
-    /// invariant for the 2026-05-15 perf optimization landing fused
-    /// 2-mask SSIM/edge/MSE kernels.
-    #[test]
-    fn fused_2mask_matches_separate_paths() {
-        let (w, h) = (128, 128);
-        let n = w * h;
-        let mut src = vec![[128u8, 128, 128]; n];
-        let mut dst = vec![[128u8, 128, 128]; n];
-        // Build a textured image so weights actually vary.
-        for y in 0..h {
-            for x in 0..w {
-                let r = ((x * 255) / w) as u8;
-                let g = ((y * 255) / h) as u8;
-                let b = (((x + y) * 255) / (2 * w)) as u8;
-                let noise = if (x % 16) < 8 && (y % 16) < 8 { 32 } else { 0 };
-                src[y * w + x] = [r.saturating_add(noise), g, b];
-                dst[y * w + x] = [
-                    r.saturating_add(noise).saturating_add(5),
-                    g.saturating_sub(3),
-                    b.saturating_add(2),
-                ];
-            }
-        }
-
-        let cfg_ext = ZensimConfig {
-            extended_features: true,
-            compute_iw_features: false,
-            compute_all_features: true,
-            extended_masking_strength: 4.0,
-            iw_strength: 4.0,
-            ..Default::default()
-        };
-        let cfg_iw = ZensimConfig {
-            extended_features: false,
-            compute_iw_features: true,
-            compute_all_features: true,
-            extended_masking_strength: 4.0,
-            iw_strength: 4.0,
-            ..Default::default()
-        };
-        let cfg_both = ZensimConfig {
-            extended_features: true,
-            compute_iw_features: true,
-            compute_all_features: true,
-            extended_masking_strength: 4.0,
-            iw_strength: 4.0,
-            ..Default::default()
-        };
-        let r_ext = compute_zensim_with_config(&src, &dst, w, h, cfg_ext).unwrap();
-        let r_iw = compute_zensim_with_config(&src, &dst, w, h, cfg_iw).unwrap();
-        let r_both = compute_zensim_with_config(&src, &dst, w, h, cfg_both).unwrap();
-
-        assert_eq!(r_ext.features.len(), 300);
-        assert_eq!(r_iw.features.len(), 300);
-        assert_eq!(r_both.features.len(), 372);
-
-        // First 228 features (basic + peaks) must agree across all 3.
-        for i in 0..228 {
-            let de = (r_ext.features[i] - r_both.features[i]).abs();
-            let di = (r_iw.features[i] - r_both.features[i]).abs();
-            assert!(
-                de < 1e-9,
-                "basic feature {} disagrees: ext_only {} vs both {}",
-                i,
-                r_ext.features[i],
-                r_both.features[i]
-            );
-            assert!(
-                di < 1e-9,
-                "basic feature {} disagrees: iw_only {} vs both {}",
-                i,
-                r_iw.features[i],
-                r_both.features[i]
-            );
-        }
-
-        // Masked block (228..300 in r_ext, 228..300 in r_both) must agree
-        // — same kernel called identically.
-        let mut max_diff = 0.0f64;
-        for i in 0..72 {
-            let d = (r_ext.features[228 + i] - r_both.features[228 + i]).abs();
-            let denom = r_ext.features[228 + i].abs().max(1e-9);
-            // Use a relative tolerance — small numerical drift from
-            // FMA reordering in the fused 2-mask vs single-mask kernels
-            // is acceptable. The bound of 1e-4 relative captures any
-            // structural correctness bug while permitting last-bit FMA
-            // variability.
-            let rel = d / denom;
-            max_diff = max_diff.max(rel);
-            assert!(
-                rel < 1e-4,
-                "masked feature {} differs: ext_only {} vs both {} (rel diff {:e})",
-                i,
-                r_ext.features[228 + i],
-                r_both.features[228 + i],
-                rel,
-            );
-        }
-        // IW block (228..300 in r_iw, 300..372 in r_both) must agree.
-        for i in 0..72 {
-            let d = (r_iw.features[228 + i] - r_both.features[300 + i]).abs();
-            let denom = r_iw.features[228 + i].abs().max(1e-9);
-            let rel = d / denom;
-            max_diff = max_diff.max(rel);
-            assert!(
-                rel < 1e-4,
-                "iw feature {} differs: iw_only {} vs both {} (rel diff {:e})",
-                i,
-                r_iw.features[228 + i],
-                r_both.features[300 + i],
-                rel,
-            );
-        }
-        // Sanity: not all zero
-        assert!(
-            (0.0..1e-4).contains(&max_diff),
-            "max_diff out of range: {}",
-            max_diff
-        );
-    }
-
-    /// Extended features: default config produces same score as non-extended.
-    #[test]
-    fn extended_features_backward_compat() {
-        let (w, h) = (64, 64);
-        let (src, dst) = make_gradient_pair(w, h);
-
-        let basic = compute_zensim_with_config(&src, &dst, w, h, ZensimConfig::default()).unwrap();
-
-        let extended = compute_zensim_with_config(
-            &src,
-            &dst,
-            w,
-            h,
-            ZensimConfig {
-                extended_features: false,
-                compute_all_features: true,
-                ..Default::default()
-            },
-        )
-        .unwrap();
-
-        // Both produce 228 features now (peaks always included)
-        assert_eq!(basic.features.len(), 228);
-        assert_eq!(extended.features.len(), 228);
-        // Score should be the same — compute_all forces all channels active but result is same
-        assert!(
-            (basic.score - extended.score).abs() < 0.01,
-            "basic {} vs compute_all {}",
-            basic.score,
-            extended.score,
-        );
-    }
-
-    /// Extended features produce 300 values and all are non-negative.
-    #[test]
-    fn extended_features_count_and_nonneg() {
-        let (w, h) = (64, 64);
-        let (src, dst) = make_gradient_pair(w, h);
-
-        let result = compute_zensim_with_config(
-            &src,
-            &dst,
-            w,
-            h,
-            ZensimConfig {
-                extended_features: true,
-                compute_all_features: true,
-                ..Default::default()
-            },
-        )
-        .unwrap();
-
-        assert_eq!(
-            result.features.len(),
-            300,
-            "Expected 25 × 3 × 4 = 300 features"
-        );
-        for (i, &f) in result.features.iter().enumerate() {
-            assert!(f >= 0.0, "Feature {} is negative: {}", i, f);
-        }
-    }
-
-    /// ssim_max >= ssim_4th >= ssim_mean ordering.
-    #[test]
-    fn extended_features_ordering() {
-        let (w, h) = (64, 64);
-        let (src, dst) = make_gradient_pair(w, h);
-
-        let result = compute_zensim_with_config(
-            &src,
-            &dst,
-            w,
-            h,
-            ZensimConfig {
-                extended_features: true,
-                compute_all_features: true,
-                ..Default::default()
-            },
-        )
-        .unwrap();
-
-        // Feature layout (block-separated):
-        //   [0..156)   scored: 13/ch × 3ch × 4 scales
-        //   [156..228)  peaks: 6/ch × 3ch × 4 scales
-        //   [228..300) masked: 6/ch × 3ch × 4 scales
-        let scored_per_ch = FEATURES_PER_CHANNEL_BASIC; // 13
-        let peaks_offset = 4 * scored_per_ch * 3; // 156
-        let peaks_per_ch = 6;
-        for scale in 0..4 {
-            for ch in 0..3 {
-                let scored_base = scale * scored_per_ch * 3 + ch * scored_per_ch;
-                let peaks_base = peaks_offset + scale * peaks_per_ch * 3 + ch * peaks_per_ch;
-                let ssim_mean = result.features[scored_base]; // scored[0]
-                let ssim_4th = result.features[scored_base + 1]; // scored[1]
-                let ssim_max = result.features[peaks_base]; // peaks[0]
-                let ssim_p95 = result.features[peaks_base + 3]; // peaks[3]
-
-                // max >= 4th >= mean (4th is L4 norm, always >= mean for non-negative values)
-                assert!(
-                    ssim_max >= ssim_4th - 1e-10,
-                    "s{} c{}: max {:.6} < 4th {:.6}",
-                    scale,
-                    ch,
-                    ssim_max,
-                    ssim_4th,
-                );
-                assert!(
-                    ssim_4th >= ssim_mean - 1e-10,
-                    "s{} c{}: 4th {:.6} < mean {:.6}",
-                    scale,
-                    ch,
-                    ssim_4th,
-                    ssim_mean,
-                );
-                // p95 between 4th and max
-                assert!(
-                    ssim_p95 <= ssim_max + 1e-10,
-                    "s{} c{}: p95 {:.6} > max {:.6}",
-                    scale,
-                    ch,
-                    ssim_p95,
-                    ssim_max,
-                );
-            }
-        }
-    }
-
-    /// Identical images: all features zero.
-    #[test]
-    fn extended_features_identical_zero() {
-        let (w, h) = (64, 64);
-        let (src, _) = make_gradient_pair(w, h);
-
-        let result = compute_zensim_with_config(
-            &src,
-            &src,
-            w,
-            h,
-            ZensimConfig {
-                extended_features: true,
-                compute_all_features: true,
-                ..Default::default()
-            },
-        )
-        .unwrap();
-
-        assert_eq!(result.score, 100.0);
-        assert_eq!(result.features.len(), 300);
-        for (i, &f) in result.features.iter().enumerate() {
-            assert!(
-                f.abs() < 1e-10,
-                "Feature {} not zero for identical: {}",
-                i,
-                f
-            );
-        }
-    }
-
-    /// Masked features <= unmasked features (masking reduces).
-    #[test]
-    fn extended_masked_leq_unmasked() {
-        let (w, h) = (64, 64);
-        let (src, dst) = make_gradient_pair(w, h);
-
-        let result = compute_zensim_with_config(
-            &src,
-            &dst,
-            w,
-            h,
-            ZensimConfig {
-                extended_features: true,
-                compute_all_features: true,
-                ..Default::default()
-            },
-        )
-        .unwrap();
-
-        // Feature layout (block-separated):
-        //   [0..156)   scored: 13/ch × 3ch × 4 scales
-        //   [156..228)  peaks: 6/ch × 3ch × 4 scales
-        //   [228..300) masked: 6/ch × 3ch × 4 scales
-        let scored_per_ch = FEATURES_PER_CHANNEL_BASIC; // 13
-        let masked_offset = 4 * scored_per_ch * 3 + 4 * 6 * 3; // 156 + 72 = 228
-        let masked_per_ch = 6;
-        for scale in 0..4 {
-            for ch in 0..3 {
-                let scored_base = scale * scored_per_ch * 3 + ch * scored_per_ch;
-                let masked_base = masked_offset + scale * masked_per_ch * 3 + ch * masked_per_ch;
-                let ssim_mean = result.features[scored_base]; // scored[0]
-                let ssim_4th = result.features[scored_base + 1]; // scored[1]
-                let ssim_2nd = result.features[scored_base + 2]; // scored[2]
-                let masked_ssim_mean = result.features[masked_base]; // masked[0]
-                let masked_ssim_4th = result.features[masked_base + 1]; // masked[1]
-                let masked_ssim_2nd = result.features[masked_base + 2]; // masked[2]
-
-                // Masked values should be <= unmasked (mask weights ∈ [0,1])
-                assert!(
-                    masked_ssim_mean <= ssim_mean + 1e-10,
-                    "s{} c{}: masked_mean {:.6} > mean {:.6}",
-                    scale,
-                    ch,
-                    masked_ssim_mean,
-                    ssim_mean,
-                );
-                assert!(
-                    masked_ssim_4th <= ssim_4th + 1e-10,
-                    "s{} c{}: masked_4th {:.6} > 4th {:.6}",
-                    scale,
-                    ch,
-                    masked_ssim_4th,
-                    ssim_4th,
-                );
-                assert!(
-                    masked_ssim_2nd <= ssim_2nd + 1e-10,
-                    "s{} c{}: masked_2nd {:.6} > 2nd {:.6}",
-                    scale,
-                    ch,
-                    masked_ssim_2nd,
-                    ssim_2nd,
-                );
-            }
-        }
     }
 
     /// Regression: `derive_classification` must not panic when any

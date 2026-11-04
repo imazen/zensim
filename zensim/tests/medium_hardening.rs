@@ -6,15 +6,15 @@
 //! - M3: `Zensim::with_max_pixels` cap fires before allocation.
 //! - M4: `try_score_from_features` returns Err on length mismatch.
 
-#![allow(deprecated)] // exercises the legacy `ZensimProfile::LegacyA`
+#![allow(deprecated)] // exercises the adopted `ZensimProfile::A`
 
 use zensim::{PixelFormat, RgbSlice, RgbaSlice, StridedBytes, Zensim, ZensimError, ZensimProfile};
 
 fn z() -> Zensim {
     // These tests poke API mechanics (error paths, dimension checks) on
-    // tiny 16x16 / 32x16 inputs; `LegacyA` reflect-pads sub-64px inputs to the
+    // tiny 16x16 / 32x16 inputs; `A` reflect-pads sub-64px inputs to the
     // pyramid minimum, so the mechanics are exercised the same way.
-    Zensim::new(ZensimProfile::LegacyA)
+    Zensim::new(ZensimProfile::A)
 }
 
 // ─── M1: cross-image dim mismatch in compute_with_ref* ─────────────────────
