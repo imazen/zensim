@@ -4,7 +4,7 @@
 //! due to quantization error. When these are passed to zensim's planar linear
 //! RGB API, the SSIM statistics can produce NaN via division-by-near-zero.
 
-#![allow(deprecated)] // exercises the deprecated `ZensimProfile::A` (still shipped behind the default-on `deprecated-profiles` feature)
+#![allow(deprecated)] // exercises the legacy `ZensimProfile::LegacyA`
 
 #[test]
 fn diffmap_nan_from_negative_linear_rgb() {
@@ -29,7 +29,7 @@ fn diffmap_nan_from_negative_linear_rgb() {
         dst_b[i] = -0.1;
     }
 
-    let z = zensim::Zensim::new(zensim::ZensimProfile::A).with_parallel(false);
+    let z = zensim::Zensim::new(zensim::ZensimProfile::LegacyA).with_parallel(false);
     let precomputed = z
         .precompute_reference_linear_planar([&src_r, &src_g, &src_b], width, height, width)
         .unwrap();
@@ -127,7 +127,7 @@ fn diffmap_nan_from_realistic_encoder_output() {
         dst_g[i] = 1.3;
     }
 
-    let z = zensim::Zensim::new(zensim::ZensimProfile::A).with_parallel(false);
+    let z = zensim::Zensim::new(zensim::ZensimProfile::LegacyA).with_parallel(false);
     let precomputed = z
         .precompute_reference_linear_planar([&src_r, &src_g, &src_b], width, height, width)
         .unwrap();

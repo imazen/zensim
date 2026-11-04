@@ -6,5 +6,5 @@ pub mod parity_cells;
 /// (basic, peaks, masked and IW pools at the first formula revision).
 #[allow(dead_code)]
 pub fn legacy_full_profile() -> zensim::ZensimProfile {
-    zensim::ZensimProfile::A
+    zensim::ZensimProfile::LegacyA
 }

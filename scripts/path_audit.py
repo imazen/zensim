@@ -82,7 +82,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--arm", action="append", required=True, help="NAME=executable; candidate first")
     ap.add_argument("--output", type=Path, required=True)
-    ap.add_argument("--profiles", default="E,ECodec,A,PreviewV0_1,PreviewV0_2")
+    ap.add_argument("--profiles", default="E,ECodec,LegacyA,PreviewV0_1,PreviewV0_2")
     ap.add_argument("--sizes", default="64x64,257x193,1024x768,2048x1536")
     ap.add_argument("--modes", default=",".join(MODES))
     ap.add_argument("--cells", help="comma-separated PROFILE-WIDTHxHEIGHT-MODE cells for follow-up")

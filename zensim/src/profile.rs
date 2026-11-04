@@ -1,7 +1,7 @@
 //! Named metric profiles.
 //!
 //! Each [`ZensimProfile`] variant selects a named model. [`ZensimProfile::latest`]
-//! returns the general-purpose default ([`ZensimProfile::E`]) and
+//! returns the general-purpose default ([`ZensimProfile::A`]) and
 //! [`ZensimProfile::codec_target`] the model specialised for codec artifacts
 //! ([`ZensimProfile::ECodec`]). Pin the crate version when reproducing exact
 //! scores: a profile name alone does not freeze its coefficients or calibration.
@@ -26,12 +26,14 @@ pub enum ZensimProfile {
     /// through zensim 0.2.x; the 0.2.7 compatibility note on
     /// [`Self::PreviewV0_1`] applies here too.
     PreviewV0_2,
-    /// Legacy MLP profile `A` (`zensim-a`): 372 features at the first formula
-    /// revision, a monotone network and a calibrated output spline. It was the
+    /// Legacy MLP profile `LegacyA` (`zensim-legacy-a`), previously named `A`
+    /// in the 0.3.0 development line: 372 features at the first formula revision,
+    /// a monotone network and a calibrated output spline. It was the
     /// codec-quality target of the 0.3.0 development line before [`Self::E`] and
     /// is kept for callers whose thresholds are calibrated to its scores. New code
-    /// should use [`Self::latest`] or [`Self::codec_target`].
-    A,
+    /// should use [`Self::latest`] or [`Self::codec_target`]. This profile is
+    /// deprecated in 0.3.0; use `latest()`. It was never part of the 0.2.7 API.
+    LegacyA,
     /// General-purpose profile `E` (`zensim-e`), the default since 0.3.0.
     ///
     /// A monotone MLP over 410 revision-7 damage features and 410 fragility
@@ -50,8 +52,9 @@ pub enum ZensimProfile {
     /// than `E` and is less reliable on other distortion types (noise, colour
     /// shifts, contrast changes), so use it where the input is codec output.
     ECodec,
-    /// General-purpose profile `F` (`zensim-f`), returned by [`Self::latest`]
-    /// since 0.3.0.
+    /// General-purpose profile `A` (`zensim-a`), returned by [`Self::latest`]
+    /// since 0.3.0. Adopted on 2026-11-04 (research name `mixF3`, `F` in the
+    /// research crate); the earlier development profile `A` is now [`Self::LegacyA`].
     ///
     /// [`Self::E`]'s architecture with the full-resolution chroma signals of the
     /// round-3 chroma root added to its inputs: a monotone MLP over 492
@@ -63,7 +66,7 @@ pub enum ZensimProfile {
     /// better than `E` on most held-out collections and ranks compression
     /// artifacts about as well; `docs/PROFILES.md` has the numbers and the
     /// recipe reference.
-    F,
+    A,
     /// **INTERNAL — legacy 228-weight linear scoring, no MLP head.**
     /// Tags results from the training entry points `compute_zensim_with_config`
     /// and `compute_zensim_with_ref_and_config`, which score via a plain
@@ -77,9 +80,9 @@ pub enum ZensimProfile {
 }
 
 impl ZensimProfile {
-    /// Latest recommended general-purpose profile: [`Self::F`].
+    /// Latest recommended general-purpose profile: [`Self::A`].
     pub fn latest() -> Self {
-        Self::F
+        Self::A
     }
 
     /// The profile specialised for codec artifacts: [`Self::ECodec`]. Encoders
@@ -94,10 +97,10 @@ impl ZensimProfile {
         match self {
             Self::PreviewV0_1 => "zensim-preview-v0.1",
             Self::PreviewV0_2 => "zensim-preview-v0.2",
-            Self::A => "zensim-a",
+            Self::LegacyA => "zensim-legacy-a",
             Self::E => "zensim-e",
             Self::ECodec => "zensim-e-codec",
-            Self::F => "zensim-f",
+            Self::A => "zensim-a",
             #[cfg(any(feature = "training", test))]
             Self::LegacyLinearV0_2 => "zensim-legacy-linear-v0.2",
         }
@@ -108,10 +111,10 @@ impl ZensimProfile {
         match self {
             Self::PreviewV0_1 => &PROFILE_PREVIEW_V0_1,
             Self::PreviewV0_2 => &PROFILE_PREVIEW_V0_2,
-            Self::A => &PROFILE_A,
+            Self::LegacyA => &PROFILE_LEGACY_A,
             Self::E => &PROFILE_E,
             Self::ECodec => &PROFILE_E_CODEC,
-            Self::F => &PROFILE_F,
+            Self::A => &PROFILE_A,
             #[cfg(any(feature = "training", test))]
             Self::LegacyLinearV0_2 => &PROFILE_LEGACY_LINEAR_V0_2,
         }
@@ -126,6 +129,24 @@ impl ProfileParams {
     /// silently skip a family a live consumer still looks at.
     pub(crate) fn scoring_bake_bytes(&self) -> impl Iterator<Item = &'static [u8]> + '_ {
         self.mlp_bytes.into_iter().map(|f| f())
+    }
+}
+
+impl core::str::FromStr for ZensimProfile {
+    type Err = &'static str;
+
+    fn from_str(name: &str) -> Result<Self, Self::Err> {
+        match name {
+            "zensim-preview-v0.1" => Ok(Self::PreviewV0_1),
+            "zensim-preview-v0.2" => Ok(Self::PreviewV0_2),
+            "zensim-legacy-a" => Ok(Self::LegacyA),
+            "zensim-e" => Ok(Self::E),
+            "zensim-e-codec" => Ok(Self::ECodec),
+            "zensim-a" => Ok(Self::A),
+            #[cfg(any(feature = "training", test))]
+            "zensim-legacy-linear-v0.2" => Ok(Self::LegacyLinearV0_2),
+            _ => Err("unknown zensim profile"),
+        }
     }
 }
 
@@ -282,7 +303,7 @@ static PROFILE_PREVIEW_V0_2: ProfileParams = ProfileParams {
     extrapolate_score: false,
 };
 
-/// `ZensimProfile::A` bake bytes — **rotated 2026-05-27 to
+/// `ZensimProfile::LegacyA` (formerly `A`) bake bytes — **rotated 2026-05-27 to
 /// `v47-strict-QAT-native`** (`v47_strict_qat_native_2026-05-27.bin`, 27 KB,
 /// sha256 `d0ef7a30…`). This is a bake rotation of the `Profile::A` slot, not
 /// an API change — the `A` name and the metric architecture are
@@ -322,8 +343,8 @@ pub(crate) fn mlp_bake_a_v47_qat() -> &'static [u8] {
     include_bytes!("../weights/v47_strict_qat_native_byid_2026-09-06.bin")
 }
 
-/// Profile `A` params. Its bake identity is recorded in `docs/PROFILES.md`.
-static PROFILE_A: ProfileParams = ProfileParams {
+/// Profile `LegacyA` params. Its bake identity is recorded in `docs/PROFILES.md`.
+static PROFILE_LEGACY_A: ProfileParams = ProfileParams {
     // Linear weights are unused on the MLP path but kept non-empty so
     // any caller that introspects `params.weights` length without
     // checking `mlp_bytes.is_some()` sees a sensible (V0_2-equivalent)
@@ -379,11 +400,11 @@ pub(crate) fn mlp_bake_e_codec() -> &'static [u8] {
     include_bytes!("../weights/rev7_codec_h128_2026-10-27.bin")
 }
 
-/// `ZensimProfile::F` bake: the adopted general model (H128 monotone MLP,
+/// `ZensimProfile::A` bake: the adopted general model (H128 monotone MLP,
 /// 984 inputs, derived-input declaration `fx2`), prepared the same way as
 /// [`mlp_bake_e_general`]. The mapping to the research identity is in
 /// `docs/PROFILES.md`.
-pub(crate) fn mlp_bake_f_general() -> &'static [u8] {
+pub(crate) fn mlp_bake_a_general() -> &'static [u8] {
     include_bytes!("../weights/rev7_mix_h128_2026-11-03.bin")
 }
 
@@ -407,7 +428,7 @@ const fn rev7_params(bake: fn() -> &'static [u8]) -> ProfileParams {
 
 static PROFILE_E: ProfileParams = rev7_params(mlp_bake_e_general);
 static PROFILE_E_CODEC: ProfileParams = rev7_params(mlp_bake_e_codec);
-static PROFILE_F: ProfileParams = rev7_params(mlp_bake_f_general);
+static PROFILE_A: ProfileParams = rev7_params(mlp_bake_a_general);
 
 // --- Weight arrays ---
 

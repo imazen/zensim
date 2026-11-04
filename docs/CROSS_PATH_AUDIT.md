@@ -36,7 +36,7 @@ This distinction remains explicit at the entry points.
 
 ## Existing mismatch
 
-Before any production refactor, profile A produced different score bits between
+Before any production refactor, profile LegacyA (then named A) produced different score bits between
 interleaved and planar linear diffmaps on a 65×63 checkerboard with strided planes:
 `4635359462469191635` versus `4635359462376882550`. The new cross-path test exposed
 this; PreviewV0_2 also showed score mismatches, and legacy maps showed rounding
@@ -107,7 +107,7 @@ or discarding contaminated samples would change the experiment's contract.
 
 Fresh-process RSS is not byte-identical. The largest median ratio against the slim
 baseline is 1.053097 on PreviewV0_2's 65×63 scratch route (5,712 versus 5,424 KiB).
-At 2048×1536, the largest ratio is 1.011516 on A's parallel planar route (209,748
+At 2048×1536, the largest ratio is 1.011516 on LegacyA's parallel planar route (209,748
 versus 207,360 KiB). The largest ratio against research is 1.003426 on E's parallel
 map route at that size (244,824 versus 243,988 KiB). These are observed process peaks,
 not allocation counts, and the research bake-loading adapter affects that comparison.

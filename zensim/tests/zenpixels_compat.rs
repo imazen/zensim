@@ -1,6 +1,6 @@
 #![cfg(feature = "zenpixels")]
 #![allow(deprecated)]
-// exercises the deprecated `ZensimProfile::A` (shipped behind the default-on `deprecated-profiles` feature)
+// exercises the legacy `ZensimProfile::LegacyA`
 //! End-to-end integration tests for the zenpixels ImageSource adapter.
 //!
 //! Validates that `ZenpixelsSource` produces identical scores to the
@@ -15,7 +15,7 @@ use zensim::{
 };
 
 fn zensim() -> Zensim {
-    Zensim::new(ZensimProfile::A)
+    Zensim::new(ZensimProfile::LegacyA)
 }
 
 /// Generate deterministic 16x16 test pixels (gradient pattern).

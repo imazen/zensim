@@ -2249,7 +2249,7 @@ fn identical_result_at(config: &ZensimConfig, min_width: usize) -> ZensimResult 
         0.0,
         vec![0.0; num_features],
         // Placeholder tag (overridden by the compute* caller); the
-        // canonical codec-target profile, never the deprecated `A`.
+        // canonical codec-target profile, never the legacy `LegacyA`.
         ZensimProfile::codec_target(),
         [0.0; 3],
     )
@@ -3277,7 +3277,7 @@ pub fn compute_zensim_with_config(
         let num_features = config.num_scales * 3 * fpc;
         // This entry point scores via the plain WEIGHTS (V0_2 linear)
         // distance, never an MLP forward pass — tag with the honest
-        // legacy-linear profile rather than `A` (the canonical MLP-scored
+        // legacy-linear profile rather than `LegacyA` (the MLP-scored
         // profile).
         return Ok(ZensimResult::new(
             100.0,
@@ -3490,7 +3490,7 @@ pub(crate) fn combine_scores(
 
     // Placeholder profile tag — every `Zensim::compute*` caller overrides
     // it via `with_profile(self.profile)` before returning to the user.
-    // Uses the canonical codec-target profile (`B`), never the deprecated `A`.
+    // Uses the canonical codec-target profile (`ECodec`), never the legacy `LegacyA`.
     ZensimResult::new(
         score,
         raw_distance,
@@ -3511,10 +3511,10 @@ mod tests {
         for profile in [
             ZensimProfile::PreviewV0_1,
             ZensimProfile::PreviewV0_2,
-            ZensimProfile::A,
+            ZensimProfile::LegacyA,
             ZensimProfile::E,
             ZensimProfile::ECodec,
-            ZensimProfile::F,
+            ZensimProfile::A,
             ZensimProfile::LegacyLinearV0_2,
         ] {
             let params = profile.params();
@@ -3635,9 +3635,9 @@ mod tests {
 
     /// `compute_zensim_with_config` scores via plain linear `WEIGHTS`
     /// (V0_2), never an MLP forward pass — it must NOT claim the
-    /// MLP-scored `ZensimProfile::A` tag (a prior bug hardcoded `A` here).
+    /// MLP-scored `ZensimProfile::LegacyA` tag (a prior bug hardcoded `LegacyA` here).
     /// Covers both the general path and the identical-images
-    /// short-circuit, which had its own separate hardcoded `A`.
+    /// short-circuit, which had its own separate hardcoded `LegacyA`.
     #[test]
     fn compute_zensim_with_config_tags_legacy_linear_profile_not_a() {
         let w = 128;
@@ -3658,7 +3658,7 @@ mod tests {
         assert_eq!(
             result.profile(),
             crate::profile::ZensimProfile::LegacyLinearV0_2,
-            "linear-scored result must not be tagged as MLP-scored profile A"
+            "linear-scored result must not be tagged as MLP-scored profile LegacyA"
         );
 
         // Identical-images short-circuit path (its own hardcoded tag).
@@ -3667,7 +3667,7 @@ mod tests {
         assert_eq!(
             identical.profile(),
             crate::profile::ZensimProfile::LegacyLinearV0_2,
-            "identical-images short-circuit must not be tagged as MLP-scored profile A"
+            "identical-images short-circuit must not be tagged as MLP-scored profile LegacyA"
         );
         assert_eq!(identical.score(), 100.0);
     }
@@ -3694,7 +3694,7 @@ mod tests {
         assert_eq!(
             result.profile(),
             crate::profile::ZensimProfile::LegacyLinearV0_2,
-            "linear-scored result must not be tagged as MLP-scored profile A"
+            "linear-scored result must not be tagged as MLP-scored profile LegacyA"
         );
     }
 

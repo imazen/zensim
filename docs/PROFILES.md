@@ -6,12 +6,22 @@ runs, evaluation panels, ablations) lives in [imazen/zensimx](https://github.com
 the record for the revision-7 models is
 [`benchmarks/byconstruction_2026-10-22.md`](https://github.com/imazen/zensimx/blob/main/benchmarks/byconstruction_2026-10-22.md).
 
+| Public profile | Research / development name | Status |
+|---|---|---|
+| `A` (`zensim-a`) | research `F`, `mixF3` (zensimx adoption record, 2026-11-04) | Adopted general model; `latest()` |
+| `LegacyA` (`zensim-legacy-a`) | earlier 0.3.0 development `A` | Preserved scores; never shipped in 0.2.7 |
+| `E` (`zensim-e`) | research `E` | Unchanged; pending an owner decision |
+| `ECodec` (`zensim-e-codec`) | research `ECodec` | Unchanged; pending an owner decision; `codec_target()` |
+
+The published 0.2.7 API had only `PreviewV0_1` and `PreviewV0_2`; neither is renamed.
+Research names stay unchanged.
+
 | Profile | Bake | SHA-256 | Features |
 |---|---|---|---|
-| `F` | `weights/rev7_mix_h128_2026-11-03.bin` | `d5e2a56db35c32620d9f9d9c19ba3bc78bd8fea2b8cd933cde8447428d85e62a` | 492 revision-7 damage features (with full-resolution chroma) + 492 fragility products |
+| `A` | `weights/rev7_mix_h128_2026-11-03.bin` | `d5e2a56db35c32620d9f9d9c19ba3bc78bd8fea2b8cd933cde8447428d85e62a` | 492 revision-7 damage features (with full-resolution chroma) + 492 fragility products |
 | `E` | `weights/rev7_general_h128_2026-10-27.bin` | `e460a214c1e0c4f48bc7e3bb4705df548f9f172807cc63f39ba17cb1d94e05a0` | 410 revision-7 damage features + 410 fragility products |
 | `ECodec` | `weights/rev7_codec_h128_2026-10-27.bin` | `f7ecd60299482210fe33586e8d4674fe9ba163f17f2dbaf54c6e99d5ef44af63` | the same 820 inputs |
-| `A` | `weights/v47_strict_qat_native_byid_2026-09-06.bin` | `de0ddb3dc78b8b0a4fc99645f949acb73e7e08bec9ed4d86793605d882e9176a` | 372 revision-1 features |
+| `LegacyA` | `weights/v47_strict_qat_native_byid_2026-09-06.bin` | `de0ddb3dc78b8b0a4fc99645f949acb73e7e08bec9ed4d86793605d882e9176a` | 372 revision-1 features |
 | `PreviewV0_1`, `PreviewV0_2` | linear weights in `src/profile.rs` | | 228 revision-1 features |
 
 ## The revision-7 models (`E`, `ECodec`)
@@ -67,9 +77,9 @@ block (`zentrain.repro`) and the sampler statistics (`zentrain.sample_coverage`)
 feature declaration, formula revision, derived-input declaration and calibration spline are
 unchanged; both versions score identically on every surface of the split parity run.
 
-## The adopted mix (`F`)
+## The adopted mix (`A`)
 
-**What it is.** `F` (research name `mixF3`, "the TID2013 + MDID mix on F3's recipe") shares `E`'s
+**What it is.** `A` (research profile `F`, recipe `mixF3`, "the TID2013 + MDID mix on F3's recipe") shares `E`'s
 architecture and adds the full-resolution chroma signals of the round-3 chroma root to its inputs:
 492 damage features and 492 fragility products, with the derived-input declaration `fx2` embedded in
 the bake. Its base fit keeps the SafeSyn and CID22 SSIMULACRA2 legs, the coverage pool, BAPPS and the
@@ -84,10 +94,10 @@ command, trainer build and hash, is `recipes/MixF3-s0.json` and `docs/RECIPE_MIX
 training repository, where it replays in the release sandbox.
 
 **Evaluation.** The same frozen held-out read as the table above, `E` repeated for comparison. MDID
-contributed different references to `F`'s training; the other eight collections were not trained
+contributed different references to `A`'s training; the other eight collections were not trained
 on.
 
-| Dataset | `F` | `E` | SSIMULACRA2 | Butteraugli (3-norm) |
+| Dataset | `A` | `E` | SSIMULACRA2 | Butteraugli (3-norm) |
 |---|---:|---:|---:|---:|
 | CID:IQ | 0.868 | 0.865 | 0.757 | 0.592 |
 | CID:OA | 0.911 | 0.889 | 0.847 | 0.577 |
@@ -99,10 +109,10 @@ on.
 | NITS-IQA | 0.734 | 0.706 | 0.777 | 0.706 |
 | VCL@FER | 0.950 | 0.930 | 0.945 | 0.877 |
 
-Two-alternative agreement with human choices: FG-IQA `F` 0.757 (`E` 0.759), PieAPP 0.583 (0.585).
-On CLIC 2021's validation questions (learned-codec pairs, read once as a confirmation) `F` agrees
+Two-alternative agreement with human choices: FG-IQA `A` 0.757 (`E` 0.759), PieAPP 0.583 (0.585).
+On CLIC 2021's validation questions (learned-codec pairs, read once as a confirmation) `A` agrees
 with the raters on 0.644, SSIMULACRA2 on 0.626 and butteraugli's 3-norm on 0.606. On UPIQ's HDR pairs
-through the PU21 front end `F` reaches a pooled rank correlation of 0.78 against `E`'s 0.79. One
+through the PU21 front end `A` reaches a pooled rank correlation of 0.78 against `E`'s 0.79. One
 case of the label-free map-steering gate (an 8-pixel map-rank case on a text screenshot) scores 0.69
 against its 0.70 bar; the JPEG XL loop shows no byte cost from it.
 
@@ -142,7 +152,7 @@ Peak memory at 4096², one thread: `E` 158 MiB, fast-ssim2 2,468 MiB, butteraugl
 An initial paired timing on an Intel Core Ultra 7 265K
 (2026-10-28; 1024×768, one pinned thread, the two crates' `split_timing` examples alternating
 for 12 rounds of 10 calls) gave median ratios of slim to research of 1.003 (`E`), 1.006
-(`ECodec`), 0.998 (`A`) and 1.008 (`PreviewV0_2`); `E` took 12.75 ms per call there.
+(`ECodec`), 0.998 (`LegacyA`) and 1.008 (`PreviewV0_2`); `E` took 12.75 ms per call there.
 Reusing a reference with `precompute_reference` saves 8–11% per call at one thread; at eight
 threads the uncached path was faster from 1024² up in that research measurement.
 These observations do not establish parity for every route. The broader
@@ -151,8 +161,11 @@ and map measurements, including inconclusive comparisons and RSS differences.
 
 ## Parity with the research crate
 
-For `F`, run the research example with the adopted bake as its general model; it prints those rows
-under the first bake's label (`E`), so relabel them `F` before the diff.
+For public `A` (research `F` / `mixF3`), run the research `split_parity_golden` example with
+the adopted bake as its general model; it prints those rows under the first bake's label (`E`),
+so relabel them `A` before the diff. For the original profiles, relabel the research `A` rows
+`LegacyA`; leave `E`, `ECodec` and preview rows unchanged. Compare each matching bake separately
+so the adopted model's temporary `E` label cannot collide with the original `E` model.
 
 The crate was cut from imazen/zensimx on 2026-10-28. `examples/split_parity_check.rs` prints the
 score, raw distance and a hash of the features and diffmaps for 231 generated image pairs,

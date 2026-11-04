@@ -13,7 +13,7 @@
 //!   cargo test -p zensim --test corpus_icc -- --ignored --nocapture
 //! ```
 
-#![allow(deprecated)] // exercises the deprecated `ZensimProfile::A` (still shipped behind the default-on `deprecated-profiles` feature)
+#![allow(deprecated)] // exercises the legacy `ZensimProfile::LegacyA`
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -109,7 +109,7 @@ fn should_skip() -> bool {
 }
 
 fn zensim() -> Zensim {
-    Zensim::new(ZensimProfile::A)
+    Zensim::new(ZensimProfile::LegacyA)
 }
 
 // ─── Wide-gamut corpus tests ─────────────────────────────────────────

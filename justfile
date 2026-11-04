@@ -1,7 +1,7 @@
 # Run compute-heavy recipes through the environment's resource-limited runner.
 
 fmt:
-    cargo fmt --all --check
+    cargo fmt -p zensim -p zensim-regress --check
 
 check:
     cargo check --offline -p zensim --all-targets --all-features --message-format=short
@@ -27,3 +27,14 @@ path-audit-report *args:
 
 path-audit-confirm-plan *args:
     PYTHONDONTWRITEBYTECODE=1 python3 scripts/path_audit_plan.py {{args}}
+
+# Profile-serving validation; run each cargo command under the heavy-work lock
+# and run-heavy, as with the other compute-heavy recipes above.
+profile-test:
+    cargo test --workspace --all-targets
+
+profile-doc-test:
+    cargo test --workspace --doc
+
+profile-score-test:
+    cargo test -p zensim --all-features --test profiles

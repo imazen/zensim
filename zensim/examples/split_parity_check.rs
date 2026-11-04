@@ -40,10 +40,10 @@ fn main() {
     let profiles = [
         ("PreviewV0_1", ZensimProfile::PreviewV0_1),
         ("PreviewV0_2", ZensimProfile::PreviewV0_2),
-        ("A", ZensimProfile::A),
+        ("LegacyA", ZensimProfile::LegacyA),
         ("E", ZensimProfile::E),
         ("ECodec", ZensimProfile::ECodec),
-        ("F", ZensimProfile::F),
+        ("A", ZensimProfile::A),
     ];
     let hex = |x: f64| format!("{:016x}", x.to_bits());
     let line = |surface: &str, profile: &str, pair: &str, value: String| {

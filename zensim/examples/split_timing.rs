@@ -4,7 +4,7 @@
 //! with the same arguments and output, and a driver alternates the two binaries.
 //!
 //! ```text
-//! split_timing <E|ECodec|A|PreviewV0_2> <pair-id> <warmup> <calls>
+//! split_timing <A|E|ECodec|LegacyA|PreviewV0_2> <pair-id> <warmup> <calls>
 //! ```
 //! Prints one line per timed call: nanoseconds.
 
@@ -19,8 +19,8 @@ fn main() {
     let profile = match a[0].as_str() {
         "E" => ZensimProfile::E,
         "ECodec" => ZensimProfile::ECodec,
-        "F" => ZensimProfile::F,
-        "A" => ZensimProfile::A,
+        "A" | "zensim-a" => ZensimProfile::A,
+        "LegacyA" | "zensim-legacy-a" => ZensimProfile::LegacyA,
         "PreviewV0_2" => ZensimProfile::PreviewV0_2,
         other => panic!("unknown profile {other}"),
     };

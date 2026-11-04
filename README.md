@@ -23,10 +23,10 @@ candidates against one reference with `precompute_reference` and `compute_with_r
 
 | Profile | Name | Use |
 |---|---|---|
-| `F` (`latest()`) | `zensim-f` | General purpose, the default: compression, noise, blur, colour and contrast changes |
+| `A` (`latest()`) | `zensim-a` | General purpose, the default: compression, noise, blur, colour and contrast changes |
 | `E` | `zensim-e` | The previous general-purpose model, kept for callers calibrated to its scores |
 | `ECodec` (`codec_target()`) | `zensim-e-codec` | Codec output (JPEG, WebP, AVIF, JPEG XL); less reliable on other distortions |
-| `A` | `zensim-a` | Legacy, for callers whose thresholds are calibrated to it |
+| `LegacyA` | `zensim-legacy-a` | Legacy development model, for callers whose thresholds are calibrated to it |
 | `PreviewV0_1`, `PreviewV0_2` | | The linear profiles of zensim 0.1 and 0.2 |
 
 `E` and `ECodec` are monotone networks over multi-scale SSIM, edge, detail-loss and

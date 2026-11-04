@@ -12,7 +12,7 @@
 //! [`zenpredict`](https://github.com/imazen/zenanalyze) crate, which
 //! is the canonical MLP runtime for the imazen image-codec ecosystem
 //! (zenjpeg / zenwebp / zenavif / zenjxl picker selection + zensim
-//! profile-`A` perceptual scoring). The format and dispatch math live
+//! profile-`LegacyA` perceptual scoring). The format and dispatch math live
 //! there; this module re-exports only what `zensim::metric` /
 //! `zensim::profile` consume. The module is `pub(crate)` — external
 //! consumers wanting to bake or load MLP models depend on `zenpredict`

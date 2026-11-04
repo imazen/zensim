@@ -42,7 +42,7 @@ pushed tag and GitHub release.
 
 ## Known Bugs
 
-- Cross-path audit at `d15a5486` (2026-10-28): profile A's interleaved and planar
+- Cross-path audit at `d15a5486` (2026-10-28): profile LegacyA's (then named A) interleaved and planar
   linear diffmap scores differ on the 65×63 checkerboard fixture with padded rows.
   Score bits: interleaved `4635359462469191635`, planar `4635359462376882550`.
   The audit also found PreviewV0_2 score mismatches and legacy map rounding
