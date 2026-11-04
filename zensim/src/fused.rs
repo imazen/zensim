@@ -1755,7 +1755,6 @@ fn fused_vblur_ssim_inner(
         let mut sum_m2_a = [0.0f32; 8];
         let mut sum_sq_a = [0.0f32; 8];
         let mut sum_s12_a = [0.0f32; 8];
-        let mut sum_act_a = [0.0f32; 8];
         // Free raw moments: one lane accumulator per column group, reduced
         // at the band's last inner row (see `raw_moments`). Dead code when
         // the caller did not ask.
@@ -1785,7 +1784,6 @@ fn fused_vblur_ssim_inner(
             let mut sm2 = f32x8::zero_t(token);
             let mut ssq = f32x8::zero_t(token);
             let mut ss12 = f32x8::zero_t(token);
-            let sact = f32x8::zero_t(token);
             for i in 0..diam {
                 let idx = mirror_idx(i, r, height);
                 let base = idx * width + col_base;
@@ -1799,7 +1797,6 @@ fn fused_vblur_ssim_inner(
             sm2.store(&mut sum_m2_a);
             ssq.store(&mut sum_sq_a);
             ss12.store(&mut sum_s12_a);
-            sact.store(&mut sum_act_a);
         }
 
         for y in 0..height {
@@ -3011,7 +3008,6 @@ struct VWinPlanes<'a> {
     m2: &'a [f32],
     sq: &'a [f32],
     s12: &'a [f32],
-    act: &'a [f32],
     width: usize,
     height: usize,
     r: usize,
@@ -3038,7 +3034,6 @@ enum VWin {
         m2: Vec<f64>,
         sq: Vec<f64>,
         s12: Vec<f64>,
-        act: Vec<f64>,
     },
     Local,
 }
@@ -3077,23 +3072,11 @@ impl VWin {
                 let mut m2 = vec![0.0; p.width];
                 let mut sq = vec![0.0; p.width];
                 let mut s12 = vec![0.0; p.width];
-                let mut act = if p.act.is_empty() {
-                    Vec::new()
-                } else {
-                    vec![0.0; p.width]
-                };
                 seed64(p.m1, &mut m1);
                 seed64(p.m2, &mut m2);
                 seed64(p.sq, &mut sq);
                 seed64(p.s12, &mut s12);
-                seed64(p.act, &mut act);
-                Self::F64 {
-                    m1,
-                    m2,
-                    sq,
-                    s12,
-                    act,
-                }
+                Self::F64 { m1, m2, sq, s12 }
             }
             crate::featcanon::BlurMode::Local => Self::Local,
         }
@@ -3103,17 +3086,11 @@ impl VWin {
     /// `vblur_rem_idx` — the production index sequence).
     fn slide(&mut self, y: usize, p: &VWinPlanes<'_>) {
         match self {
-            Self::F64 {
-                m1,
-                m2,
-                sq,
-                s12,
-                act,
-            } => {
+            Self::F64 { m1, m2, sq, s12 } => {
                 let ab = vblur_add_idx(y, p.r, p.height) * p.width;
                 let rb = vblur_rem_idx(y, p.r, p.height) * p.width;
                 // Same empty-plane guard as `slide32` above: the edge
-                // body's planes have no `sq`/`s12`/`act`, so absent planes
+                // body's planes have no `sq`/`s12`, so absent planes
                 // are skipped rather than indexed (their state vectors are
                 // empty too — `sq`/`s12` stay `len == 0`).
                 let slide64 = |plane: &[f32], out: &mut [f64]| {
@@ -3128,31 +3105,24 @@ impl VWin {
                 slide64(p.m2, m2);
                 slide64(p.sq, sq);
                 slide64(p.s12, s12);
-                slide64(p.act, act);
             }
             Self::Local => {}
         }
     }
 
-    /// The `(mu1, mu2, ssq, s12, act)` plane values at `(x, y)` — f32, the
+    /// The `(mu1, mu2, ssq, s12)` plane values at `(x, y)` — f32, the
     /// canon bodies' element precision. `Rec` is the production `sum * inv`
     /// f32 multiply; `F64`/`Fresh` compute in f64 and narrow once at the
     /// same f32-store boundary production writes through.
     #[allow(unused_variables)]
     #[inline(always)]
-    fn at32(&self, x: usize, y: usize, p: &VWinPlanes<'_>) -> (f32, f32, f32, f32, f32) {
+    fn at32(&self, x: usize, y: usize, p: &VWinPlanes<'_>) -> (f32, f32, f32, f32) {
         match self {
-            Self::F64 {
-                m1,
-                m2,
-                sq,
-                s12,
-                act,
-            } => {
+            Self::F64 { m1, m2, sq, s12 } => {
                 let inv = p.inv64();
-                // Absent planes read as `0.0` — the `act` convention,
+                // Absent planes read as `0.0` — the empty-plane convention,
                 // extended to `sq`/`s12` (the edge body's planes leave all
-                // three unpopulated).
+                // two unpopulated).
                 let g = |v: &[f64]| {
                     if v.is_empty() {
                         0.0
@@ -3160,13 +3130,7 @@ impl VWin {
                         (v[x] * inv) as f32
                     }
                 };
-                (
-                    (m1[x] * inv) as f32,
-                    (m2[x] * inv) as f32,
-                    g(sq),
-                    g(s12),
-                    g(act),
-                )
+                ((m1[x] * inv) as f32, (m2[x] * inv) as f32, g(sq), g(s12))
             }
             Self::Local => {
                 // Rev5 `localwin`: the row's own 11-tap f32 pair tree — no
@@ -3188,21 +3152,15 @@ impl VWin {
                     }
                     crate::blur::local_sum_taps(&t[..diam]) * inv
                 };
-                (g(p.m1), g(p.m2), g(p.sq), g(p.s12), g(p.act))
+                (g(p.m1), g(p.m2), g(p.sq), g(p.s12))
             }
         }
     }
 
     #[inline(always)]
-    fn f64_states(&self) -> Option<[&[f64]; 5]> {
+    fn f64_states(&self) -> Option<[&[f64]; 4]> {
         match self {
-            Self::F64 {
-                m1,
-                m2,
-                sq,
-                s12,
-                act,
-            } => Some([m1, m2, sq, s12, act]),
+            Self::F64 { m1, m2, sq, s12 } => Some([m1, m2, sq, s12]),
             _ => None,
         }
     }
@@ -3212,24 +3170,12 @@ impl VWin {
 macro_rules! vwin_slide64x8 {
     ($win:expr, $token:expr, $y:expr, $p:expr) => {{
         match &mut $win {
-            VWin::F64 {
-                m1,
-                m2,
-                sq,
-                s12,
-                act,
-            } => {
+            VWin::F64 { m1, m2, sq, s12 } => {
                 let ab = vblur_add_idx($y, $p.r, $p.height) * $p.width;
                 let rb = vblur_rem_idx($y, $p.r, $p.height) * $p.width;
                 // One slice construction per row per plane; the chunk/tail
                 // iterators then carry the bounds so no index is re-checked.
-                for (out, plane) in [
-                    (m1, $p.m1),
-                    (m2, $p.m2),
-                    (sq, $p.sq),
-                    (s12, $p.s12),
-                    (act, $p.act),
-                ] {
+                for (out, plane) in [(m1, $p.m1), (m2, $p.m2), (sq, $p.sq), (s12, $p.s12)] {
                     if plane.is_empty() {
                         continue;
                     }
@@ -3276,7 +3222,6 @@ fn vblur_ssim_elem_canon<P: crate::featcanon::Pool>(
     mu2: f32,
     ssq: f32,
     s12: f32,
-    _act: f32,
     s: f32,
     d: f32,
     x: usize,
@@ -3436,7 +3381,6 @@ fn fused_vblur_ssim_canon<P: crate::featcanon::Pool>(
         m2: h_mu2,
         sq: h_sigma_sq,
         s12: h_sigma12,
-        act: &[],
         width,
         height,
         r,
@@ -3453,7 +3397,7 @@ fn fused_vblur_ssim_canon<P: crate::featcanon::Pool>(
             let base = y * width;
             let mut row = VblurPools::<P>::zero();
             for x in 0..width {
-                let (mu1, mu2, ssq, s12, act) = win.at32(x, y, &planes);
+                let (mu1, mu2, ssq, s12) = win.at32(x, y, &planes);
                 let s = src[base + x];
                 let d = dst[base + x];
                 vblur_ssim_elem_canon(
@@ -3461,7 +3405,6 @@ fn fused_vblur_ssim_canon<P: crate::featcanon::Pool>(
                     mu2,
                     ssq,
                     s12,
-                    act,
                     s,
                     d,
                     x,
@@ -3563,14 +3506,12 @@ fn fused_vblur_ssim_local<P: crate::featcanon::Pool>(
         m2: h_mu2,
         sq: h_sigma_sq,
         s12: h_sigma12,
-        act: &[],
         width,
         height,
         r,
     };
     let diam = planes.diam();
     let inv = planes.inv32();
-    let has_act = !planes.act.is_empty();
 
     let mut acc = StripChannelAccum::zero();
     let mut t_stack = [0.0f32; 33];
@@ -3625,7 +3566,6 @@ fn fused_vblur_ssim_local<P: crate::featcanon::Pool>(
             let mu2 = win_at(planes.m2);
             let ssq = win_at(planes.sq);
             let s12 = win_at(planes.s12);
-            let act = if has_act { win_at(planes.act) } else { 0.0 };
             let s = src[base + x];
             let d = dst[base + x];
             vblur_ssim_elem_canon(
@@ -3633,7 +3573,6 @@ fn fused_vblur_ssim_local<P: crate::featcanon::Pool>(
                 mu2,
                 ssq,
                 s12,
-                act,
                 s,
                 d,
                 x,
@@ -3714,7 +3653,6 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
         m2: h_mu2,
         sq: h_sigma_sq,
         s12: h_sigma12,
-        act: &[],
         width,
         height,
         r,
@@ -3792,19 +3730,14 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
             let base = y * width;
             let mut fresh = VblurPools::<P>::zero();
             let row = if rev7 { &mut call_row } else { &mut fresh };
-            let [wm1, wm2, wsq, ws12, wact] = win.f64_states().unwrap_or([&[]; 5]);
+            let [wm1, wm2, wsq, ws12] = win.f64_states().unwrap_or([&[]; 4]);
             // Provable-length slices: `x0 + 8 <= full * 8` is then literal,
             // so `narrow`'s window reads and the plane loads compile with
-            // no `slice_index_fail` path. (`wact` stays conditionally read.)
+            // no `slice_index_fail` path.
             let wm1 = if local { wm1 } else { &wm1[..full * 8] };
             let wm2 = if local { wm2 } else { &wm2[..full * 8] };
             let wsq = if local { wsq } else { &wsq[..full * 8] };
             let ws12 = if local { ws12 } else { &ws12[..full * 8] };
-            let wact = if wact.is_empty() {
-                wact
-            } else {
-                &wact[..full * 8]
-            };
             let srow = &src[base..base + full * 8];
             let drow = &dst[base..base + full * 8];
 
@@ -3830,12 +3763,11 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
                     t
                 }};
             }
-            let (tm1, tm2, tsq, ts12, tact) = (
+            let (tm1, tm2, tsq, ts12) = (
                 taps!(planes.m1),
                 taps!(planes.m2),
                 taps!(planes.sq),
                 taps!(planes.s12),
-                taps!(planes.act),
             );
             // One chunk of `$w` columns (eight or sixteen) at column `x0`,
             // through vector type `$vt`: every term is element-wise, and the
@@ -3887,11 +3819,6 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
                     let m2v = $window!(planes.m2, wm2, tm2, x0);
                     let ssqv = $window!(planes.sq, wsq, tsq, x0);
                     let s12v = $window!(planes.s12, ws12, ts12, x0);
-                    let _actv = if planes.act.is_empty() {
-                        zero
-                    } else {
-                        $window!(planes.act, wact, tact, x0)
-                    };
                     let sv = $vt::load_t(token, srow[x0..x0 + $w].try_into().unwrap());
                     let dv = $vt::load_t(token, drow[x0..x0 + $w].try_into().unwrap());
 
@@ -4213,7 +4140,7 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
             }
             // Scalar tail — the canonical element step verbatim.
             for x in full * 8..width {
-                let (mu1, mu2, ssq, s12, act) = win.at32(x, y, &planes);
+                let (mu1, mu2, ssq, s12) = win.at32(x, y, &planes);
                 let s = src[base + x];
                 let d = dst[base + x];
                 vblur_ssim_elem_canon(
@@ -4221,7 +4148,6 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
                     mu2,
                     ssq,
                     s12,
-                    act,
                     s,
                     d,
                     x,
@@ -4621,7 +4547,6 @@ fn fused_vblur_edge_canon<P: crate::featcanon::Pool>(
         m2: h_mu2,
         sq: &[],
         s12: &[],
-        act: &[],
         width,
         height,
         r,
@@ -4634,7 +4559,7 @@ fn fused_vblur_edge_canon<P: crate::featcanon::Pool>(
             let base = y * width;
             let mut row = EdgeRowPools::<P>::zero();
             for x in 0..width {
-                let (mu1, mu2, _, _, _) = win.at32(x, y, &planes);
+                let (mu1, mu2, _, _) = win.at32(x, y, &planes);
                 let s = src[base + x];
                 let d = dst[base + x];
                 vblur_edge_elem_canon(
@@ -4686,7 +4611,6 @@ fn fused_vblur_edge_canon64_vec(
         m2: h_mu2,
         sq: &[],
         s12: &[],
-        act: &[],
         width,
         height,
         r,
@@ -4714,7 +4638,7 @@ fn fused_vblur_edge_canon64_vec(
         if y >= inner_start && y < inner_end {
             let base = y * width;
             let mut row = EdgeRowPools::<LanesF64>::zero();
-            let [wm1, wm2, _, _, _] = win.f64_states().expect("F64Recurrence");
+            let [wm1, wm2, _, _] = win.f64_states().expect("F64Recurrence");
             let wm1 = &wm1[..full * 8];
             let wm2 = &wm2[..full * 8];
             let srow = &src[base..base + full * 8];
@@ -4762,7 +4686,7 @@ fn fused_vblur_edge_canon64_vec(
                 row.mse.add_chunk(&(pd * pd).to_array());
             }
             for x in full * 8..width {
-                let (mu1, mu2, _, _, _) = win.at32(x, y, &planes);
+                let (mu1, mu2, _, _) = win.at32(x, y, &planes);
                 let s = src[base + x];
                 let d = dst[base + x];
                 vblur_edge_elem_canon(
