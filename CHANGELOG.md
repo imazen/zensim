@@ -3,7 +3,7 @@
 ## [Unreleased]
 
 ### QUEUED BREAKING CHANGES
-- zensim 0.3.0: `compute_hdr` feeds the cube-root front end at 203 cd/m²; HDR scores change.
+- zensim 0.3.0: `compute_hdr` feeds the cube-root front end at 203 cd/m²; HDR scores change (`0b596aa0`).
 - zensim 0.3.0: research profiles `E` and `ECodec` are withdrawn; `codec_target()` returns `A` (`fdce4ac2`).
 <!-- Breaking changes that ship together in the next major (or minor for 0.x).
      Persist across patch releases. Only clear when the breaking release ships. -->
