@@ -232,7 +232,7 @@ pub struct ProfileParams {
     pub(crate) extrapolate_score: bool,
 }
 
-#[cfg(feature = "training")]
+#[cfg(any(feature = "training", test))]
 impl ProfileParams {
     /// Create custom params for weight training/exploration.
     ///

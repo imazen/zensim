@@ -7,7 +7,7 @@
      Persist across patch releases. Only clear when the breaking release ships. -->
 - zensim 0.3.0: `ZensimProfile::A` is the adopted general model (the earlier development `A` is
   `LegacyA`, string id `zensim-legacy-a`); `latest()` returns `A`. Published 0.2.7 had only the
-  two preview variants, which are unchanged. Default scores change.
+  two preview variants, which are unchanged. Default scores change (`38b16050`).
 - zensim 0.3.0: `ZensimError` and `profile::ProfileParams` become `#[non_exhaustive]`; `ZensimError` gains variants.
 - zensim 0.3.0: the 0.2.x linear profiles' scores shift by up to about 1.5e-2 (kernel fusion and summation order),
   and inputs smaller than 64 px are reflect-padded, which changes their scores.

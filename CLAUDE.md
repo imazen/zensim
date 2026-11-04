@@ -22,6 +22,13 @@ frozen models.
 
 New public API goes through a pull request so the signatures are reviewed.
 
+`split_parity_check` requires the `training` feature (declared in Cargo.toml).
+`ProfileParams::custom` is available to unit tests as well as training builds, so
+`cargo test --workspace --all-targets` builds without enabling training.
+Fresh checkouts also need the existing classification PNG fixtures: run the two
+commands in `just profile-fixtures` under the resource wrapper before testing.
+The PNGs are ignored build inputs; keep them out of commits.
+
 ## Release process
 
 Tag format: `zensim-v0.3.0` for the library, `zensim-regress-v0.4.0` for the regression crate.

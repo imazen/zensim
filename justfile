@@ -38,3 +38,8 @@ profile-doc-test:
 
 profile-score-test:
     cargo test -p zensim --all-features --test profiles
+
+# Populate the existing ignored classification PNG fixtures in a fresh checkout.
+profile-fixtures:
+    bash zensim/tests/fixtures/generate.sh
+    cargo test -p zensim --test generate_bitops -- --ignored
