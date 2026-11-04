@@ -2026,23 +2026,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "zenresize"
-version = "0.3.1"
-source = "git+https://github.com/imazen/zenresize?rev=e3975fb9d6d6b7baa96038a0eb8e27febb37c012#e3975fb9d6d6b7baa96038a0eb8e27febb37c012"
-dependencies = [
- "archmage",
- "imgref",
- "libm",
- "linear-srgb",
- "magetypes",
- "rgb",
- "safe_unaligned_simd",
- "whereat",
- "zenblend",
- "zenpixels",
-]
-
-[[package]]
 name = "zensim"
 version = "0.3.0"
 dependencies = [
@@ -2062,7 +2045,6 @@ dependencies = [
  "zenpixels",
  "zenpredict",
  "zenpredict-bake",
- "zenresize 0.3.1",
 ]
 
 [[package]]
@@ -2078,7 +2060,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "zenbench",
- "zenresize 0.2.1",
+ "zenresize",
  "zensim",
 ]
 

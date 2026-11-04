@@ -56,7 +56,6 @@ zenpixels = { version = ">=0.2.11, <0.4.0", default-features = false, features =
 zenpredict = { workspace = true }
 # Cooperative cancellation: `Zensim::with_stop`, `ZensimError::Cancelled`.
 enough = { workspace = true }
-zenresize = { git = "https://github.com/imazen/zenresize", rev = "e3975fb9d6d6b7baa96038a0eb8e27febb37c012", default-features = false, features = ["std"] }
 
 [dev-dependencies]
 zenbench = { workspace = true }
