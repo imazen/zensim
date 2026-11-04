@@ -93,9 +93,15 @@ and [reference source and commands](../benchmarks/hdr_cube_root_203_reference_20
 ## Parity with the research crate
 
 For public `A` (research `F` / `mixF3`), run the research `split_parity_golden` example with
-the adopted bake as its general model; it prints those rows under the first bake's label (`E`),
-so relabel them `A` before the diff. Preview names stay unchanged; exclude the research development `A` rows.
-Compare only profiles retained by the public crate, using each matching bake separately.
+`--public-a` and the adopted bake as its general model. This selects A's 156-weight
+linear-helper projection and the anchored cube-root HDR front end. Set
+`ZENSIM_POW_FORM=libm` to match the public crate's legacy score mapping. Use
+`ZENSIM_FORMULA_REV=7` for A/HDR rows and a separate revision-1 run for preview and
+linear-configuration rows. The first bake's reference label is `E`; relabel it `A`.
+Preview names stay unchanged; exclude research-only profiles, the `bake_scorer`
+surface and the removed extended/masked/IW configuration knobs. The research
+`a-parallel-gate-parity` recipe checks complete matching row sets and requires an
+empty diff. `just profile-split-parity` runs this crate's half of the check.
 
 The crate was cut from imazen/zensimx on 2026-10-28. `examples/split_parity_check.rs` prints the
 score, raw distance and a hash of the features and diffmaps for 231 generated image pairs,

@@ -39,6 +39,9 @@ profile-doc-test:
 profile-score-test:
     cargo test -p zensim --all-features --test profiles
 
+profile-split-parity:
+    cargo run --release -p zensim --features training,classification --example split_parity_check
+
 # Populate the existing ignored classification PNG fixtures in a fresh checkout.
 profile-fixtures:
     bash zensim/tests/fixtures/generate.sh
