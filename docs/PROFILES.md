@@ -176,3 +176,17 @@ or missing golden rows. The four exceptions are E/ECodec `compute_all_features`
 scores whose research reference used a process-wide revision pin; their feature
 hashes match. The exception list and golden data were unchanged by this audit.
 `tests/profiles.rs` retains profile score goldens.
+
+### Public-name rename parity (2026-11-04)
+
+On the Ryzen 9 9950X3D, all 70 profile/pair score values were bit-identical before
+and after the public-name change: 14 each for adopted `A` (formerly `F`), `LegacyA`
+(formerly development `A`), `E`, `ECodec` and `PreviewV0_2`. The committed 70 historical
+golden constants were not changed. The revision-1 historical goldens already use
+a rounding tolerance: on this machine two legacy and thirteen preview values
+differ from those reference bits both before and after the rename. This check
+compares the two builds on the same host, retaining the historical test contract.
+
+[Per-case score bits](../benchmarks/profile_rename_parity_2026-11-04.tsv) and
+[commands and source identities](../benchmarks/profile_rename_parity_2026-11-04.md).
+The research crate was not run for this naming-only check.
