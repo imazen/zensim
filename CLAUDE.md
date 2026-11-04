@@ -28,6 +28,10 @@ New public API goes through a pull request so the signatures are reviewed.
 Fresh checkouts also need the existing classification PNG fixtures: run the two
 commands in `just profile-fixtures` under the resource wrapper before testing.
 The PNGs are ignored build inputs; keep them out of commits.
+On asymmetric Linux hosts, `just profile-test-pinned CPU_IDS` adds a verified
+cpuset in a job-specific system scope, copying the finite run-heavy memory
+cap and running Cargo as the original user. Ordinary taskset affinity does not
+satisfy zenbench process admission.
 
 ## Release process
 

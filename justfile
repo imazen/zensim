@@ -43,3 +43,7 @@ profile-score-test:
 profile-fixtures:
     bash zensim/tests/fixtures/generate.sh
     cargo test -p zensim --test generate_bitops -- --ignored
+
+# Requires an outer run-heavy systemd scope; CPU_IDS must name one CPU class.
+profile-test-pinned cpu_ids:
+    bash scripts/profile_test_cpuset.sh "{{cpu_ids}}" cargo test --workspace --all-targets
