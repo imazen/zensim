@@ -5,7 +5,7 @@
 ### QUEUED BREAKING CHANGES
 <!-- Breaking changes that ship together in the next major (or minor for 0.x).
      Persist across patch releases. Only clear when the breaking release ships. -->
-- zensim 0.3.0: `ZensimProfile::latest()` returns the new `E` profile, so default scores change.
+- zensim 0.3.0: `ZensimProfile::latest()` returns the new `F` profile, so default scores change.
 - zensim 0.3.0: `ZensimError` and `profile::ProfileParams` become `#[non_exhaustive]`; `ZensimError` gains variants.
 - zensim 0.3.0: the 0.2.x linear profiles' scores shift by up to about 1.5e-2 (kernel fusion and summation order),
   and inputs smaller than 64 px are reflect-padded, which changes their scores.
@@ -21,7 +21,10 @@
 ### Unreleased (0.3.0)
 
 #### Added
-- `ZensimProfile::E` (`zensim-e`, returned by `latest()`): general-purpose monotone MLP over revision-7 features.
+- `ZensimProfile::F` (`zensim-f`, returned by `latest()`): the general-purpose model adopted on 2026-11-04, `E`'s
+  architecture with full-resolution chroma inputs, trained with the human-rating legs narrowed to TID2013 and MDID
+  and continued on the JPEG AIC-2026 public training set with rehearsal (`docs/PROFILES.md`).
+- `ZensimProfile::E` (`zensim-e`): general-purpose monotone MLP over revision-7 features, the default before `F`.
 - `ZensimProfile::ECodec` (`zensim-e-codec`) and `ZensimProfile::codec_target()`: the model specialised for codec output.
 - `ZensimProfile::A` (`zensim-a`): the legacy MLP profile of the 0.3.0 development line.
 - `Zensim::with_max_pixels` / `max_pixels` and `ZensimError::ImageTooLarge`: a pixel-count cap for untrusted input.

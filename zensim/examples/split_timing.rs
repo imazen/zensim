@@ -19,6 +19,7 @@ fn main() {
     let profile = match a[0].as_str() {
         "E" => ZensimProfile::E,
         "ECodec" => ZensimProfile::ECodec,
+        "F" => ZensimProfile::F,
         "A" => ZensimProfile::A,
         "PreviewV0_2" => ZensimProfile::PreviewV0_2,
         other => panic!("unknown profile {other}"),

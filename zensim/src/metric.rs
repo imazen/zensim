@@ -3514,6 +3514,7 @@ mod tests {
             ZensimProfile::A,
             ZensimProfile::E,
             ZensimProfile::ECodec,
+            ZensimProfile::F,
             ZensimProfile::LegacyLinearV0_2,
         ] {
             let params = profile.params();

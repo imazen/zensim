@@ -4,7 +4,9 @@
 //! The golden scores were produced by the research crate this one was cut from
 //! (imazen/zensimx, `split_parity_golden`, 2026-10-28) on the pairs in
 //! `examples/split_parity/pairs.rs`; the slim crate reproduced all 6,930 values of
-//! that run bit for bit before these were copied here.
+//! that run bit for bit before these were copied here. The `F` values come from
+//! the same example run on 2026-11-04 with the adopted bake as its general model
+//! (its stripped copy scored identically on every surface).
 //!
 //! Run the tier test alone (`--test-threads=1`) when debugging: it disables SIMD
 //! tiers process-wide while it runs.
@@ -34,6 +36,7 @@ fn by_name(name: &str) -> ZensimProfile {
     match name {
         "E" => ZensimProfile::E,
         "ECodec" => ZensimProfile::ECodec,
+        "F" => ZensimProfile::F,
         "A" => ZensimProfile::A,
         "PreviewV0_2" => ZensimProfile::PreviewV0_2,
         _ => unreachable!(),
@@ -42,6 +45,20 @@ fn by_name(name: &str) -> ZensimProfile {
 
 /// (profile, pair, score bits) from the research reference run.
 const GOLDEN: &[(&str, &str, u64)] = &[
+    ("F", "64x64-photo-noise", 0x405267c1ff28136f),
+    ("F", "64x64-edges-blur", 0x40335ff4af4a7e65),
+    ("F", "65x63-text-blocks", 0xc0346f35499e665f),
+    ("F", "128x96-photo-posterize", 0x40526de1012462ad),
+    ("F", "200x150-edges-shift", 0x4056b61031aec2ec),
+    ("F", "200x150-photo-blur", 0x404c3f1d5a752927),
+    ("F", "256x256-text-noise", 0x40538a69e41bd571),
+    ("F", "256x256-photo-pixels", 0x4058d5c1fb0d1fb8),
+    ("F", "333x251-edges-blocks", 0xc04822574b9489e7),
+    ("F", "333x251-photo-identity", 0x4059000000000000),
+    ("F", "16x16-photo-noise", 0x405472ba34b9164c),
+    ("F", "31x17-text-shift", 0x40562d2f88e71244),
+    ("F", "512x384-photo-blocks", 0x404dcd8ed6bee9bc),
+    ("F", "1024x768-photo-noise", 0x404a54e9256bcb0f),
     ("E", "64x64-photo-noise", 0x4052aad69a938ab2),
     ("ECodec", "64x64-photo-noise", 0x40523aeeb9e7c6a8),
     ("A", "64x64-photo-noise", 0x404df8e8f9af74e6),
@@ -109,7 +126,8 @@ fn golden_scores_match_the_research_reference() {
     for &(name, id, bits) in GOLDEN {
         let want = f64::from_bits(bits);
         let got = score(by_name(name), &pair(id));
-        let exact = cfg!(target_arch = "x86_64") && (name == "E" || name == "ECodec");
+        let exact =
+            cfg!(target_arch = "x86_64") && (name == "E" || name == "ECodec" || name == "F");
         let ok = if exact {
             got.to_bits() == bits
         } else {
@@ -129,7 +147,7 @@ fn golden_scores_match_the_research_reference() {
 
 #[test]
 fn identical_images_score_100() {
-    for name in ["E", "ECodec", "A", "PreviewV0_2"] {
+    for name in ["F", "E", "ECodec", "A", "PreviewV0_2"] {
         for id in [
             "8x8-photo-identity",
             "65x63-edges-identity",
@@ -154,7 +172,7 @@ fn more_noise_never_scores_higher() {
             (state % 3) as i32 - 1
         })
         .collect();
-    for profile in [ZensimProfile::E, ZensimProfile::ECodec] {
+    for profile in [ZensimProfile::F, ZensimProfile::E, ZensimProfile::ECodec] {
         let mut last = f64::INFINITY;
         for amp in [0, 1, 2, 4, 8, 16, 32] {
             let dst: Vec<u8> = base
@@ -183,7 +201,7 @@ fn more_noise_never_scores_higher() {
 #[test]
 fn rev7_scores_are_identical_across_simd_tiers() {
     let p = pair("333x251-photo-blur");
-    for profile in [ZensimProfile::E, ZensimProfile::ECodec] {
+    for profile in [ZensimProfile::F, ZensimProfile::E, ZensimProfile::ECodec] {
         let mut scores = Vec::new();
         let report = for_each_token_permutation(CompileTimePolicy::Warn, |perm| {
             scores.push((perm.label.clone(), score(profile, &p)));
@@ -205,7 +223,7 @@ fn rev7_scores_are_identical_across_thread_settings() {
     let p = pair("1024x768-edges-noise");
     let src = RgbSlice::new(bytemuck::cast_slice(&p.src), p.width, p.height);
     let dst = RgbSlice::new(bytemuck::cast_slice(&p.dst), p.width, p.height);
-    for profile in [ZensimProfile::E, ZensimProfile::ECodec] {
+    for profile in [ZensimProfile::F, ZensimProfile::E, ZensimProfile::ECodec] {
         let parallel = Zensim::new(profile)
             .with_parallel(true)
             .compute(&src, &dst)
@@ -237,6 +255,7 @@ fn all_features_agree_with_compute_on_every_slot_compute_fills() {
         let src = RgbSlice::new(bytemuck::cast_slice(&p.src), p.width, p.height);
         let dst = RgbSlice::new(bytemuck::cast_slice(&p.dst), p.width, p.height);
         for profile in [
+            ZensimProfile::F,
             ZensimProfile::E,
             ZensimProfile::ECodec,
             ZensimProfile::A,
@@ -264,8 +283,9 @@ fn all_features_agree_with_compute_on_every_slot_compute_fills() {
 
 #[test]
 fn latest_and_codec_target_select_the_rev7_profiles() {
-    assert_eq!(ZensimProfile::latest(), ZensimProfile::E);
+    assert_eq!(ZensimProfile::latest(), ZensimProfile::F);
     assert_eq!(ZensimProfile::codec_target(), ZensimProfile::ECodec);
+    assert_eq!(ZensimProfile::F.name(), "zensim-f");
     assert_eq!(ZensimProfile::E.name(), "zensim-e");
     assert_eq!(ZensimProfile::ECodec.name(), "zensim-e-codec");
 }

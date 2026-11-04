@@ -8,6 +8,7 @@ the record for the revision-7 models is
 
 | Profile | Bake | SHA-256 | Features |
 |---|---|---|---|
+| `F` | `weights/rev7_mix_h128_2026-11-03.bin` | `d5e2a56db35c32620d9f9d9c19ba3bc78bd8fea2b8cd933cde8447428d85e62a` | 492 revision-7 damage features (with full-resolution chroma) + 492 fragility products |
 | `E` | `weights/rev7_general_h128_2026-10-27.bin` | `e460a214c1e0c4f48bc7e3bb4705df548f9f172807cc63f39ba17cb1d94e05a0` | 410 revision-7 damage features + 410 fragility products |
 | `ECodec` | `weights/rev7_codec_h128_2026-10-27.bin` | `f7ecd60299482210fe33586e8d4674fe9ba163f17f2dbaf54c6e99d5ef44af63` | the same 820 inputs |
 | `A` | `weights/v47_strict_qat_native_byid_2026-09-06.bin` | `de0ddb3dc78b8b0a4fc99645f949acb73e7e08bec9ed4d86793605d882e9176a` | 372 revision-1 features |
@@ -66,6 +67,49 @@ block (`zentrain.repro`) and the sampler statistics (`zentrain.sample_coverage`)
 feature declaration, formula revision, derived-input declaration and calibration spline are
 unchanged; both versions score identically on every surface of the split parity run.
 
+## The adopted mix (`F`)
+
+**What it is.** `F` (research name `mixF3`, "the TID2013 + MDID mix on F3's recipe") shares `E`'s
+architecture and adds the full-resolution chroma signals of the round-3 chroma root to its inputs:
+492 damage features and 492 fragility products, with the derived-input declaration `fx2` embedded in
+the bake. Its base fit keeps the SafeSyn and CID22 SSIMULACRA2 legs, the coverage pool, BAPPS and the
+chroma-teacher leg of the round-3 recipe and narrows the human-rating legs to TID2013's training
+split and MDID, which share the recipe's MOS weight equally; PIPAL, LIVE-MD, CID:IQ, CID:OA,
+IRCCyN/IVC and Colourlab are not trained on. It was then continued for 60 epochs on the JPEG AIC-2026
+public training set (weighted ×256, 48 percent of the continuation's draws) with the base legs
+rehearsed; the checkpoint after epoch 59 ships (seed 0 of three; the other seeds agree on every
+evaluation within their intervals). The owner adopted it on 2026-11-04 after the E36 candidate
+comparison (zensimx `benchmarks/e36_subset_test_2026-11-01.md`). The complete recipe, with every
+command, trainer build and hash, is `recipes/MixF3-s0.json` and `docs/RECIPE_MIXF3.md` in the private
+training repository, where it replays in the release sandbox.
+
+**Evaluation.** The same frozen held-out read as the table above, `E` repeated for comparison. MDID
+contributed different references to `F`'s training; the other eight collections were not trained
+on.
+
+| Dataset | `F` | `E` | SSIMULACRA2 | Butteraugli (3-norm) |
+|---|---:|---:|---:|---:|
+| CID:IQ | 0.868 | 0.865 | 0.757 | 0.592 |
+| CID:OA | 0.911 | 0.889 | 0.847 | 0.577 |
+| Colourlab | 0.735 | 0.711 | 0.604 | 0.373 |
+| IQA-ODI | 0.867 | 0.865 | 0.854 | 0.806 |
+| IRCCyN/IVC | 0.919 | 0.940 | 0.949 | 0.912 |
+| LIVE-MD | 0.902 | 0.894 | 0.913 | 0.827 |
+| MDID | 0.927 | 0.870 | 0.787 | 0.572 |
+| NITS-IQA | 0.734 | 0.706 | 0.777 | 0.706 |
+| VCL@FER | 0.950 | 0.930 | 0.945 | 0.877 |
+
+Two-alternative agreement with human choices: FG-IQA `F` 0.757 (`E` 0.759), PieAPP 0.583 (0.585).
+On CLIC 2021's validation questions (learned-codec pairs, read once as a confirmation) `F` agrees
+with the raters on 0.644, SSIMULACRA2 on 0.626 and butteraugli's 3-norm on 0.606. On UPIQ's HDR pairs
+through the PU21 front end `F` reaches a pooled rank correlation of 0.78 against `E`'s 0.79. One
+case of the label-free map-steering gate (an 8-pixel map-rank case on a text screenshot) scores 0.69
+against its 0.70 bar; the JPEG XL loop shows no byte cost from it.
+
+**Bake preparation.** The shipped file is the evaluated seed-0 artifact (packed bake SHA-256
+`185f43f7…`) with the two provenance entries removed, as for `E`; SHA-256 `d5e2a56d…`. The stripped
+copy scored identically on all 1,386 surface and pair rows of the split parity run of 2026-11-04.
+
 ## HDR input
 
 `Zensim::compute_hdr(source, distorted, encoding)` scores HDR pairs. `HdrEncoding::Linear` takes
@@ -106,6 +150,9 @@ These observations do not establish parity for every route. The broader
 and map measurements, including inconclusive comparisons and RSS differences.
 
 ## Parity with the research crate
+
+For `F`, run the research example with the adopted bake as its general model; it prints those rows
+under the first bake's label (`E`), so relabel them `F` before the diff.
 
 The crate was cut from imazen/zensimx on 2026-10-28. `examples/split_parity_check.rs` prints the
 score, raw distance and a hash of the features and diffmaps for 231 generated image pairs,

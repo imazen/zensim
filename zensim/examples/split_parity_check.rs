@@ -43,6 +43,7 @@ fn main() {
         ("A", ZensimProfile::A),
         ("E", ZensimProfile::E),
         ("ECodec", ZensimProfile::ECodec),
+        ("F", ZensimProfile::F),
     ];
     let hex = |x: f64| format!("{:016x}", x.to_bits());
     let line = |surface: &str, profile: &str, pair: &str, value: String| {

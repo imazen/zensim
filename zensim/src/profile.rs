@@ -50,6 +50,20 @@ pub enum ZensimProfile {
     /// than `E` and is less reliable on other distortion types (noise, colour
     /// shifts, contrast changes), so use it where the input is codec output.
     ECodec,
+    /// General-purpose profile `F` (`zensim-f`), returned by [`Self::latest`]
+    /// since 0.3.0.
+    ///
+    /// [`Self::E`]'s architecture with the full-resolution chroma signals of the
+    /// round-3 chroma root added to its inputs: a monotone MLP over 492
+    /// revision-7 damage features and 492 fragility products, every damage
+    /// input entering with non-negative weight. Trained on `E`'s synthetic codec
+    /// ladders, coverage pairs and pairwise legs with the human-rating legs
+    /// narrowed to TID2013 and MDID, then continued on the JPEG AIC-2026 public
+    /// training set with the base legs rehearsed. It agrees with human ratings
+    /// better than `E` on most held-out collections and ranks compression
+    /// artifacts about as well; `docs/PROFILES.md` has the numbers and the
+    /// recipe reference.
+    F,
     /// **INTERNAL — legacy 228-weight linear scoring, no MLP head.**
     /// Tags results from the training entry points `compute_zensim_with_config`
     /// and `compute_zensim_with_ref_and_config`, which score via a plain
@@ -63,9 +77,9 @@ pub enum ZensimProfile {
 }
 
 impl ZensimProfile {
-    /// Latest recommended general-purpose profile: [`Self::E`].
+    /// Latest recommended general-purpose profile: [`Self::F`].
     pub fn latest() -> Self {
-        Self::E
+        Self::F
     }
 
     /// The profile specialised for codec artifacts: [`Self::ECodec`]. Encoders
@@ -83,6 +97,7 @@ impl ZensimProfile {
             Self::A => "zensim-a",
             Self::E => "zensim-e",
             Self::ECodec => "zensim-e-codec",
+            Self::F => "zensim-f",
             #[cfg(any(feature = "training", test))]
             Self::LegacyLinearV0_2 => "zensim-legacy-linear-v0.2",
         }
@@ -96,6 +111,7 @@ impl ZensimProfile {
             Self::A => &PROFILE_A,
             Self::E => &PROFILE_E,
             Self::ECodec => &PROFILE_E_CODEC,
+            Self::F => &PROFILE_F,
             #[cfg(any(feature = "training", test))]
             Self::LegacyLinearV0_2 => &PROFILE_LEGACY_LINEAR_V0_2,
         }
@@ -363,6 +379,14 @@ pub(crate) fn mlp_bake_e_codec() -> &'static [u8] {
     include_bytes!("../weights/rev7_codec_h128_2026-10-27.bin")
 }
 
+/// `ZensimProfile::F` bake: the adopted general model (H128 monotone MLP,
+/// 984 inputs, derived-input declaration `fx2`), prepared the same way as
+/// [`mlp_bake_e_general`]. The mapping to the research identity is in
+/// `docs/PROFILES.md`.
+pub(crate) fn mlp_bake_f_general() -> &'static [u8] {
+    include_bytes!("../weights/rev7_mix_h128_2026-11-03.bin")
+}
+
 /// Shared runtime shape of the revision-7 profiles. Feature IDs, formula revision,
 /// derived inputs and output calibration all come from the bake's metadata.
 const fn rev7_params(bake: fn() -> &'static [u8]) -> ProfileParams {
@@ -383,6 +407,7 @@ const fn rev7_params(bake: fn() -> &'static [u8]) -> ProfileParams {
 
 static PROFILE_E: ProfileParams = rev7_params(mlp_bake_e_general);
 static PROFILE_E_CODEC: ProfileParams = rev7_params(mlp_bake_e_codec);
+static PROFILE_F: ProfileParams = rev7_params(mlp_bake_f_general);
 
 // --- Weight arrays ---
 
