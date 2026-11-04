@@ -476,6 +476,16 @@ pub enum HdrEncoding {
     },
 }
 
+/// The internal HDR opsin front end. Public HDR scoring fixes the white at 203 cd/m².
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum HdrFrontEnd {
+    /// Unclamped SDR cube-root opsin, with `unit_nits` mapped to linear 1.0.
+    CubeRoot { unit_nits: f32 },
+}
+
+/// BT.2408 reference white, also used by the Ultra HDR SDR-base convention.
+pub(crate) const HDR_SDR_WHITE_NITS: f32 = 203.0;
+
 /// Which FORMULA REVISION an extraction computes — re-exported so
 /// [`V2NewFeatureToggles::formula_revision`] is nameable by the callers that
 /// set it.

@@ -2872,9 +2872,8 @@ pub(crate) fn compute_folded_v1_372_streaming_stoppable(
 /// Declared-HDR form of [`compute_folded_v1_372_streaming_stoppable`]
 /// (HDR_PLAN chunk 2): pixel values map to absolute display light per
 /// `encoding` (PQ / HLG display model, or already-linear cd/m²), then
-/// the UPIQ-validated PU-XYB front-end (opsin → PU21 `banding_glare`
-/// per channel, normalized so 100 cd/m² → 1.0 — SDR-range content
-/// lands on the scale the downstream formulas were tuned on) feeds
+/// the anchored cube-root front end (linear nits / reference white,
+/// without an SDR display clamp) feeds
 /// the UNCHANGED streaming fold walk. Sources: `LinearF32Rgba` (f32)
 /// or `Srgb16Rgba` (code values; `Pq`/`Hlg` only), `AlphaMode::Opaque`,
 /// declared primaries converted to the opsin matrix's linear-sRGB basis
@@ -2882,19 +2881,19 @@ pub(crate) fn compute_folded_v1_372_streaming_stoppable(
 ///
 /// The serving plan is resolved by the caller exactly like the SDR
 /// entry's `plan` argument (`FoldWalkExtras::compute`).
-#[allow(dead_code)] // only reachable via the crate-private `Zensim::compute_hdr`
 pub(crate) fn compute_folded720_hdr_streaming_extras(
     source: &impl ImageSource,
     distorted: &impl ImageSource,
     encoding: HdrEncoding,
+    front_end: HdrFrontEnd,
     max_pixels: Option<usize>,
     parallel: bool,
     toggles: V2NewFeatureToggles,
     scratch: &mut V2Scratch,
     extras: FoldWalkExtras<'_>,
 ) -> Result<ZensimV2Result, ZensimError> {
-    validate_hdr_pair(source, distorted, encoding, max_pixels)?;
-    let front_end = crate::feature_v2_stream::FrontEnd::Hdr(encoding);
+    validate_hdr_pair(source, distorted, encoding, front_end, max_pixels)?;
+    let front_end = crate::feature_v2_stream::FrontEnd::Hdr(encoding, front_end);
     if source.width() < crate::metric::MIN_PYRAMID_DIM
         || source.height() < crate::metric::MIN_PYRAMID_DIM
     {
@@ -2924,15 +2923,19 @@ pub(crate) fn compute_folded720_hdr_streaming_extras(
 /// preserving negative and above-one components (no SDR display clamp).
 /// Everything else: `ZensimError::UnsupportedPixelFormat` (the PR maps it
 /// to the dedicated HDR variant).
-#[allow(dead_code)] // only reachable via the crate-private `Zensim::compute_hdr`
 pub(crate) fn validate_hdr_pair(
     source: &impl ImageSource,
     distorted: &impl ImageSource,
     encoding: HdrEncoding,
+    front_end: HdrFrontEnd,
     max_pixels: Option<usize>,
 ) -> Result<(), ZensimError> {
     crate::metric::validate_pair_dims(source, distorted)?;
     crate::metric::check_within_max_pixels(source.width(), source.height(), max_pixels)?;
+    let HdrFrontEnd::CubeRoot { unit_nits } = front_end;
+    if !(unit_nits.is_finite() && unit_nits > 0.0) {
+        return Err(ZensimError::UnsupportedPixelFormat);
+    }
     let valid_display = match encoding {
         HdrEncoding::Linear => true,
         HdrEncoding::Pq { peak_nits } => peak_nits.is_finite() && peak_nits > 0.0,
@@ -3937,3 +3940,47 @@ thread_local! {
 include!("feature_v2_tests.rs");
 
 include!("feature_v2_dense.rs");
+
+#[cfg(test)]
+mod hdr_admission_tests {
+    use super::*;
+
+    #[test]
+    fn cube_root_white_must_be_finite_and_positive() {
+        use crate::{AlphaMode, PixelFormat, StridedBytes};
+        let bytes = [0u8; 16];
+        let image = StridedBytes::try_with_alpha_mode(
+            &bytes,
+            1,
+            1,
+            16,
+            PixelFormat::LinearF32Rgba,
+            AlphaMode::Opaque,
+        )
+        .unwrap();
+        for unit_nits in [0.0, -1.0, f32::NAN, f32::INFINITY] {
+            assert!(matches!(
+                validate_hdr_pair(
+                    &image,
+                    &image,
+                    HdrEncoding::Linear,
+                    HdrFrontEnd::CubeRoot { unit_nits },
+                    None
+                ),
+                Err(ZensimError::UnsupportedPixelFormat)
+            ));
+        }
+        assert!(
+            validate_hdr_pair(
+                &image,
+                &image,
+                HdrEncoding::Linear,
+                HdrFrontEnd::CubeRoot {
+                    unit_nits: HDR_SDR_WHITE_NITS
+                },
+                None
+            )
+            .is_ok()
+        );
+    }
+}

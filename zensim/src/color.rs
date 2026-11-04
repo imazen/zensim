@@ -304,7 +304,7 @@ fn srgb_xyb_canon_body(
 /// Canonical linear-f32 → XYB driver; inputs are clamped to the display gamut.
 /// `mode` as for [`srgb_xyb_canon`]. REV4VEC as for [`srgb_xyb_canon`].
 #[allow(clippy::manual_clamp)]
-pub(crate) fn linear_xyb_canon(
+pub(crate) fn linear_xyb_canon<const CLAMP: bool>(
     pixels: &[[f32; 3]],
     x_out: &mut [f32],
     y_out: &mut [f32],
@@ -314,7 +314,7 @@ pub(crate) fn linear_xyb_canon(
 ) {
     let _ = mode;
     incant!(
-        linear_xyb_canon_vec(pixels, x_out, y_out, b_out, cbrt7),
+        linear_xyb_canon_vec::<CLAMP>(pixels, x_out, y_out, b_out, cbrt7),
         [v4x, v4, v3, neon, wasm128, scalar]
     );
 }
@@ -324,20 +324,22 @@ pub(crate) fn linear_xyb_canon(
 /// the scalar/wasm128 stubs (REV4VEC).
 #[inline(always)]
 #[allow(clippy::manual_clamp)]
-fn linear_px_canon(ab: f32, p: [f32; 3], cbrt7: bool) -> (f32, f32, f32) {
-    let (r, g, b) = {
+fn linear_px_canon<const CLAMP: bool>(ab: f32, p: [f32; 3], cbrt7: bool) -> (f32, f32, f32) {
+    let (r, g, b) = if CLAMP {
         (
             p[0].max(0.0).min(1.0),
             p[1].max(0.0).min(1.0),
             p[2].max(0.0).min(1.0),
         )
+    } else {
+        (p[0], p[1], p[2])
     };
     opsin_px_canon(ab, r, g, b, cbrt7)
 }
 
 /// The per-element scalar canonical linear→XYB body — as
 /// [`srgb_xyb_canon_body`], but through [`linear_px_canon`].
-fn linear_xyb_canon_body(
+fn linear_xyb_canon_body<const CLAMP: bool>(
     pixels: &[[f32; 3]],
     x_out: &mut [f32],
     y_out: &mut [f32],
@@ -346,7 +348,7 @@ fn linear_xyb_canon_body(
 ) {
     let ab = absorbance_bias_f32();
     for (i, &p) in pixels.iter().enumerate() {
-        let (x, y, bb) = linear_px_canon(ab, p, cbrt7);
+        let (x, y, bb) = linear_px_canon::<CLAMP>(ab, p, cbrt7);
         x_out[i] = x;
         y_out[i] = y;
         b_out[i] = bb;
@@ -394,20 +396,9 @@ struct CanonChunk<T: F32x16Convert> {
     x_bias: GenericF32x16<T>,
     y_bias: GenericF32x16<T>,
     b_bias: GenericF32x16<T>,
-    // PU21 canon (`pu21_encode_canon` + `/ PU_WHITE` + `PU_X_SCALE`).
-    l_min: GenericF32x16<T>,
-    l_max: GenericF32x16<T>,
-    p: [GenericF32x16<T>; 7],
-    pu_white: GenericF32x16<T>,
-    pu_x_scale: GenericF32x16<T>,
 }
 
 impl<T: F32x16Convert> CanonChunk<T> {
-    #[inline(always)]
-    fn new(token: T) -> Self {
-        Self::new_at(token, false)
-    }
-
     /// `cbrt7` selects revision 7's cube root in [`Self::opsin_positive`].
     #[inline(always)]
     fn new_at(token: T, cbrt7: bool) -> Self {
@@ -429,19 +420,6 @@ impl<T: F32x16Convert> CanonChunk<T> {
             x_bias: splat(0.42),
             y_bias: splat(0.01),
             b_bias: splat(0.55),
-            l_min: splat(crate::pu21::PU21_L_MIN),
-            l_max: splat(crate::pu21::PU21_L_MAX),
-            p: [
-                splat(crate::pu21::P[0]),
-                splat(crate::pu21::P[1]),
-                splat(crate::pu21::P[2]),
-                splat(crate::pu21::P[3]),
-                splat(crate::pu21::P[4]),
-                splat(crate::pu21::P[5]),
-                splat(crate::pu21::P[6]),
-            ],
-            pu_white: splat(PU_WHITE),
-            pu_x_scale: splat(PU_X_SCALE),
         }
     }
 
@@ -550,42 +528,6 @@ impl<T: F32x16Convert> CanonChunk<T> {
             x.mul_add(self.fourteen, self.x_bias),
             y + self.y_bias,
             (t2 - y) + self.b_bias,
-        )
-    }
-
-    /// [`crate::pu21::pu21_encode_canon`] lane-parallel: identical clamp
-    /// and midp formula chain through the generated `f32x16`
-    /// transcendentals, which are the same op sequence as the `det_math`
-    /// scalar bodies on a fused tier.
-    #[inline(always)]
-    #[allow(clippy::manual_clamp)] // must match the scalar .max().min() lanes
-    fn pu_encode(&self, v: GenericF32x16<T>) -> GenericF32x16<T> {
-        let [p0, p1, p2, p3, p4, p5, p6] = self.p;
-        let y = v.max(self.l_min).min(self.l_max);
-        let yp = (p3 * y.log2_midp()).exp2_midp();
-        let inner = (p0 + p1 * yp) / (self.one + p2 * yp);
-        (p6 * ((p4 * inner.log2_midp()).exp2_midp() - p5)).max(self.zero)
-    }
-
-    /// [`pu_xyb_pixel_canon`] lane-parallel: the mix, canonical PU21 per
-    /// channel divided by `PU_WHITE`, and the positive-XYB shift.
-    #[inline(always)]
-    fn pu_xyb(
-        &self,
-        r: GenericF32x16<T>,
-        g: GenericF32x16<T>,
-        b: GenericF32x16<T>,
-    ) -> (GenericF32x16<T>, GenericF32x16<T>, GenericF32x16<T>) {
-        let [m0, m1, m2] = self.mixed(r, g, b);
-        let c0 = self.pu_encode(m0) / self.pu_white;
-        let c1 = self.pu_encode(m1) / self.pu_white;
-        let c2 = self.pu_encode(m2) / self.pu_white;
-        let x = self.half * (c0 - c1);
-        let y = self.half * (c0 + c1);
-        (
-            x.mul_add(self.pu_x_scale, self.x_bias),
-            y + self.y_bias,
-            (c2 - y) + self.b_bias,
         )
     }
 }
@@ -912,7 +854,7 @@ fn srgb_xyb_canon_vec_neon(
 /// [`linear_xyb_canon`] lane-parallel — as [`srgb_xyb_canon_vec`], with
 /// [`CanonChunk::linear_lanes`] for the input side.
 #[magetypes(define(f32x16), v4x, v4, v3, -scalar)]
-fn linear_xyb_canon_vec(
+fn linear_xyb_canon_vec<const CLAMP: bool>(
     token: Token,
     pixels: &[[f32; 3]],
     x_out: &mut [f32],
@@ -928,7 +870,7 @@ fn linear_xyb_canon_vec(
         let px: &[[f32; 3]; 16] = pixels[base..base + 16]
             .try_into()
             .expect("16 pixels per chunk");
-        let (r, g, b) = k.linear_lanes::<true>(px);
+        let (r, g, b) = k.linear_lanes::<CLAMP>(px);
         let (x, y, bb) = k.opsin_positive(r, g, b);
         x_out[base..base + 16].copy_from_slice(&x.to_array());
         y_out[base..base + 16].copy_from_slice(&y.to_array());
@@ -936,14 +878,14 @@ fn linear_xyb_canon_vec(
     }
     let ab = absorbance_bias_f32();
     for i in (chunks * 16)..n {
-        let (x, y, bb) = linear_px_canon(ab, pixels[i], cbrt7);
+        let (x, y, bb) = linear_px_canon::<CLAMP>(ab, pixels[i], cbrt7);
         x_out[i] = x;
         y_out[i] = y;
         b_out[i] = bb;
     }
 }
 
-fn linear_xyb_canon_vec_scalar(
+fn linear_xyb_canon_vec_scalar<const CLAMP: bool>(
     _token: archmage::ScalarToken,
     pixels: &[[f32; 3]],
     x_out: &mut [f32],
@@ -951,11 +893,11 @@ fn linear_xyb_canon_vec_scalar(
     b_out: &mut [f32],
     cbrt7: bool,
 ) {
-    linear_xyb_canon_body(pixels, x_out, y_out, b_out, cbrt7);
+    linear_xyb_canon_body::<CLAMP>(pixels, x_out, y_out, b_out, cbrt7);
 }
 
 #[cfg(target_arch = "wasm32")]
-fn linear_xyb_canon_vec_wasm128(
+fn linear_xyb_canon_vec_wasm128<const CLAMP: bool>(
     _token: archmage::Wasm128Token,
     pixels: &[[f32; 3]],
     x_out: &mut [f32],
@@ -963,13 +905,13 @@ fn linear_xyb_canon_vec_wasm128(
     b_out: &mut [f32],
     cbrt7: bool,
 ) {
-    linear_xyb_canon_body(pixels, x_out, y_out, b_out, cbrt7);
+    linear_xyb_canon_body::<CLAMP>(pixels, x_out, y_out, b_out, cbrt7);
 }
 
 /// NEON runs the scalar canonical body (2026-10-03): its vector `max`/`min` propagate NaN, while the canon clamps with
 /// `f32::max`/`min`, which drop it, so a lane-parallel NEON chunk differed from the scalar canon on NaN inputs (CI aarch64).
 #[cfg(target_arch = "aarch64")]
-fn linear_xyb_canon_vec_neon(
+fn linear_xyb_canon_vec_neon<const CLAMP: bool>(
     _token: archmage::NeonToken,
     pixels: &[[f32; 3]],
     x_out: &mut [f32],
@@ -977,292 +919,7 @@ fn linear_xyb_canon_vec_neon(
     b_out: &mut [f32],
     cbrt7: bool,
 ) {
-    linear_xyb_canon_body(pixels, x_out, y_out, b_out, cbrt7);
-}
-
-/// HDR PU-XYB conversion (scalar): **absolute-luminance** linear RGB (cd/m²,
-/// NOT clamped to `[0,1]`) → PU-encoded XYB-like planes.
-///
-/// The HDR-path analog of [`linear_to_positive_xyb_planar_into`]: identical
-/// opsin mix + opponent structure, but each opsin-mixed channel goes through
-/// **PU21** (normalized so 100 cd/m² → ~1.0, matching the cube-root white
-/// point) instead of the cube root. The cube-root-domain absorbance centering
-/// (`-cbrt(K_B0)`) is dropped — in PU space `K_B0` clamps below `PU21_L_MIN`,
-/// so its contribution is ~0. See `docs/HDR_PLAN.md` §2b for the design
-/// rationale and the validation gate. Scalar only (HDR is a minority path;
-/// SIMD is a later optimization).
-/// PU21(100 cd/m²) ≈ 256.3 — normalizes a 100-nit reference white to ~1.0,
-/// the range the cube-root XYB white point sits in, so the downstream
-/// opponent biases + feature kernels stay in calibration.
-const PU_WHITE: f32 = 256.3;
-/// Opponent X amplification in PU space. The cube-root path uses 14× to make
-/// the tiny red-green cube-root difference visible; PU-space opsin
-/// differences are already large, and HDR validation favors
-/// luminance-dominant weighting (see docs/HDR_PLAN.md §2b).
-const PU_X_SCALE: f32 = 4.0;
-
-/// Scalar per-pixel PU-XYB (also the SIMD kernels' tail path and the
-/// parity-test reference).
-#[inline]
-fn pu_xyb_pixel(p: [f32; 3]) -> (f32, f32, f32) {
-    use crate::pu21::pu21_encode;
-    let mixed0 = K_M00
-        .mul_add(p[0], K_M01.mul_add(p[1], K_M02.mul_add(p[2], K_B0)))
-        .max(0.0);
-    let mixed1 = K_M10
-        .mul_add(p[0], K_M11.mul_add(p[1], K_M12.mul_add(p[2], K_B0)))
-        .max(0.0);
-    let mixed2 = K_M20
-        .mul_add(p[0], K_M21.mul_add(p[1], K_M22.mul_add(p[2], K_B0)))
-        .max(0.0);
-    let c0 = pu21_encode(mixed0) / PU_WHITE;
-    let c1 = pu21_encode(mixed1) / PU_WHITE;
-    let c2 = pu21_encode(mixed2) / PU_WHITE;
-    let x = 0.5 * (c0 - c1);
-    let y = 0.5 * (c0 + c1);
-    (x.mul_add(PU_X_SCALE, 0.42), y + 0.01, (c2 - y) + 0.55)
-}
-
-/// Canonical per-pixel PU-XYB (REV4SERVE): [`pu_xyb_pixel`]'s structure with
-/// the PU21 encode replaced by [`crate::pu21::pu21_encode_canon`] — the
-/// production SIMD `pu` closure's midp formula chain replicated scalar-side
-/// with always-fused `mul_add`. One body, every pixel, every tier.
-#[inline(always)]
-fn pu_xyb_pixel_canon(p: [f32; 3]) -> (f32, f32, f32) {
-    let mixed0 = K_M00
-        .mul_add(p[0], K_M01.mul_add(p[1], K_M02.mul_add(p[2], K_B0)))
-        .max(0.0);
-    let mixed1 = K_M10
-        .mul_add(p[0], K_M11.mul_add(p[1], K_M12.mul_add(p[2], K_B0)))
-        .max(0.0);
-    let mixed2 = K_M20
-        .mul_add(p[0], K_M21.mul_add(p[1], K_M22.mul_add(p[2], K_B0)))
-        .max(0.0);
-    let c0 = crate::pu21::pu21_encode_canon(mixed0) / PU_WHITE;
-    let c1 = crate::pu21::pu21_encode_canon(mixed1) / PU_WHITE;
-    let c2 = crate::pu21::pu21_encode_canon(mixed2) / PU_WHITE;
-    let x = 0.5 * (c0 - c1);
-    let y = 0.5 * (c0 + c1);
-    (x.mul_add(PU_X_SCALE, 0.42), y + 0.01, (c2 - y) + 0.55)
-}
-/// [`pu_xyb_canon_vec`] on the fused-FMA tiers; the scalar canonical body
-/// runs the remainder and every pixel on the non-fused tiers.
-pub(crate) fn pu_xyb_canon(
-    pixels: &[[f32; 3]],
-    x_out: &mut [f32],
-    y_out: &mut [f32],
-    b_out: &mut [f32],
-    mode: crate::featcanon::Mode,
-) {
-    let _ = mode;
-    incant!(
-        pu_xyb_canon_vec(pixels, x_out, y_out, b_out),
-        [v4x, v4, v3, neon, wasm128, scalar]
-    );
-}
-
-/// The per-element scalar canonical PU-XYB body — the fused tiers'
-/// remainder and the non-fused tiers' whole input, as
-/// [`srgb_xyb_canon_body`].
-/// [`srgb_xyb_canon_body`].
-fn pu_xyb_canon_body(pixels: &[[f32; 3]], x_out: &mut [f32], y_out: &mut [f32], b_out: &mut [f32]) {
-    for (i, p) in pixels.iter().enumerate() {
-        let (x, y, bb) = pu_xyb_pixel_canon(*p);
-        x_out[i] = x;
-        y_out[i] = y;
-        b_out[i] = bb;
-    }
-}
-
-/// [`pu_xyb_pixel_canon`] lane-parallel over [`CanonChunk::pu_xyb`] — the
-/// canonical opsin mix, canonical PU21, `/ PU_WHITE`, positive shift — for
-/// full 16-pixel chunks; the scalar body covers the remainder.
-/// `-scalar` as for [`srgb_xyb_canon_vec`].
-#[magetypes(define(f32x16), v4x, v4, v3, -scalar)]
-fn pu_xyb_canon_vec(
-    token: Token,
-    pixels: &[[f32; 3]],
-    x_out: &mut [f32],
-    y_out: &mut [f32],
-    b_out: &mut [f32],
-) {
-    let k = CanonChunk::new(token);
-    let n = pixels.len();
-    let chunks = n / 16;
-    for c in 0..chunks {
-        let base = c * 16;
-        let px: &[[f32; 3]; 16] = pixels[base..base + 16]
-            .try_into()
-            .expect("16 pixels per chunk");
-        let (r, g, b) = k.linear_lanes::<false>(px);
-        let (x, y, bb) = k.pu_xyb(r, g, b);
-        x_out[base..base + 16].copy_from_slice(&x.to_array());
-        y_out[base..base + 16].copy_from_slice(&y.to_array());
-        b_out[base..base + 16].copy_from_slice(&bb.to_array());
-    }
-    for i in (chunks * 16)..n {
-        let (x, y, bb) = pu_xyb_pixel_canon(pixels[i]);
-        x_out[i] = x;
-        y_out[i] = y;
-        b_out[i] = bb;
-    }
-}
-
-fn pu_xyb_canon_vec_scalar(
-    _token: archmage::ScalarToken,
-    pixels: &[[f32; 3]],
-    x_out: &mut [f32],
-    y_out: &mut [f32],
-    b_out: &mut [f32],
-) {
-    pu_xyb_canon_body(pixels, x_out, y_out, b_out);
-}
-
-#[cfg(target_arch = "wasm32")]
-fn pu_xyb_canon_vec_wasm128(
-    _token: archmage::Wasm128Token,
-    pixels: &[[f32; 3]],
-    x_out: &mut [f32],
-    y_out: &mut [f32],
-    b_out: &mut [f32],
-) {
-    pu_xyb_canon_body(pixels, x_out, y_out, b_out);
-}
-
-/// NEON runs the scalar canonical body (2026-10-03): its vector `max`/`min` propagate NaN, while the canon clamps with
-/// `f32::max`/`min`, which drop it, so a lane-parallel NEON chunk differed from the scalar canon on NaN inputs (CI aarch64).
-#[cfg(target_arch = "aarch64")]
-fn pu_xyb_canon_vec_neon(
-    _token: archmage::NeonToken,
-    pixels: &[[f32; 3]],
-    x_out: &mut [f32],
-    y_out: &mut [f32],
-    b_out: &mut [f32],
-) {
-    pu_xyb_canon_body(pixels, x_out, y_out, b_out);
-}
-
-/// [`linear_to_pu_xyb_planar_into`] at an explicit formula revision:
-/// the tier-dispatched production kernel through Rev3, the canonical body
-/// ([`pu_xyb_canon`]) at Rev4 — the same convention
-/// [`srgb_to_positive_xyb_planar_into_at_revision`] uses.
-pub(crate) fn linear_to_pu_xyb_planar_into_at_revision(
-    pixels: &[[f32; 3]],
-    x_out: &mut [f32],
-    y_out: &mut [f32],
-    b_out: &mut [f32],
-    revision: crate::feature_defs::FormulaRevision,
-) {
-    let mode = crate::featcanon::mode(revision);
-    if mode.active() {
-        pu_xyb_canon(pixels, x_out, y_out, b_out, mode);
-        return;
-    }
-    linear_to_pu_xyb_planar_into(pixels, x_out, y_out, b_out);
-}
-
-/// Absolute-luminance linear RGB → positive PU-XYB planes, SIMD-dispatched
-/// (8 px/iter via the generic magetypes tiers; `x^p = exp2_midp_precise(p·log2_midp_precise(x))`
-/// — the midp_precise transcendentals hold the scalar↔SIMD divergence to
-/// ≤ 2e-3 per channel; `simd_matches_scalar_within_band` pins it).
-pub(crate) fn linear_to_pu_xyb_planar_into(
-    pixels: &[[f32; 3]],
-    x_out: &mut [f32],
-    y_out: &mut [f32],
-    b_out: &mut [f32],
-) {
-    incant!(
-        pu_xyb_rows_inner(pixels, x_out, y_out, b_out),
-        [v3, neon, wasm128, scalar]
-    );
-}
-
-#[magetypes(v3, neon, wasm128, scalar)]
-fn pu_xyb_rows_inner(
-    token: Token,
-    pixels: &[[f32; 3]],
-    x_out: &mut [f32],
-    y_out: &mut [f32],
-    b_out: &mut [f32],
-) {
-    #[allow(non_camel_case_types)]
-    type f32x8 = GenericF32x8<Token>;
-    // PU21 banding_glare parameters — single source: `pu21::P`.
-    const P0: f32 = crate::pu21::P[0];
-    const P1: f32 = crate::pu21::P[1];
-    const P2: f32 = crate::pu21::P[2];
-    const P3: f32 = crate::pu21::P[3];
-    const P4: f32 = crate::pu21::P[4];
-    const P5: f32 = crate::pu21::P[5];
-    const P6: f32 = crate::pu21::P[6];
-    let l_min = f32x8::splat_t(token, crate::pu21::PU21_L_MIN);
-    let l_max = f32x8::splat_t(token, crate::pu21::PU21_L_MAX);
-    let zero = f32x8::splat_t(token, 0.0);
-    let one = f32x8::splat_t(token, 1.0);
-    let p0 = f32x8::splat_t(token, P0);
-    let p1 = f32x8::splat_t(token, P1);
-    let p2 = f32x8::splat_t(token, P2);
-    let p3 = f32x8::splat_t(token, P3);
-    let p4 = f32x8::splat_t(token, P4);
-    let p5 = f32x8::splat_t(token, P5);
-    let p6 = f32x8::splat_t(token, P6);
-    let inv_white = f32x8::splat_t(token, 1.0 / PU_WHITE);
-    let pu = |v: f32x8| -> f32x8 {
-        let y = v.max(l_min).min(l_max);
-        let yp = (p3 * y.log2_midp_precise()).exp2_midp_precise();
-        let inner = (p0 + p1 * yp) / (one + p2 * yp);
-        (p6 * ((p4 * inner.log2_midp_precise()).exp2_midp_precise() - p5)).max(zero)
-    };
-
-    let n = pixels.len();
-    let chunks = n / 8;
-    let mut r = [0.0f32; 8];
-    let mut g = [0.0f32; 8];
-    let mut b = [0.0f32; 8];
-    for c in 0..chunks {
-        let base = c * 8;
-        for (j, px) in pixels[base..base + 8].iter().enumerate() {
-            r[j] = px[0];
-            g[j] = px[1];
-            b[j] = px[2];
-        }
-        let vr = f32x8::from_array_t(token, r);
-        let vg = f32x8::from_array_t(token, g);
-        let vb = f32x8::from_array_t(token, b);
-        let kb0 = f32x8::splat_t(token, K_B0);
-        let m0 = (f32x8::splat_t(token, K_M00) * vr
-            + f32x8::splat_t(token, K_M01) * vg
-            + f32x8::splat_t(token, K_M02) * vb
-            + kb0)
-            .max(zero);
-        let m1 = (f32x8::splat_t(token, K_M10) * vr
-            + f32x8::splat_t(token, K_M11) * vg
-            + f32x8::splat_t(token, K_M12) * vb
-            + kb0)
-            .max(zero);
-        let m2 = (f32x8::splat_t(token, K_M20) * vr
-            + f32x8::splat_t(token, K_M21) * vg
-            + f32x8::splat_t(token, K_M22) * vb
-            + kb0)
-            .max(zero);
-        let c0 = pu(m0) * inv_white;
-        let c1 = pu(m1) * inv_white;
-        let c2 = pu(m2) * inv_white;
-        let half = f32x8::splat_t(token, 0.5);
-        let x = half * (c0 - c1);
-        let y = half * (c0 + c1);
-        (x * f32x8::splat_t(token, PU_X_SCALE) + f32x8::splat_t(token, 0.42))
-            .store((&mut x_out[base..base + 8]).try_into().unwrap());
-        (y + f32x8::splat_t(token, 0.01)).store((&mut y_out[base..base + 8]).try_into().unwrap());
-        ((c2 - y) + f32x8::splat_t(token, 0.55))
-            .store((&mut b_out[base..base + 8]).try_into().unwrap());
-    }
-    for i in (chunks * 8)..n {
-        let (x, y, bb) = pu_xyb_pixel(pixels[i]);
-        x_out[i] = x;
-        y_out[i] = y;
-        b_out[i] = bb;
-    }
+    linear_xyb_canon_body::<CLAMP>(pixels, x_out, y_out, b_out, cbrt7);
 }
 
 // --- SIMD implementations ---
@@ -2120,7 +1777,7 @@ pub fn linear_to_positive_xyb_planar_into(
 ) {
     let mode = crate::featcanon::mode(revision);
     if mode.active() {
-        linear_xyb_canon(pixels, x_out, y_out, b_out, mode, revision.cbrt_newton());
+        linear_xyb_canon::<true>(pixels, x_out, y_out, b_out, mode, revision.cbrt_newton());
         return;
     }
     incant!(
@@ -2634,18 +2291,18 @@ fn linear_to_positive_xyb_planar_inner_v3(
 /// through [`OpsinChunk`]; see [`PaddedTail`] for the remainder. The input is clamped to the
 /// display gamut `[0, 1]`.
 #[inline(always)]
-fn linear_positive_xyb_generic<T: F32x8Convert + PaddedTail>(
+fn linear_positive_xyb_generic<T: F32x8Convert + PaddedTail, const CLAMP: bool>(
     token: T,
     pixels: &[[f32; 3]],
     x_out: &mut [f32],
     y_out: &mut [f32],
     b_out: &mut [f32],
 ) {
-    /// One 8-pixel chunk. Clamp to display gamut: out-of-range values from lossy
+    /// One 8-pixel chunk. Clamp to display gamut (`CLAMP`): out-of-range values from lossy
     /// reconstruction aren't visible on a real display, so measuring them would
     /// overcount error.
     #[inline(always)]
-    fn chunk<T: F32x8Convert>(
+    fn chunk<T: F32x8Convert, const CLAMP: bool>(
         k: &OpsinChunk<T>,
         px: &[[f32; 3]; 8],
     ) -> ([f32; 8], [f32; 8], [f32; 8]) {
@@ -2660,7 +2317,7 @@ fn linear_positive_xyb_generic<T: F32x8Convert + PaddedTail>(
         }
         let load = |arr: [f32; 8]| {
             let v = GenericF32x8::from_array_t(k.token, arr);
-            v.max(k.zero).min(k.one)
+            if CLAMP { v.max(k.zero).min(k.one) } else { v }
         };
         let (r, g, b) = (load(r_arr), load(g_arr), load(b_arr));
         let (x_pos, y_pos, b_pos) = k.positive(k.cube_roots(r, g, b));
@@ -2678,7 +2335,7 @@ fn linear_positive_xyb_generic<T: F32x8Convert + PaddedTail>(
         let px: &[[f32; 3]; 8] = pixels[base..base + 8]
             .try_into()
             .expect("8 pixels per chunk");
-        let (xs, ys, bs) = chunk::<T>(&k, px);
+        let (xs, ys, bs) = chunk::<T, CLAMP>(&k, px);
         x_out[base..base + 8].copy_from_slice(&xs);
         y_out[base..base + 8].copy_from_slice(&ys);
         b_out[base..base + 8].copy_from_slice(&bs);
@@ -2690,7 +2347,7 @@ fn linear_positive_xyb_generic<T: F32x8Convert + PaddedTail>(
         if rem != 0 {
             let mut padded = [[0.0f32; 3]; 8];
             padded[..rem].copy_from_slice(&pixels[done..]);
-            let (xs, ys, bs) = chunk::<T>(&k, &padded);
+            let (xs, ys, bs) = chunk::<T, CLAMP>(&k, &padded);
             x_out[done..n].copy_from_slice(&xs[..rem]);
             y_out[done..n].copy_from_slice(&ys[..rem]);
             b_out[done..n].copy_from_slice(&bs[..rem]);
@@ -2700,12 +2357,14 @@ fn linear_positive_xyb_generic<T: F32x8Convert + PaddedTail>(
         // Scalar remainder
         for i in done..n {
             let p = pixels[i];
-            let [r, g, b] = {
+            let [r, g, b] = if CLAMP {
                 [
                     p[0].clamp(0.0, 1.0),
                     p[1].clamp(0.0, 1.0),
                     p[2].clamp(0.0, 1.0),
                 ]
+            } else {
+                p
             };
 
             let mixed0 = K_M00
@@ -2741,7 +2400,90 @@ fn linear_to_positive_xyb_planar_inner(
     y_out: &mut [f32],
     b_out: &mut [f32],
 ) {
-    linear_positive_xyb_generic::<_>(token, pixels, x_out, y_out, b_out);
+    linear_positive_xyb_generic::<_, true>(token, pixels, x_out, y_out, b_out);
+}
+
+/// Linear RGB to positive XYB without clipping input light to `[0, 1]`.
+/// Used by the anchored HDR front end; the opsin mix still floors at zero.
+pub(crate) fn linear_to_positive_xyb_planar_into_unclamped(
+    pixels: &[[f32; 3]],
+    x_out: &mut [f32],
+    y_out: &mut [f32],
+    b_out: &mut [f32],
+    revision: crate::feature_defs::FormulaRevision,
+) {
+    let mode = crate::featcanon::mode(revision);
+    if mode.active() {
+        linear_xyb_canon::<false>(pixels, x_out, y_out, b_out, mode, revision.cbrt_newton());
+        return;
+    }
+    incant!(
+        linear_positive_unclamped_inner(pixels, x_out, y_out, b_out),
+        [v3, neon, wasm128, scalar]
+    );
+}
+
+#[magetypes(v3, neon, wasm128, scalar)]
+fn linear_positive_unclamped_inner(
+    token: Token,
+    pixels: &[[f32; 3]],
+    x_out: &mut [f32],
+    y_out: &mut [f32],
+    b_out: &mut [f32],
+) {
+    linear_positive_unclamped_generic(token, pixels, x_out, y_out, b_out);
+}
+
+/// Tail policy of the unclamped converter: chunk arithmetic where the tier pads its tail,
+/// the per-pixel form everywhere else.
+#[inline(always)]
+fn linear_positive_unclamped_generic<T: F32x8Convert + PaddedTail>(
+    token: T,
+    pixels: &[[f32; 3]],
+    x_out: &mut [f32],
+    y_out: &mut [f32],
+    b_out: &mut [f32],
+) {
+    if T::PAD_TAIL {
+        linear_positive_xyb_generic::<_, false>(token, pixels, x_out, y_out, b_out);
+    } else {
+        linear_positive_unclamped_per_pixel(pixels, x_out, y_out, b_out);
+    }
+}
+
+/// The per-pixel unclamped form (see [`linear_to_positive_xyb_planar_into_unclamped`]).
+#[inline(always)]
+fn linear_positive_unclamped_per_pixel(
+    pixels: &[[f32; 3]],
+    x_out: &mut [f32],
+    y_out: &mut [f32],
+    b_out: &mut [f32],
+) {
+    let absorbance_bias = -cbrtf_fast(K_B0);
+    for (i, p) in pixels.iter().enumerate() {
+        let [r, g, b] = *p;
+
+        let mixed0 = K_M00
+            .mul_add(r, K_M01.mul_add(g, K_M02.mul_add(b, K_B0)))
+            .max(0.0);
+        let mixed1 = K_M10
+            .mul_add(r, K_M11.mul_add(g, K_M12.mul_add(b, K_B0)))
+            .max(0.0);
+        let mixed2 = K_M20
+            .mul_add(r, K_M21.mul_add(g, K_M22.mul_add(b, K_B0)))
+            .max(0.0);
+
+        let c0 = cbrtf_fast(mixed0) + absorbance_bias;
+        let c1 = cbrtf_fast(mixed1) + absorbance_bias;
+        let c2 = cbrtf_fast(mixed2);
+
+        let x = 0.5 * (c0 - c1);
+        let y = 0.5 * (c0 + c1);
+
+        x_out[i] = x.mul_add(14.0, 0.42);
+        y_out[i] = y + 0.01;
+        b_out[i] = (c2 - y) + 0.55;
+    }
 }
 
 // ---------------------------------------------------------------------------

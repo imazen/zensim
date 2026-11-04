@@ -1490,8 +1490,10 @@ impl Zensim {
 
     /// Score an HDR pair. Pixel values map to absolute display light as
     /// `encoding` declares (already-linear cd/m², or PQ/HLG through a display
-    /// model); a PU21 front-end then feeds the same feature walk as SDR input,
-    /// and this profile's model scores the result.
+    /// model); the anchored cube-root front end then feeds the SDR feature walk,
+    /// and this profile's model scores the result. BT.2408 reference white
+    /// (203 cd/m², also the Ultra HDR SDR-base convention) maps to linear 1.0;
+    /// light above that white is retained without clipping.
     ///
     /// Sources are [`PixelFormat::LinearF32Rgba`] (f32 light; any encoding) or
     /// [`PixelFormat::Srgb16Rgba`] (16-bit code values; [`HdrEncoding::Pq`] and
@@ -1552,6 +1554,9 @@ impl Zensim {
             source,
             distorted,
             encoding,
+            crate::feature_v2::HdrFrontEnd::CubeRoot {
+                unit_nits: crate::feature_v2::HDR_SDR_WHITE_NITS,
+            },
             self.max_pixels,
             self.parallel_now(),
             toggles,
@@ -1566,7 +1571,7 @@ impl Zensim {
         if let Some(p) = plan {
             p.check_emit_covered(features.len())
                 .map_err(|_| ZensimError::ModelLoadFailed {
-                    reason: "PU fold did not materialize the bake's declared reads",
+                    reason: "HDR fold did not materialize the bake's declared reads",
                 })?;
             features.resize(
                 p.walk_width()

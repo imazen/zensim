@@ -9,7 +9,8 @@
 //! (its stripped copy scored identically on every surface).
 //!
 //! Run the tier test alone (`--test-threads=1`) when debugging: it disables SIMD
-//! tiers process-wide while it runs.
+//! tiers process-wide while it runs. Every scoring test holds
+//! `lock_token_testing()` so legacy goldens cannot observe a partial tier switch.
 
 include!("../examples/split_parity/pairs.rs");
 
@@ -93,6 +94,7 @@ const GOLDEN: &[(&str, &str, u64)] = &[
 /// architectures may differ by FMA contraction, bounded here.
 #[test]
 fn golden_scores_match_the_research_reference() {
+    let _token = archmage::testing::lock_token_testing();
     let mut failures = Vec::new();
     for &(name, id, bits) in GOLDEN {
         let want = f64::from_bits(bits);
@@ -117,6 +119,7 @@ fn golden_scores_match_the_research_reference() {
 
 #[test]
 fn identical_images_score_100() {
+    let _token = archmage::testing::lock_token_testing();
     for name in ["A", "LegacyA", "PreviewV0_1", "PreviewV0_2"] {
         for id in [
             "8x8-photo-identity",
@@ -132,6 +135,7 @@ fn identical_images_score_100() {
 /// monotone in every damage input by construction).
 #[test]
 fn more_noise_never_scores_higher() {
+    let _token = archmage::testing::lock_token_testing();
     let base = pair("256x256-photo-identity");
     let mut state = 0x9E37_79B9_7F4A_7C15u64;
     let noise: Vec<i32> = (0..base.src.len())
@@ -142,7 +146,8 @@ fn more_noise_never_scores_higher() {
             (state % 3) as i32 - 1
         })
         .collect();
-    for profile in [ZensimProfile::A] {
+    {
+        let profile = ZensimProfile::A;
         let mut last = f64::INFINITY;
         for amp in [0, 1, 2, 4, 8, 16, 32] {
             let dst: Vec<u8> = base
@@ -170,8 +175,10 @@ fn more_noise_never_scores_higher() {
 
 #[test]
 fn rev7_scores_are_identical_across_simd_tiers() {
+    let _token = archmage::testing::lock_token_testing();
     let p = pair("333x251-photo-blur");
-    for profile in [ZensimProfile::A] {
+    {
+        let profile = ZensimProfile::A;
         let mut scores = Vec::new();
         let report = for_each_token_permutation(CompileTimePolicy::Warn, |perm| {
             scores.push((perm.label.clone(), score(profile, &p)));
@@ -190,10 +197,12 @@ fn rev7_scores_are_identical_across_simd_tiers() {
 
 #[test]
 fn rev7_scores_are_identical_across_thread_settings() {
+    let _token = archmage::testing::lock_token_testing();
     let p = pair("1024x768-edges-noise");
     let src = RgbSlice::new(bytemuck::cast_slice(&p.src), p.width, p.height);
     let dst = RgbSlice::new(bytemuck::cast_slice(&p.dst), p.width, p.height);
-    for profile in [ZensimProfile::A] {
+    {
+        let profile = ZensimProfile::A;
         let parallel = Zensim::new(profile)
             .with_parallel(true)
             .compute(&src, &dst)

@@ -57,8 +57,7 @@ on.
 
 Two-alternative agreement with human choices: FG-IQA `A` 0.757, PieAPP 0.583.
 On CLIC 2021's validation questions (learned-codec pairs, read once as a confirmation) `A` agrees
-with the raters on 0.644, SSIMULACRA2 on 0.626 and butteraugli's 3-norm on 0.606. On UPIQ's HDR pairs
-through the older PU21 front end `A` reached a pooled rank correlation of 0.78. One
+with the raters on 0.644, SSIMULACRA2 on 0.626 and butteraugli's 3-norm on 0.606. One
 case of the label-free map-steering gate (an 8-pixel map-rank case on a text screenshot) scores 0.69
 against its 0.70 bar; the JPEG XL loop shows no byte cost from it.
 
@@ -68,12 +67,30 @@ copy scored identically on all 1,386 surface and pair rows of the split parity r
 
 ## HDR input
 
-`Zensim::compute_hdr(source, distorted, encoding)` scores HDR pairs. `HdrEncoding::Linear` takes
-`LinearF32Rgba` pixels in absolute cd/m²; `HdrEncoding::Pq { peak_nits }` and `HdrEncoding::Hlg { peak_nits,
-ambient_lux }` take `Srgb16Rgba` code values (or `LinearF32Rgba` signal values) and decode them through a display
-model. Declared primaries are converted without clipping light to the SDR range, and a PU21 front-end (100 cd/m²
-maps to 1.0) feeds the same revision-7 feature walk as SDR input. The current profiles were trained on SDR content;
-an HDR-trained profile is in development.
+`Zensim::compute_hdr(source, distorted, encoding)` scores HDR pairs. `HdrEncoding::Linear`
+takes `LinearF32Rgba` pixels in absolute cd/m². `Pq { peak_nits }` and
+`Hlg { peak_nits, ambient_lux }` take 16-bit or float code values and decode them through
+the declared display model. Declared primaries are converted without clipping absolute light.
+
+The fixed front end divides linear nits by **203 cd/m²** (BT.2408 reference white,
+also the Ultra HDR SDR-base convention), then uses the SDR cube-root XYB opsin without
+clipping values above 1.0. There is no public white-point or front-end knob.
+An SDR image shown as HDR at that white therefore follows the same feature arithmetic,
+with small floating-point differences from linearizing and rescaling the input.
+
+The [research continuity record](https://github.com/imazen/zensimx/blob/41ea3ecfc0da147e2b4525b3225f52ea3dc44c6a/benchmarks/hc1_continuity_2026-11-04.tsv)
+reports a maximum absolute SDR/HDR score gap of **0.0003** for the adopted seed-0 model
+on its 24-pair PNG panel. The public test checks 14 synthetic SDR pairs in both thread
+modes (28 comparisons), with a measured maximum gap of **0.00055716912091697** and an
+asserted bound of **1e-3 per comparison**. This is continuity evidence, not an HDR
+accuracy claim: `A` was fitted to SDR content. PU21-era HDR numbers in older records
+describe a different front end and do not apply to this public HDR path.
+
+All **166** existing HDR fixture cases reproduce the research `BakeScorer`'s anchored
+cube-root scores bit for bit: linear, PQ and HLG; sRGB and BT.2020 primaries; packed
+and padded rows; float and 16-bit containers; both thread modes. The fixtures include
+identity and nonidentity pairs. See [golden values](../zensim/tests/fixtures/hdr_a_cube_root_203.tsv)
+and [reference source and commands](../benchmarks/hdr_cube_root_203_reference_2026-11-04.md).
 
 ## Parity with the research crate
 
@@ -111,6 +128,7 @@ The research crate was not run for this naming-only check.
 Removing the two research-only variants and selecting `A` for `codec_target()` left
 all 56 checked SDR scores bit-identical: 14 cases each for `A`, `LegacyA`,
 `PreviewV0_1` and `PreviewV0_2`, compared with a frozen export of `d97076e1` on the
-same Ryzen 9 9950X3D. [Per-case score bits](../benchmarks/public_profiles_withdrawal_2026-11-04.tsv).
+same Ryzen 9 9950X3D. The same 56 values also remain bit-identical after the
+HDR cube-root port. [Per-case score bits](../benchmarks/public_profiles_withdrawal_2026-11-04.tsv).
 All 42 retained historical score constants are unchanged. The revision-7 cross-path,
 HDR and profile checks passed (2, 2 and 8 tests respectively).

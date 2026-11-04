@@ -58,6 +58,10 @@ sRGB 8-bit RGB or RGBA (`RgbSlice`, `RgbaSlice`, `imgref`), 16-bit and linear `f
 with the `zenpixels` feature. Both images must have the same size; images smaller than 64
 pixels are reflect-padded.
 
+`compute_hdr` decodes declared linear, PQ or HLG input to absolute light and uses
+the anchored cube-root front end at a fixed 203 cd/m² SDR white, retaining brighter
+light without clipping. Details: [HDR input](docs/PROFILES.md#hdr-input).
+
 ## Features
 
 `avx512`, `threads` and `imgref` are on by default. `training` exposes the linear-model

@@ -8,13 +8,9 @@ pub(crate) enum FrontEnd {
     /// The SDR path: `convert_source_to_xyb_into_slices` (sRGB → linear →
     /// opsin → cube-root XYB) — byte-identical to the pre-HDR producer.
     Sdr,
-    /// The HDR path: absolute-light rows decoded per [`HdrEncoding`]
-    /// (`hdr_source_row_to_nits`) then PU-encoded to XYB
-    /// (`color::linear_to_pu_xyb_planar_into`: opsin mix → PU21
-    /// `banding_glare` — keeps 100 cd/m² at ~1.0 so the downstream
-    /// feature kernels stay calibrated).
-    #[allow(dead_code)] // only reachable via compute_folded720_hdr_streaming_extras
-    Hdr(HdrEncoding),
+    /// Absolute-light rows decoded per [`HdrEncoding`], then normalized by
+    /// the reference white and converted through the unclamped cube-root opsin.
+    Hdr(HdrEncoding, crate::feature_v2::HdrFrontEnd),
 }
 
 /// Rows appended to scale 0 per production step. A multiple of
@@ -638,7 +634,7 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
             front_end,
             hdr_row: match front_end {
                 FrontEnd::Sdr => Vec::new(),
-                FrontEnd::Hdr(_) => vec![[0.0f32; 3]; w0],
+                FrontEnd::Hdr(..) => vec![[0.0f32; 3]; w0],
             },
             max_held_rows: vec![0; crate::NUM_SCALES],
             ref_planes,
@@ -880,7 +876,10 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
                             );
                         }
                     },
-                    FrontEnd::Hdr(encoding) => {
+                    FrontEnd::Hdr(
+                        encoding,
+                        crate::feature_v2::HdrFrontEnd::CubeRoot { unit_nits },
+                    ) => {
                         for k in 0..n_new {
                             let y = hi0 + k;
                             let row_off = k * width;
@@ -901,7 +900,13 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
                                     self.revision,
                                 );
                             }
-                            crate::color::linear_to_pu_xyb_planar_into_at_revision(
+                            let inv = 1.0 / unit_nits;
+                            for px in &mut self.hdr_row[..width] {
+                                for c in px.iter_mut() {
+                                    *c *= inv;
+                                }
+                            }
+                            crate::color::linear_to_positive_xyb_planar_into_unclamped(
                                 &self.hdr_row[..width],
                                 &mut p0[row_off..row_off + width],
                                 &mut p1[row_off..row_off + width],

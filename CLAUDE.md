@@ -14,6 +14,9 @@ frozen models.
   `CHANGELOG.md`, never a side effect of a refactor.
 - `tests/profiles.rs` holds golden scores; the revision-7 profile `A` must stay
   bit-identical across x86 SIMD tiers and thread counts.
+- Public `compute_hdr` uses the anchored cube-root front end at 203 cd/m².
+  `tests/hdr.rs` checks research-derived A goldens bit for bit and SDR/HDR
+  continuity within 1e-3; changing the front end changes HDR scores deliberately.
 - For refactors of the extraction or scoring code, rerun the split parity gate: build
   `examples/split_parity_check.rs` here and zensimx's `split_parity_golden` on the same machine
   and compare the outputs with `diff` (`docs/PROFILES.md`, "Parity with the research crate").
@@ -52,6 +55,11 @@ then `cargo publish --manifest-path <crate>/Cargo.toml`. Never publish without a
 pushed tag and GitHub release.
 
 ## Known Bugs
+
+- Resolved test-harness race (2026-11-04): SIMD token permutations are process-wide.
+  Unguarded legacy golden checks could observe a tier switch during computation.
+  Every scoring test in `tests/profiles.rs` now holds `lock_token_testing()`,
+  matching `tests/hdr.rs`; golden values and tolerances were not changed.
 
 - Cross-path audit at `d15a5486` (2026-10-28): profile LegacyA's (then named A) interleaved and planar
   linear diffmap scores differ on the 65×63 checkerboard fixture with padded rows.
