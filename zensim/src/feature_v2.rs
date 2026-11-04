@@ -555,18 +555,7 @@ const V1_BAND_ROWS: usize = 32;
 const V1_BANDS_PER_STRIP: usize = STRIP_ROWS / V1_BAND_ROWS;
 const V1_BAND_OVERLAP: usize = 5;
 
-/// v1's masking / IW strengths (`metric::config_from_params`:
-/// replay uses the same constants so the block reproduces v1's numbers.
-
-/// What a v1 band does with its [`FoldPoolScratch`] — the band-level
-/// resolution of [`V1PoolsMode`].
-///
-/// [`Self::HOnly`] exists because the pool block is NOT three independent
-/// jobs. Peaks ride the fused kernel's unconditional L8/max tier, while
-/// masked and IW share ONE activity chain, ONE sigma store and three
-/// `*_inline_both` kernels that compute both strengths in a single sweep. So
-/// the only compute boundary inside `f156..372` is *peaks* vs
-/// *masked-and-IW*, and this enum is that boundary.
+/// A band may own H-blur scratch; weighted revision-1 pools are retired.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BandPoolWork {
     /// No pool arithmetic at all. The scratch is present only so a
@@ -576,8 +565,6 @@ enum BandPoolWork {
 
 #[cfg(test)]
 thread_local! {
-    // Observe actual weighted-pool execution, not planner declarations.
-    static POOL_TEST_WIDTHS: std::cell::RefCell<Option<Vec<usize>>> = const { std::cell::RefCell::new(None) };
     // Scales whose strips the streaming walk skipped (declared plans reading nothing there).
     static SKIPPED_SCALES: std::cell::RefCell<u8> = const { std::cell::RefCell::new(0) };
 }

@@ -6798,6 +6798,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "legacy-models")]
     /// Edge-concentrated distortion: compare metric sensitivity to distortions
     /// at the right/bottom edges vs left/top edges. With symmetric handling,
     /// the scores should be equal. Tests the full metric pipeline.
@@ -6864,6 +6865,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "legacy-models")]
     /// Same as above but for top vs bottom edge distortion.
     #[test]
     fn edge_distortion_top_vs_bottom() {
@@ -6927,6 +6929,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "legacy-models")]
     /// Small image where boundary pixels are a large fraction.
     /// At 16x16 with radius=5, the blur window (11 pixels) exceeds the dimension,
     /// so boundary handling dominates every pixel.

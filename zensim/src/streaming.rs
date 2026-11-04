@@ -2830,7 +2830,7 @@ fn compute_diffmap_from_xyb(
 /// Un-stoppable convenience wrapper. Production paths thread a stop token
 /// via [`compute_zensim_streaming_stoppable`]; this remains for the
 /// `training`-feature `compute_zensim_with_config` and in-crate tests.
-#[cfg(any(feature = "training", test))]
+#[cfg(all(feature = "legacy-models", any(feature = "training", test)))]
 pub(crate) fn compute_zensim_streaming(
     source: &impl ImageSource,
     distorted: &impl ImageSource,
@@ -3338,8 +3338,11 @@ fn finalize_delta_stats(acc: DeltaAccum, has_alpha: bool, native_max: f64) -> De
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "legacy-models")]
     use crate::metric::WEIGHTS;
+    #[cfg(feature = "legacy-models")]
     use crate::metric::compute_zensim_with_config;
+    #[cfg(feature = "legacy-models")]
     use crate::source::RgbSlice;
 
     #[test]
@@ -3420,6 +3423,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "legacy-models")]
     /// Verify streaming produces equivalent results to full-image processing.
     ///
     /// The strip-based V-blur running sum starts from strip boundaries (with mirror
@@ -3576,6 +3580,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "legacy-models")]
     /// Verify that linear f32 input produces equivalent results to sRGB u8 input.
     ///
     /// Given the same image content, the sRGB u8 and linear f32 paths should produce
@@ -3696,6 +3701,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "legacy-models")]
     /// Verify that BGRA u8 input produces equivalent results to RGB u8 (opaque).
     #[test]
     fn bgra_u8_matches_rgb_u8_opaque() {
@@ -3774,6 +3780,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "legacy-models")]
     /// Verify precomputed reference produces bit-identical results to the streaming path.
     #[test]
     fn precomputed_ref_matches_streaming() {
@@ -3832,6 +3839,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "legacy-models")]
     /// Identical P3 images through the streaming path should score very close to 100.
     ///
     /// Note: `compute_zensim_streaming` does not shortcircuit on byte-identical
@@ -3903,6 +3911,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "legacy-models")]
     /// P3 vs sRGB with same pixel values should produce different scores
     /// because gamut conversion changes the XYB values.
     #[test]

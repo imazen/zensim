@@ -526,7 +526,7 @@ pub struct V2NewFeatureToggles {
 
 }
 
-/// Which of v1's pool slots (`f156..372`) the folded walk emits live.
+/// Whether the folded walk emits the retained peak slots (`f156..228`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum V1PoolsMode {
     /// Structural zeros in the unused peak positions.
@@ -628,9 +628,9 @@ pub(crate) struct ComputeSet {
     /// Only basic local SSIM/edge moments and MSE; no peaks or HF ratios.
     pub local_only: bool,
     pub omit_edges: bool,
-    /// v1's masked/IW/soft-peak pool slots — the 13.6 % pass of item E.
+    /// The retained legacy peak slots.
     pub v1_pools: V1PoolsMode,
-    /// Scales at which any v1-era slot (basic, peaks, masked, IW) is read.
+    /// Scales at which any legacy basic or peak slot is read.
     /// Public extraction keeps all scales; declared-ID plans narrow it, and the
     /// walk skips a scale's strips whole when neither this nor `v2_scales`
     /// names it (the pyramid is still built through it).
@@ -734,24 +734,8 @@ impl ComputeSet {
         }
     }
 
-    /// True when the fold can own its H planes band-locally — the shape that
-    /// skips phase A entirely. Needs the band pool scratch, which
-    /// [`V1PoolsMode::Full`] and [`V1PoolsMode::Peaks`] both provide
-    /// (`Peaks` hands the band the scratch for the four H planes alone —
-    /// [`BandPoolWork::HOnly`]); [`V1PoolsMode::Off`] hands the band no
-    /// scratch at all, which is why `fold_engine::pools_mode_for_need` never
-    /// returns it.
-    ///
-    /// **THE owner of this predicate.** The strip loop's `fuse_channels` arm
-    /// reads it rather than re-deriving it — those were two separate
-    /// derivations until 2026-09-05 and they DISAGREED on `Peaks`: this one
-    /// said `Full` only, the loop said `Full | Peaks`. Since this one sizes
-    /// the strip scratch (via [`Self::plane_needs`]) and the loop decides
-    /// whether phase A runs, a `Peaks` walk reserved phase A's four fused-H
-    /// planes and then skipped phase A whole — allocating and first-touching
-    /// planes nothing ever wrote, on the one mode the fast class ships.
-    /// `self_blur_sizing_predicate_matches_the_strip_loop_predicate` pins
-    /// them together; it fails against the pre-fix definition.
+    /// Whether this basic/peak walk owns its four H planes in each band.
+    /// The strip loop and scratch sizing use this same predicate.
     pub(crate) fn self_blur_eligible(&self) -> bool {
         !self.v2_blocks
             && self.v1_basic
@@ -890,7 +874,7 @@ impl ComputeSet {
 /// Which groups of [`ScratchV2Strip`]'s planes a walk will actually write.
 ///
 /// The set is a property of the REQUEST, and the fold-footprint lane measured
-/// what ignoring it costs: a `v1_only` + [`V1PoolsMode::Full`] score — the
+/// what ignoring it costs: a `v1_only` + [`V1PoolsMode::Peaks`] score — the
 /// fold-backed scoring walk — runs self-blur bands, so phase A never executes
 /// and the ONLY planes it writes are `src_wide` / `dst_wide`. The other twelve
 /// were still allocated at `3 × 148 × width × 4` bytes apiece: **21,312·width

@@ -1,7 +1,7 @@
 //! Feature definitions and their scale/channel placements.
 //!
 //! The registered layout is block-major: basic [0, 156), peaks [156, 228),
-//! masked [228, 300), IW [300, 372), and v2 [372, 720) for four scales.
+//! reserved [228, 372), and v2 [372, 720) for four scales.
 //! Each block expands its signal table across scales and XYB channels.
 
 use crate::feature_set_id::{ComputeToken, SlotSet};
@@ -512,11 +512,9 @@ pub(crate) fn def_at(id: usize, n_scales: usize) -> Option<FeatureDef> {
 }
 
 pub(crate) fn family_slots(family: impl Into<Family>, n_scales: usize) -> SlotSet {
-    match family.into() {
-        other => match block_base(other, n_scales) {
-            Some((base, block)) => SlotSet::from_ranges([(base, base + block.width(n_scales))]),
-            None => SlotSet::default(),
-        },
+    match block_base(family, n_scales) {
+        Some((base, block)) => SlotSet::from_ranges([(base, base + block.width(n_scales))]),
+        None => SlotSet::default(),
     }
 }
 

@@ -1,6 +1,8 @@
 //! Legacy linear score mapping, shared by the preview scorers.
+#[cfg(feature = "legacy-models")]
 use crate::det_math::{DetPow, PowForm};
 
+#[cfg(feature = "legacy-models")]
 pub fn distance_to_score_mapped(raw_distance: f64, a: f64, b: f64, form: PowForm) -> f64 {
     if raw_distance <= 0.0 {
         100.0
@@ -130,6 +132,7 @@ pub fn pchip_eval_capped(x: f64, xs: &[f64], ys: &[f64], derivs: &[f64]) -> f64 
 mod tests {
     use super::*;
 
+    #[cfg(feature = "legacy-models")]
     #[test]
     fn distance_mapping_is_exactly_a_hundred_at_or_below_zero() {
         for form in [PowForm::LibmPowf, PowForm::PureRust] {

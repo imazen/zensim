@@ -26,8 +26,9 @@ frozen models.
 New public API goes through a pull request so the signatures are reviewed.
 
 `split_parity_check` requires the `training` feature (declared in Cargo.toml).
-`ProfileParams::custom` is available to unit tests as well as training builds, so
-`cargo test --workspace --all-targets` builds without enabling training.
+`legacy-models` is off by default. `training` enables it for custom linear scoring;
+preview tests and weights follow the feature. Run all-target tests and clippy in
+both default and `--features legacy-models` configurations.
 Fresh checkouts also need the existing classification PNG fixtures: run the two
 commands in `just profile-fixtures` under the resource wrapper before testing.
 The PNGs are ignored build inputs; keep them out of commits.
@@ -64,5 +65,4 @@ pushed tag and GitHub release.
 - The historical cross-path audit at `d15a5486` also found PreviewV0_2
   score mismatches and map rounding differences at 65×63 and 257×193.
   Those preview contracts remain behind `legacy-models`; see the historical
-  `docs/CROSS_PATH_AUDIT.md`. The removed development MLP's discrepancy
-  closes with removal of that model.
+  `docs/CROSS_PATH_AUDIT.md`.

@@ -38,7 +38,9 @@ fn f32s(v: &[f32]) -> u64 {
 
 fn main() {
     let profiles = [
+        #[cfg(feature = "legacy-models")]
         ("PreviewV0_1", ZensimProfile::PreviewV0_1),
+        #[cfg(feature = "legacy-models")]
         ("PreviewV0_2", ZensimProfile::PreviewV0_2),
         ("A", ZensimProfile::A),
     ];

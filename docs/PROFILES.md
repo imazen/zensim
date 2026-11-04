@@ -9,7 +9,6 @@ the record for the revision-7 models is
 | Public profile | Research / development name | Status |
 |---|---|---|
 | `A` (`zensim-a`) | research `F`, `mixF3` (zensimx adoption record, 2026-11-04) | Adopted general model; `latest()` and `codec_target()` |
-| `PreviewV0_1`, `PreviewV0_2` | published 0.1/0.2 linear profiles | Unchanged |
 
 The published 0.2.7 API had only `PreviewV0_1` and `PreviewV0_2`; neither is renamed.
 Research names stay unchanged.
@@ -17,9 +16,10 @@ Research names stay unchanged.
 | Profile | Bake | SHA-256 | Features |
 |---|---|---|---|
 | `A` | `weights/rev7_mix_h128_2026-11-03.bin` | `d5e2a56db35c32620d9f9d9c19ba3bc78bd8fea2b8cd933cde8447428d85e62a` | 492 revision-7 damage features (with full-resolution chroma) + 492 fragility products |
-| `PreviewV0_1`, `PreviewV0_2` | linear weights in `src/profile.rs` | | 228 revision-1 features |
 
 The revision-7 research models `E` and `ECodec` stay in [imazen/zensimx](https://github.com/imazen/zensimx) and are not published.
+
+The 0.1/0.2 linear profiles are available with the `legacy-models` feature for score continuity with 0.2.7.
 
 ## The adopted mix (`A`)
 
@@ -130,3 +130,18 @@ same Ryzen 9 9950X3D. The same 56 values also remain bit-identical after the
 HDR cube-root port. [Per-case score bits](../benchmarks/public_profiles_withdrawal_2026-11-04.tsv).
 All 42 retained historical score constants are unchanged. The revision-7 cross-path,
 HDR and profile checks passed (2, 2 and 8 tests respectively).
+
+### Optional preview models
+
+`legacy-models` enables `PreviewV0_1` (`zensim-preview-v0.1`) and `PreviewV0_2`
+(`zensim-preview-v0.2`), their 228-weight linear scorer and golden tests. `training`
+also enables this feature because its custom-configuration entry points use the
+linear scorer. The coefficients are inline Rust arrays, not external weight files.
+A's steering maps retain their shared 156-coefficient projection independently;
+the default build contains no preview variant or 228-weight scoring vector.
+
+A's feature IDs retain the retired f228–f371 gap; those slots are uncomputable,
+not renumbered. The v47 alpha/tanh head and revision-1 masked/IW extraction are
+removed. A still uses the shared PCHIP evaluator, and its revision-7 masked/IW
+features are separate definitions that remain unchanged. `zensim-regress` already
+selects `latest()`, so it continues to use A with either feature configuration.

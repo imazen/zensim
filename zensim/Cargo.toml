@@ -21,13 +21,15 @@ all-features = true
 
 [features]
 default = ["avx512", "imgref", "threads"]
+## Opt in to the 0.1/0.2 linear profiles for score continuity.
+legacy-models = []
 avx512 = ["archmage/avx512", "magetypes/avx512"]
 ## Enable multi-threaded computation via rayon. Disable for wasm or single-threaded use.
 threads = ["dep:rayon"]
 ## Exposes training/research API: ZensimConfig, score_from_features, WEIGHTS,
 ## FEATURES_PER_SCALE. These items control metric internals (blur kernel, scale
 ## count) whose outputs are incomparable with the default trained weights.
-training = []
+training = ["legacy-models"]
 ## Exposes classification API: classify(), ClassifiedResult, ErrorClassification,
 ## DeltaStats, AlphaStratifiedStats. Used by zensim-regress for regression testing.
 classification = []

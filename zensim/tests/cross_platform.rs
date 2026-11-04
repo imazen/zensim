@@ -73,6 +73,7 @@ fn generate_test_pairs(w: usize, h: usize) -> Vec<TestPair> {
 
 // ─── Tests ─────────────────────────────────────────────────────────────────
 
+#[cfg(feature = "legacy-models")]
 /// Hardcoded reference scores validated across all 7 CI platforms.
 ///
 /// The V0_2 contract is "scores approximately stable across builds" — not
@@ -144,6 +145,7 @@ fn hardcoded_reference_scores() {
     );
 }
 
+#[cfg(feature = "legacy-models")]
 /// All features must be non-trivial (max > 1e-6 across all 8 test pairs).
 /// Layout: [0..156) scored (13/ch × 3ch × 4), [156..228) peaks (6/ch × 3ch × 4)
 #[cfg(feature = "training")]
@@ -234,6 +236,7 @@ fn feature_coverage() {
     println!("  All {NUM_FEATURES} features activated (max > 1e-6)");
 }
 
+#[cfg(feature = "legacy-models")]
 /// Tests all 4 generators with separately-allocated copies (not same pointer).
 ///
 /// Pinned to `PreviewV0_2` rather than `latest()` because the
@@ -298,6 +301,7 @@ fn identical_images_score_100() {
     }
 }
 
+#[cfg(feature = "legacy-models")]
 /// `PreviewV0_1` is the restored 0.2.x-compatible linear profile. Guard its
 /// basic contract: correct name, identical images score exactly 100, and a
 /// distorted pair scores below 100 (the profile is wired and non-trivial).
@@ -498,6 +502,7 @@ fn determinism_same_platform() {
     println!("  All 8 pairs × 3 runs bit-exact");
 }
 
+#[cfg(feature = "legacy-models")]
 /// mean_offset must reflect XYB channel shifts for color-shifted images.
 /// Identical images must have exactly [0, 0, 0].
 #[test]

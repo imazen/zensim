@@ -176,23 +176,10 @@ impl Layout {
     }
 }
 
-/// The layout a loaded bake DECLARES.
-///
-/// Conservative by construction, and that is the safety property: a dense
-/// layout is used **only** when the bake carries a `zentrain.feature_set_id`
-/// that this build can reproduce AND whose slot count equals the bake's
-/// caller-facing width exactly. Anything else — no id, an unparseable id, an
-/// id whose hash disagrees, or an id whose slot count differs from the width
-/// (which is the NORMAL case: the metadata records the id of the tables the
-/// bake was TRAINED on, and a `944`-with-structural-zeros producer names 265
-/// slots at width 944) — resolves to the IDENTITY layout at
-/// `caller_input_width()`, which is exactly what every bake in existence gets
-/// today.
-///
-/// So this function returns a non-identity layout for **zero** currently
-/// shipped or board bakes, by design; it is the hook a dense-table bake needs
-/// in order to be servable at all, and
-/// [`tests::every_shipped_bake_resolves_to_an_identity_layout`] pins that.
+/// Resolve the bake's declared feature IDs to its gather layout. A's derived
+/// inputs use the declared read set; its model input count includes products.
+/// Other bakes may use a matching dense feature-set declaration or an identity
+/// layout. The v47 bake and its declaration no longer ship.
 pub(crate) fn declared_layout(model: &crate::mlp::Model) -> Layout {
     let width = model.caller_input_width();
     if let Some(slots) = declared_ids(model)

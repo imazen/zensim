@@ -36,7 +36,9 @@ fn score(profile: ZensimProfile, p: &SplitPair) -> f64 {
 fn by_name(name: &str) -> ZensimProfile {
     match name {
         "A" => ZensimProfile::A,
+        #[cfg(feature = "legacy-models")]
         "PreviewV0_1" => ZensimProfile::PreviewV0_1,
+        #[cfg(feature = "legacy-models")]
         "PreviewV0_2" => ZensimProfile::PreviewV0_2,
         _ => unreachable!(),
     }
@@ -58,19 +60,33 @@ const GOLDEN: &[(&str, &str, u64)] = &[
     ("A", "31x17-text-shift", 0x40562d2f88e71244),
     ("A", "512x384-photo-blocks", 0x404dcd8ed6bee9bc),
     ("A", "1024x768-photo-noise", 0x404a54e9256bcb0f),
+    #[cfg(feature = "legacy-models")]
     ("PreviewV0_2", "64x64-photo-noise", 0x4053c2809278bdab),
+    #[cfg(feature = "legacy-models")]
     ("PreviewV0_2", "64x64-edges-blur", 0x402fe8667b189400),
+    #[cfg(feature = "legacy-models")]
     ("PreviewV0_2", "65x63-text-blocks", 0xc042853a97107170),
+    #[cfg(feature = "legacy-models")]
     ("PreviewV0_2", "128x96-photo-posterize", 0x40537ea0198c0b60),
+    #[cfg(feature = "legacy-models")]
     ("PreviewV0_2", "200x150-edges-shift", 0x40553e6ff2624cbd),
+    #[cfg(feature = "legacy-models")]
     ("PreviewV0_2", "200x150-photo-blur", 0x40536d00e6303f17),
+    #[cfg(feature = "legacy-models")]
     ("PreviewV0_2", "256x256-text-noise", 0x4054b03976a363b0),
+    #[cfg(feature = "legacy-models")]
     ("PreviewV0_2", "256x256-photo-pixels", 0x4058dde8b46bdf4a),
+    #[cfg(feature = "legacy-models")]
     ("PreviewV0_2", "333x251-edges-blocks", 0xc061ff02ae3ac7b4),
+    #[cfg(feature = "legacy-models")]
     ("PreviewV0_2", "333x251-photo-identity", 0x4059000000000000),
+    #[cfg(feature = "legacy-models")]
     ("PreviewV0_2", "16x16-photo-noise", 0x405520a00c68709c),
+    #[cfg(feature = "legacy-models")]
     ("PreviewV0_2", "31x17-text-shift", 0x40588bb8484bed5e),
+    #[cfg(feature = "legacy-models")]
     ("PreviewV0_2", "512x384-photo-blocks", 0x4052bdd01c513e9e),
+    #[cfg(feature = "legacy-models")]
     ("PreviewV0_2", "1024x768-photo-noise", 0x404e743b38b5e556),
 ];
 
@@ -105,12 +121,20 @@ fn golden_scores_match_the_research_reference() {
 #[test]
 fn identical_images_score_100() {
     let _token = archmage::testing::lock_token_testing();
-    for name in ["A", "PreviewV0_1", "PreviewV0_2"] {
-        for id in [
+    let cases = [
+        "A",
+        #[cfg(feature = "legacy-models")]
+        "PreviewV0_1",
+        #[cfg(feature = "legacy-models")]
+        "PreviewV0_2",
+    ];
+    for name in cases {
+        let cases = [
             "8x8-photo-identity",
             "65x63-edges-identity",
             "256x256-text-identity",
-        ] {
+        ];
+        for id in cases {
             assert_eq!(score(by_name(name), &pair(id)), 100.0, "{name} {id}");
         }
     }
@@ -134,7 +158,8 @@ fn more_noise_never_scores_higher() {
     {
         let profile = ZensimProfile::A;
         let mut last = f64::INFINITY;
-        for amp in [0, 1, 2, 4, 8, 16, 32] {
+        let cases = [0, 1, 2, 4, 8, 16, 32];
+        for amp in cases {
             let dst: Vec<u8> = base
                 .src
                 .iter()
@@ -209,16 +234,19 @@ fn rev7_scores_are_identical_across_thread_settings() {
 fn all_features_agree_with_compute_on_every_slot_compute_fills() {
     // The tier test disables SIMD tiers process-wide while it runs.
     let _token = archmage::testing::lock_token_testing();
-    for id in [
+    let cases = [
         "31x17-photo-noise",
         "65x63-text-blocks",
         "200x150-edges-blur",
         "333x251-photo-posterize",
-    ] {
+    ];
+    for id in cases {
         let p = pair(id);
         let src = RgbSlice::new(bytemuck::cast_slice(&p.src), p.width, p.height);
         let dst = RgbSlice::new(bytemuck::cast_slice(&p.dst), p.width, p.height);
-        for profile in [ZensimProfile::A, ZensimProfile::PreviewV0_2] {
+        #[cfg(feature = "legacy-models")]
+        let cases = [ZensimProfile::A, ZensimProfile::PreviewV0_2];
+        for profile in cases {
             let z = Zensim::new(profile);
             let served = z.compute(&src, &dst).unwrap();
             let all = z.compute_all_features(&src, &dst).unwrap();
@@ -246,17 +274,19 @@ fn latest_and_codec_target_select_the_rev7_profiles() {
     assert_eq!(ZensimProfile::A.name(), "zensim-a");
 }
 
-/// Canonical names select the adopted and earlier development models. The
-/// legacy reference retains its existing cross-architecture rounding tolerance;
-/// exact same-host rename parity is recorded in docs/PROFILES.md.
+/// Canonical names select A and, when enabled, the optional previews.
+/// Withdrawn development and research names fail parsing.
 #[test]
 fn canonical_names_select_the_shipped_models() {
     let _token = archmage::testing::lock_token_testing();
-    for profile in [
+    let cases = [
         ZensimProfile::A,
+        #[cfg(feature = "legacy-models")]
         ZensimProfile::PreviewV0_1,
+        #[cfg(feature = "legacy-models")]
         ZensimProfile::PreviewV0_2,
-    ] {
+    ];
+    for profile in cases {
         assert_eq!(profile.to_string().parse(), Ok(profile));
     }
     assert_eq!("zensim-a".parse(), Ok(ZensimProfile::A));
@@ -264,4 +294,17 @@ fn canonical_names_select_the_shipped_models() {
     assert!("zensim-f".parse::<ZensimProfile>().is_err());
     assert!("zensim-e".parse::<ZensimProfile>().is_err());
     assert!("zensim-e-codec".parse::<ZensimProfile>().is_err());
+}
+
+#[cfg(not(feature = "legacy-models"))]
+#[test]
+fn previews_require_the_legacy_models_feature() {
+    let cases = [
+        "zensim-preview-v0.1",
+        "zensim-preview-v0.2",
+        "zensim-legacy-linear-v0.2",
+    ];
+    for name in cases {
+        assert!(name.parse::<ZensimProfile>().is_err());
+    }
 }

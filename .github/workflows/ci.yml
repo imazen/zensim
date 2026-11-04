@@ -24,7 +24,13 @@ jobs:
       - run: cargo fmt --all --check
 
   clippy:
-    name: Clippy
+    name: Clippy (${{ matrix.models.name }})
+    strategy:
+      matrix:
+        models:
+          - {name: default, args: ""}
+          - {name: legacy-models, args: "--features legacy-models"}
+          - {name: all-features, args: "--all-features"}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -32,14 +38,17 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - run: cargo clippy --workspace --all-targets ${{ matrix.models.args }} -- -D warnings
 
   test:
-    name: Test (${{ matrix.os }})
+    name: Test (${{ matrix.os }}, ${{ matrix.models.name }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        models:
+          - {name: default, args: ""}
+          - {name: legacy-models, args: "--features legacy-models"}
         os:
           - ubuntu-latest
           - ubuntu-24.04-arm
@@ -50,7 +59,9 @@ jobs:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test --workspace --no-fail-fast -- --nocapture
+      - run: cargo test --workspace --all-targets --no-fail-fast ${{ matrix.models.args }}
+      - run: cargo test --workspace --doc ${{ matrix.models.args }}
+      - run: cargo doc --workspace --no-deps ${{ matrix.models.args }}
 
   test-all-features:
     name: Test all features
@@ -91,6 +102,7 @@ jobs:
             "avx512"
             "threads"
             "imgref"
+            "legacy-models"
             "training"
             "classification"
             "zenpixels"

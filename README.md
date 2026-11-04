@@ -24,12 +24,13 @@ candidates against one reference with `precompute_reference` and `compute_with_r
 | Profile | Name | Use |
 |---|---|---|
 | `A` (`latest()`, `codec_target()`) | `zensim-a` | General purpose, the default: compression, noise, blur, colour and contrast changes |
-| `PreviewV0_1`, `PreviewV0_2` | | The linear profiles of zensim 0.1 and 0.2 |
 
 `A` is a monotone network over multi-scale SSIM, edge, detail-loss and
 high-frequency features in XYB: more damage never raises the score. Severe damage
 can score below 0. Scores are bit-identical across x86 SIMD tiers and thread counts.
 Training data and evaluation details: [docs/PROFILES.md](docs/PROFILES.md).
+
+The 0.1/0.2 linear profiles are available with the `legacy-models` feature for score continuity with 0.2.7.
 
 ## Accuracy
 

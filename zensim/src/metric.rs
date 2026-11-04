@@ -122,6 +122,7 @@ use crate::error::ZensimError;
 /// regardless of radius and has full SIMD optimization.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg(feature = "training")]
 pub enum BlurKernel {
     /// Iterated box blur. `passes` controls the kernel shape:
     /// - 1 = rectangular (fastest, enables fused streaming kernels)
@@ -133,6 +134,7 @@ pub enum BlurKernel {
     },
 }
 
+#[cfg(feature = "training")]
 impl Default for BlurKernel {
     fn default() -> Self {
         Self::Box { passes: 1 }
@@ -150,6 +152,7 @@ impl Default for BlurKernel {
 /// because no compute path ever dispatched on them.)
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[cfg(feature = "training")]
 pub enum DownscaleFilter {
     /// 2×2 box averaging (fastest, current default).
     #[default]
@@ -194,12 +197,14 @@ pub struct ZensimConfig {
     ///
     /// Overrides `blur_passes` when set. The `blur_radius` field still controls
     /// the kernel width. Currently only the `Box` variant is implemented.
+    #[cfg(feature = "training")]
     pub blur_kernel: BlurKernel,
 
     /// Downscale filter for pyramid construction (default: `DownscaleFilter::Box2x2`).
     ///
     /// Controls how each pyramid level is produced. `Box2x2` is currently
     /// the only variant.
+    #[cfg(feature = "training")]
     pub downscale_filter: DownscaleFilter,
 
     /// Compute all 156 features even when their weights are zero (default: false).
@@ -222,6 +227,7 @@ pub struct ZensimConfig {
     ///
     /// Used in the final score formula: `score = 100 - a × d^b`, where `d` is
     /// the raw weighted distance. Larger values spread scores more aggressively.
+    #[cfg(feature = "legacy-models")]
     pub score_mapping_a: f64,
 
     /// Score mapping gamma exponent (default: 0.7).
@@ -229,6 +235,7 @@ pub struct ZensimConfig {
     /// Used in the final score formula: `score = 100 - a × d^b`. Sub-linear
     /// gamma (< 1.0) compresses high distances, giving more resolution in the
     /// high-quality range.
+    #[cfg(feature = "legacy-models")]
     pub score_mapping_b: f64,
 
     /// Enable multi-threaded computation via rayon (default: true).
@@ -255,12 +262,16 @@ impl Default for ZensimConfig {
             attribution_channels: None,
             blur_radius: 5,
             blur_passes: 1,
+            #[cfg(feature = "training")]
             blur_kernel: BlurKernel::default(),
+            #[cfg(feature = "training")]
             downscale_filter: DownscaleFilter::default(),
             compute_all_features: false,
 
             num_scales: crate::NUM_SCALES,
+            #[cfg(feature = "legacy-models")]
             score_mapping_a: 18.0,
+            #[cfg(feature = "legacy-models")]
             score_mapping_b: 0.7,
             allow_multithreading: true,
         }
@@ -274,6 +285,7 @@ impl Default for ZensimConfig {
 ///
 /// For profile-specific mapping, use [`Zensim::compute`] which applies the profile's
 /// `score_mapping_a` and `score_mapping_b` automatically.
+#[cfg(feature = "training")]
 pub(crate) fn distance_to_score(raw_distance: f64) -> f64 {
     distance_to_score_mapped(raw_distance, 18.0, 0.7)
 }
@@ -283,6 +295,7 @@ pub(crate) fn distance_to_score(raw_distance: f64) -> f64 {
 /// `score = 100 - a * d^b`. Nominally 0–100 but can go negative for
 /// extreme distortions (the magnitude below zero is informative —
 /// it distinguishes "slightly wrong" from "completely wrong").
+#[cfg(feature = "legacy-models")]
 fn distance_to_score_mapped(raw_distance: f64, a: f64, b: f64) -> f64 {
     crate::score_math::distance_to_score_mapped(raw_distance, a, b, active_pow_form())
 }
@@ -296,6 +309,7 @@ fn distance_to_score_mapped(raw_distance: f64, a: f64, b: f64) -> f64 {
 /// Returns `(score, raw_distance)` on success, or
 /// [`ZensimError::FeatureWeightsLengthMismatch`] if the slices have
 /// different lengths.
+#[cfg(feature = "training")]
 pub fn try_score_from_features(
     features: &[f64],
     weights: &[f64],
@@ -334,6 +348,7 @@ pub fn try_score_from_features(
 ///
 /// Panics if the slices have different lengths; [`try_score_from_features`]
 /// returns an error instead.
+#[cfg(feature = "training")]
 pub fn score_from_features(features: &[f64], weights: &[f64]) -> (f64, f64) {
     try_score_from_features(features, weights).expect("features and weights must have same length")
 }
@@ -347,6 +362,7 @@ pub fn score_from_features(features: &[f64], weights: &[f64]) -> (f64, f64) {
 /// Feature-extraction API for custom scale counts. Changing the pyramid
 /// changes the features; default trained weights need their original layout.
 #[doc(hidden)]
+#[cfg(feature = "training")]
 pub fn precompute_reference_with_scales(
     source: &[[u8; 3]],
     width: usize,
@@ -547,7 +563,7 @@ impl ZensimResult {
             score: f64::NAN,
             raw_distance: f64::NAN,
             features: vec![],
-            profile: crate::profile::ZensimProfile::PreviewV0_1,
+            profile: crate::profile::ZensimProfile::A,
             mean_offset: [f64::NAN; 3],
             is_identical: false,
         }
@@ -2203,16 +2219,20 @@ pub(crate) fn config_from_params(params: &ProfileParams, parallel: bool) -> Zens
         attribution_channels: None,
         blur_radius: params.blur_radius,
         blur_passes: params.blur_passes,
+        #[cfg(feature = "training")]
         blur_kernel: BlurKernel::Box {
             passes: params.blur_passes,
         },
+        #[cfg(feature = "training")]
         downscale_filter: DownscaleFilter::default(),
         // MLP-scored profiles need the full feature vector populated;
         // the linear path can skip features it doesn't use.
         compute_all_features: params.mlp_bytes.is_some(),
 
         num_scales: params.num_scales,
+        #[cfg(feature = "legacy-models")]
         score_mapping_a: params.score_mapping_a,
+        #[cfg(feature = "legacy-models")]
         score_mapping_b: params.score_mapping_b,
         allow_multithreading: parallel,
     }
@@ -2294,7 +2314,14 @@ pub(crate) fn dispose_mlp_raw(raw: f64, params: &crate::profile::ProfileParams) 
         // (e.g. raw=90 → mapped=-374).
         raw
     } else {
-        distance_to_score_mapped(raw, params.score_mapping_a, params.score_mapping_b)
+        #[cfg(feature = "legacy-models")]
+        {
+            distance_to_score_mapped(raw, params.score_mapping_a, params.score_mapping_b)
+        }
+        #[cfg(not(feature = "legacy-models"))]
+        {
+            unreachable!("A uses its baked score calibration")
+        }
     };
     // Bound the score to [0, 100] before handing it back. Two
     // policies exist:
@@ -2822,7 +2849,7 @@ impl<'a> FeatureView<'a> {
 /// Uses the legacy v0.2 linear weights. Custom configuration changes metric
 /// internals, so its scores are not comparable with default-profile scores.
 #[doc(hidden)]
-#[cfg(any(feature = "training", test))]
+#[cfg(all(feature = "legacy-models", any(feature = "training", test)))]
 pub fn compute_zensim_with_config(
     source: &[[u8; 3]],
     distorted: &[[u8; 3]],
@@ -2866,6 +2893,7 @@ pub fn compute_zensim_with_config(
             100.0,
             0.0,
             vec![0.0; num_features],
+            #[cfg(feature = "legacy-models")]
             ZensimProfile::LegacyLinearV0_2,
             [0.0; 3],
         )
@@ -2906,13 +2934,15 @@ pub fn compute_zensim_with_config(
 ///
 /// Weights are trained against synthetic quality scores (see `weights/` directory).
 /// Features per scale for the default scoring profile (3 channels × 13 features = 39).
+#[cfg(feature = "training")]
 pub const FEATURES_PER_SCALE: usize = FEATURES_PER_CHANNEL_WITH_PEAKS * 3;
 
 /// Default scoring weights — references the latest profile weights.
 ///
 /// Layout: 4 scales × 3 channels (X,Y,B) × 13 basic features, then
 ///         4 scales × 3 channels × 6 peak features = 228 total.
-#[cfg(any(feature = "training", test))]
+#[cfg(all(feature = "legacy-models", any(feature = "training", test)))]
+#[cfg(feature = "legacy-models")]
 pub const WEIGHTS: &[f64; 228] = &crate::profile::WEIGHTS_PREVIEW_V0_2;
 
 /// **THE single owner of "turn a v1-layout feature vector into
@@ -2959,17 +2989,25 @@ pub(crate) fn score_v1_layout_features(
         }
     }
 
-    let scored_total = n_scales * 3 * FEATURES_PER_CHANNEL_WITH_PEAKS;
-    let n_score = scored_total.min(weights.len()).min(features.len());
-    let mut raw_distance = 0.0f64;
-    for (i, &feat) in features[..n_score].iter().enumerate() {
-        raw_distance += feat * weights[i];
-    }
-    raw_distance /= n_scales.max(1) as f64;
+    #[cfg(feature = "legacy-models")]
+    {
+        let scored_total = n_scales * 3 * FEATURES_PER_CHANNEL_WITH_PEAKS;
+        let n_score = scored_total.min(weights.len()).min(features.len());
+        let mut raw_distance = 0.0f64;
+        for (i, &feat) in features[..n_score].iter().enumerate() {
+            raw_distance += feat * weights[i];
+        }
+        raw_distance /= n_scales.max(1) as f64;
 
-    let score =
-        distance_to_score_mapped(raw_distance, config.score_mapping_a, config.score_mapping_b);
-    (score, raw_distance)
+        let score =
+            distance_to_score_mapped(raw_distance, config.score_mapping_a, config.score_mapping_b);
+        (score, raw_distance)
+    }
+    #[cfg(not(feature = "legacy-models"))]
+    {
+        let _ = (weights, config, n_scales);
+        (0.0, 0.0)
+    }
 }
 
 pub(crate) fn combine_scores(
@@ -3070,12 +3108,16 @@ mod tests {
     #[allow(deprecated)]
     fn public_configs_preserve_revision_route_invariants() {
         use crate::feature_defs::FormulaRevision;
-        for profile in [
+        let profiles = [
+            #[cfg(feature = "legacy-models")]
             ZensimProfile::PreviewV0_1,
+            #[cfg(feature = "legacy-models")]
             ZensimProfile::PreviewV0_2,
             ZensimProfile::A,
+            #[cfg(feature = "legacy-models")]
             ZensimProfile::LegacyLinearV0_2,
-        ] {
+        ];
+        for profile in profiles {
             let params = profile.params();
             let config = config_from_params(params, false);
             if config.revision() >= FormulaRevision::Rev5 {
@@ -3083,14 +3125,18 @@ mod tests {
                 assert!(crate::fold_engine::is_fold_backable(&config), "{profile:?}");
             }
         }
-        let custom = ProfileParams::custom(&[], 3, 3, 2, 1.0, 1.0);
-        assert_eq!(
-            config_from_params(&custom, false).revision(),
-            FormulaRevision::Rev1
-        );
+        #[cfg(feature = "legacy-models")]
+        {
+            let custom = ProfileParams::custom(&[], 3, 3, 2, 1.0, 1.0);
+            assert_eq!(
+                config_from_params(&custom, false).revision(),
+                FormulaRevision::Rev1
+            );
+        }
         assert_eq!(ZensimConfig::default().revision(), FormulaRevision::Rev1);
     }
 
+    #[cfg(feature = "legacy-models")]
     /// Verify compute_all_features produces same score as default (weight-skipped) path.
     /// This exercises the multi-SSIM channel code path where ssim_chs.len() > 1.
     #[test]
@@ -3157,6 +3203,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "legacy-models")]
     /// `compute_zensim_with_config` scores via plain linear `WEIGHTS`
     /// (V0_2), never an MLP forward pass — it must NOT claim the
     /// MLP-scored profile tag.

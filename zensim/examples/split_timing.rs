@@ -18,7 +18,9 @@ fn main() {
     let a: Vec<String> = std::env::args().skip(1).collect();
     let profile = match a[0].as_str() {
         "A" | "zensim-a" => ZensimProfile::A,
+        #[cfg(feature = "legacy-models")]
         "PreviewV0_1" => ZensimProfile::PreviewV0_1,
+        #[cfg(feature = "legacy-models")]
         "PreviewV0_2" => ZensimProfile::PreviewV0_2,
         other => panic!("unknown profile {other}"),
     };
