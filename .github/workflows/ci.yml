@@ -115,14 +115,14 @@ jobs:
           for features in "${features_list[@]}"; do
             if [ -z "$features" ]; then
               label="none"
-              flags="--no-default-features"
+              flags=(--no-default-features)
             else
               label="$features"
-              flags="--no-default-features --features $features"
+              flags=(--no-default-features --features "$features")
             fi
             echo "::group::Clippy + test: $label"
-            cargo clippy -p zensim $flags --lib -- -D warnings
-            cargo test -p zensim $flags --lib -- --nocapture
+            cargo clippy -p zensim "${flags[@]}" --lib -- -D warnings
+            cargo test -p zensim "${flags[@]}" --lib -- --nocapture
             echo "::endgroup::"
           done
 
