@@ -36,7 +36,11 @@ fn main() {
             let src = RgbSlice::new(bytemuck::cast_slice(&p.src), p.width, p.height);
             let dst = RgbSlice::new(bytemuck::cast_slice(&p.dst), p.width, p.height);
             let result = Zensim::new(profile).compute(&src, &dst).unwrap();
-            println!("{}\t{id}\t{:016x}", profile.name(), result.score().to_bits());
+            println!(
+                "{}\t{id}\t{:016x}",
+                profile.name(),
+                result.score().to_bits()
+            );
         }
     }
 }

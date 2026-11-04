@@ -3,8 +3,8 @@
 ## [Unreleased]
 
 ### QUEUED BREAKING CHANGES
-- zensim 0.3.0: the preview profiles require `legacy-models`, off by default; their scores are unchanged.
-- zensim 0.3.0: remove the development-only `LegacyA` profile and its revision-1 372-feature MLP serving path.
+- zensim 0.3.0: the preview profiles require `legacy-models`, off by default; their scores are unchanged (`aab05bd1`).
+- zensim 0.3.0: remove the development-only `LegacyA` profile and its revision-1 372-feature MLP serving path (`7c2bf29c`, `788918cd`).
 - zensim 0.3.0: `compute_hdr` feeds the cube-root front end at 203 cd/m²; HDR scores change (`0b596aa0`).
 - zensim 0.3.0: research profiles `E` and `ECodec` are withdrawn; `codec_target()` returns `A` (`fdce4ac2`).
 <!-- Breaking changes that ship together in the next major (or minor for 0.x).

@@ -145,3 +145,16 @@ not renumbered. The v47 alpha/tanh head and revision-1 masked/IW extraction are
 removed. A still uses the shared PCHIP evaluator, and its revision-7 masked/IW
 features are separate definitions that remain unchanged. `zensim-regress` already
 selects `latest()`, so it continues to use A with either feature configuration.
+
+### Final public line and removal parity (2026-11-04)
+
+A is the only default profile; the two previews require `legacy-models`.
+Removing the development LegacyA model and gating the previews preserve all
+42 retained same-host SDR scores: 14 for A and 14 for each preview. Default and
+preview-enabled builds reproduce the frozen Phase 2 values bit for bit.
+All 166 HDR reference cases remain bit-identical. The old LegacyA cross-path
+bug closes with removal of that model; the historical preview findings remain
+recorded separately.
+
+[Per-case SDR comparison](../benchmarks/profile_a_phase3_parity_2026-11-04.tsv),
+[validation, removal counts and artifact pointer](../benchmarks/profile_a_phase3_2026-11-04.pointer.md).
