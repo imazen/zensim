@@ -14,8 +14,6 @@ categories = ["multimedia::images", "computer-vision"]
 include = [
     "src/**/*.rs",
     "weights/v47_strict_qat_native_byid_2026-09-06.bin",
-    "weights/rev7_general_h128_2026-10-27.bin",
-    "weights/rev7_codec_h128_2026-10-27.bin",
     "weights/rev7_mix_h128_2026-11-03.bin",
 ]
 

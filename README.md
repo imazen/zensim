@@ -23,51 +23,33 @@ candidates against one reference with `precompute_reference` and `compute_with_r
 
 | Profile | Name | Use |
 |---|---|---|
-| `A` (`latest()`) | `zensim-a` | General purpose, the default: compression, noise, blur, colour and contrast changes |
-| `E` | `zensim-e` | The previous general-purpose model, kept for callers calibrated to its scores |
-| `ECodec` (`codec_target()`) | `zensim-e-codec` | Codec output (JPEG, WebP, AVIF, JPEG XL); less reliable on other distortions |
+| `A` (`latest()`, `codec_target()`) | `zensim-a` | General purpose, the default: compression, noise, blur, colour and contrast changes |
 | `LegacyA` | `zensim-legacy-a` | Legacy development model, for callers whose thresholds are calibrated to it |
 | `PreviewV0_1`, `PreviewV0_2` | | The linear profiles of zensim 0.1 and 0.2 |
 
-`E` and `ECodec` are monotone networks over multi-scale SSIM, edge, detail-loss and
-high-frequency features in the XYB colour space: more damage never raises the score. Severe
-damage can score below 0. Their scores are bit-identical across x86 SIMD tiers and thread
-counts. Training data and evaluation details: [docs/PROFILES.md](docs/PROFILES.md).
+`A` is a monotone network over multi-scale SSIM, edge, detail-loss and
+high-frequency features in XYB: more damage never raises the score. Severe damage
+can score below 0. Scores are bit-identical across x86 SIMD tiers and thread counts.
+Training data and evaluation details: [docs/PROFILES.md](docs/PROFILES.md).
 
 ## Accuracy
 
-Spearman rank correlation with human ratings on the held-out evaluation references of nine
-datasets, scored once after the models were frozen. Six of these datasets contributed other
-references to training; NITS-IQA, IQA-ODI and VCL@FER were never trained on. SSIMULACRA2 and
-butteraugli were trained on none of them:
+Spearman rank correlation with human ratings on held-out references, read after
+the adopted model was frozen. MDID contributed different references to training;
+the other eight collections below were not trained on. The peer metrics were
+trained on none of these collections.
 
-| Dataset | `E` | `ECodec` | SSIMULACRA2 | Butteraugli (3-norm) |
-|---|---:|---:|---:|---:|
-| CID:IQ | 0.865 | 0.742 | 0.757 | 0.592 |
-| CID:OA | 0.889 | 0.813 | 0.847 | 0.577 |
-| Colourlab | 0.711 | 0.477 | 0.604 | 0.373 |
-| IQA-ODI | 0.865 | 0.828 | 0.854 | 0.806 |
-| IRCCyN/IVC | 0.940 | 0.935 | 0.949 | 0.912 |
-| LIVE-MD | 0.894 | 0.910 | 0.913 | 0.827 |
-| MDID | 0.870 | 0.692 | 0.787 | 0.572 |
-| NITS-IQA | 0.706 | 0.724 | 0.777 | 0.706 |
-| VCL@FER | 0.930 | 0.904 | 0.945 | 0.877 |
-
-These datasets mix compression with other distortions; `ECodec` trades accuracy on the
-latter for better ranking of codec output.
-
-## Speed and memory
-
-One thread, 95th-percentile time per comparison (AMD Ryzen 9 9950X3D, AVX-512, 2026-10-28):
-
-| | 256² | 1024² | 2048² | 4096² | Peak memory, 4096² |
-|---|---:|---:|---:|---:|---:|
-| zensim `E` | 0.98 ms | 11.2 ms | 41.5 ms | 151 ms | 158 MiB |
-| fast-ssim2 0.8.2 | 4.2 ms | 70.6 ms | 312 ms | 1,362 ms | 2,468 MiB |
-| butteraugli 0.9.3 | 5.5 ms | 90.9 ms | 418 ms | 1,945 ms | 2,646 MiB |
-
-With eight threads `E` takes 3.2 ms at 1024² and 10.1 ms at 2048². Method and the full grid:
-[docs/PROFILES.md](docs/PROFILES.md#speed-and-memory).
+| Dataset | `A` | SSIMULACRA2 | Butteraugli (3-norm) |
+|---|---:|---:|---:|
+| CID:IQ | 0.868 | 0.757 | 0.592 |
+| CID:OA | 0.911 | 0.847 | 0.577 |
+| Colourlab | 0.735 | 0.604 | 0.373 |
+| IQA-ODI | 0.867 | 0.854 | 0.806 |
+| IRCCyN/IVC | 0.919 | 0.949 | 0.912 |
+| LIVE-MD | 0.902 | 0.913 | 0.827 |
+| MDID | 0.927 | 0.787 | 0.572 |
+| NITS-IQA | 0.734 | 0.777 | 0.706 |
+| VCL@FER | 0.950 | 0.945 | 0.877 |
 
 ## Input
 

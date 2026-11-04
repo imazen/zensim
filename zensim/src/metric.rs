@@ -3490,7 +3490,7 @@ pub(crate) fn combine_scores(
 
     // Placeholder profile tag — every `Zensim::compute*` caller overrides
     // it via `with_profile(self.profile)` before returning to the user.
-    // Uses the canonical codec-target profile (`ECodec`), never the legacy `LegacyA`.
+    // Uses the canonical codec-target profile (`A`), never the legacy `LegacyA`.
     ZensimResult::new(
         score,
         raw_distance,
@@ -3512,8 +3512,6 @@ mod tests {
             ZensimProfile::PreviewV0_1,
             ZensimProfile::PreviewV0_2,
             ZensimProfile::LegacyA,
-            ZensimProfile::E,
-            ZensimProfile::ECodec,
             ZensimProfile::A,
             ZensimProfile::LegacyLinearV0_2,
         ] {

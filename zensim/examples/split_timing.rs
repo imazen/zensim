@@ -4,7 +4,7 @@
 //! with the same arguments and output, and a driver alternates the two binaries.
 //!
 //! ```text
-//! split_timing <A|E|ECodec|LegacyA|PreviewV0_2> <pair-id> <warmup> <calls>
+//! split_timing <A|LegacyA|PreviewV0_1|PreviewV0_2> <pair-id> <warmup> <calls>
 //! ```
 //! Prints one line per timed call: nanoseconds.
 
@@ -17,10 +17,9 @@ use zensim::{RgbSlice, Zensim, ZensimProfile};
 fn main() {
     let a: Vec<String> = std::env::args().skip(1).collect();
     let profile = match a[0].as_str() {
-        "E" => ZensimProfile::E,
-        "ECodec" => ZensimProfile::ECodec,
         "A" | "zensim-a" => ZensimProfile::A,
         "LegacyA" | "zensim-legacy-a" => ZensimProfile::LegacyA,
+        "PreviewV0_1" => ZensimProfile::PreviewV0_1,
         "PreviewV0_2" => ZensimProfile::PreviewV0_2,
         other => panic!("unknown profile {other}"),
     };

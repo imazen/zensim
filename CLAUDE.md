@@ -12,7 +12,7 @@ frozen models.
 
 - A change that moves any profile's scores or features is deliberate and recorded in
   `CHANGELOG.md`, never a side effect of a refactor.
-- `tests/profiles.rs` holds golden scores; the revision-7 profiles (`E`, `ECodec`) must stay
+- `tests/profiles.rs` holds golden scores; the revision-7 profile `A` must stay
   bit-identical across x86 SIMD tiers and thread counts.
 - For refactors of the extraction or scoring code, rerun the split parity gate: build
   `examples/split_parity_check.rs` here and zensimx's `split_parity_golden` on the same machine

@@ -34,10 +34,9 @@ fn score(profile: ZensimProfile, p: &SplitPair) -> f64 {
 
 fn by_name(name: &str) -> ZensimProfile {
     match name {
-        "E" => ZensimProfile::E,
-        "ECodec" => ZensimProfile::ECodec,
         "A" => ZensimProfile::A,
         "LegacyA" => ZensimProfile::LegacyA,
+        "PreviewV0_1" => ZensimProfile::PreviewV0_1,
         "PreviewV0_2" => ZensimProfile::PreviewV0_2,
         _ => unreachable!(),
     }
@@ -59,60 +58,32 @@ const GOLDEN: &[(&str, &str, u64)] = &[
     ("A", "31x17-text-shift", 0x40562d2f88e71244),
     ("A", "512x384-photo-blocks", 0x404dcd8ed6bee9bc),
     ("A", "1024x768-photo-noise", 0x404a54e9256bcb0f),
-    ("E", "64x64-photo-noise", 0x4052aad69a938ab2),
-    ("ECodec", "64x64-photo-noise", 0x40523aeeb9e7c6a8),
     ("LegacyA", "64x64-photo-noise", 0x404df8e8f9af74e6),
     ("PreviewV0_2", "64x64-photo-noise", 0x4053c2809278bdab),
-    ("E", "64x64-edges-blur", 0x401e2fe329bdc22c),
-    ("ECodec", "64x64-edges-blur", 0x403892a4cc5e23a3),
     ("LegacyA", "64x64-edges-blur", 0xc001d4a1dbbf9ad3),
     ("PreviewV0_2", "64x64-edges-blur", 0x402fe8667b189400),
-    ("E", "65x63-text-blocks", 0xc04bb7824bf08dbe),
-    ("ECodec", "65x63-text-blocks", 0x40388e003c6fccd9),
     ("LegacyA", "65x63-text-blocks", 0x40351061fa16b761),
     ("PreviewV0_2", "65x63-text-blocks", 0xc042853a97107170),
-    ("E", "128x96-photo-posterize", 0x405219d5ef2fb40e),
-    ("ECodec", "128x96-photo-posterize", 0x4051084784f15682),
     ("LegacyA", "128x96-photo-posterize", 0x404ed25181330dd5),
     ("PreviewV0_2", "128x96-photo-posterize", 0x40537ea0198c0b60),
-    ("E", "200x150-edges-shift", 0x4056be19206d8147),
-    ("ECodec", "200x150-edges-shift", 0x40560fdf8baea128),
     ("LegacyA", "200x150-edges-shift", 0x40549b2c10c8cf58),
     ("PreviewV0_2", "200x150-edges-shift", 0x40553e6ff2624cbd),
-    ("E", "200x150-photo-blur", 0x404a91a05f6040e3),
-    ("ECodec", "200x150-photo-blur", 0x4047794a4cb413eb),
     ("LegacyA", "200x150-photo-blur", 0x405276e2c552885f),
     ("PreviewV0_2", "200x150-photo-blur", 0x40536d00e6303f17),
-    ("E", "256x256-text-noise", 0x404807234bba5a54),
-    ("ECodec", "256x256-text-noise", 0x40478cc06a650371),
     ("LegacyA", "256x256-text-noise", 0x404fce495f5f703d),
     ("PreviewV0_2", "256x256-text-noise", 0x4054b03976a363b0),
-    ("E", "256x256-photo-pixels", 0x4058f426ec4d2c2d),
-    ("ECodec", "256x256-photo-pixels", 0x4058f83453851038),
     ("LegacyA", "256x256-photo-pixels", 0x40580f0dd03070e0),
     ("PreviewV0_2", "256x256-photo-pixels", 0x4058dde8b46bdf4a),
-    ("E", "333x251-edges-blocks", 0xc04a598d9a2688a1),
-    ("ECodec", "333x251-edges-blocks", 0x40314e52d5f1ed6a),
     ("LegacyA", "333x251-edges-blocks", 0xc05224a3ea2fef19),
     ("PreviewV0_2", "333x251-edges-blocks", 0xc061ff02ae3ac7b4),
-    ("E", "333x251-photo-identity", 0x4059000000000000),
-    ("ECodec", "333x251-photo-identity", 0x4059000000000000),
     ("LegacyA", "333x251-photo-identity", 0x4059000000000000),
     ("PreviewV0_2", "333x251-photo-identity", 0x4059000000000000),
-    ("E", "16x16-photo-noise", 0x4054c3e7e75a28dc),
-    ("ECodec", "16x16-photo-noise", 0x40548bd9cea66699),
     ("LegacyA", "16x16-photo-noise", 0x40500aefe491ef04),
     ("PreviewV0_2", "16x16-photo-noise", 0x405520a00c68709c),
-    ("E", "31x17-text-shift", 0x405349e63d8450b3),
-    ("ECodec", "31x17-text-shift", 0x4051211124b16b76),
     ("LegacyA", "31x17-text-shift", 0x4056840035ddea76),
     ("PreviewV0_2", "31x17-text-shift", 0x40588bb8484bed5e),
-    ("E", "512x384-photo-blocks", 0x404f49b428470fbb),
-    ("ECodec", "512x384-photo-blocks", 0x404ee3dc61c36fcf),
     ("LegacyA", "512x384-photo-blocks", 0x404f83040febe95a),
     ("PreviewV0_2", "512x384-photo-blocks", 0x4052bdd01c513e9e),
-    ("E", "1024x768-photo-noise", 0x404cdcd0363f2beb),
-    ("ECodec", "1024x768-photo-noise", 0x4047dea51aa2d7b6),
     ("LegacyA", "1024x768-photo-noise", 0x40462562e87bc4cb),
     ("PreviewV0_2", "1024x768-photo-noise", 0x404e743b38b5e556),
 ];
@@ -126,8 +97,7 @@ fn golden_scores_match_the_research_reference() {
     for &(name, id, bits) in GOLDEN {
         let want = f64::from_bits(bits);
         let got = score(by_name(name), &pair(id));
-        let exact =
-            cfg!(target_arch = "x86_64") && (name == "E" || name == "ECodec" || name == "A");
+        let exact = cfg!(target_arch = "x86_64") && name == "A";
         let ok = if exact {
             got.to_bits() == bits
         } else {
@@ -147,7 +117,7 @@ fn golden_scores_match_the_research_reference() {
 
 #[test]
 fn identical_images_score_100() {
-    for name in ["A", "E", "ECodec", "LegacyA", "PreviewV0_2"] {
+    for name in ["A", "LegacyA", "PreviewV0_1", "PreviewV0_2"] {
         for id in [
             "8x8-photo-identity",
             "65x63-edges-identity",
@@ -172,7 +142,7 @@ fn more_noise_never_scores_higher() {
             (state % 3) as i32 - 1
         })
         .collect();
-    for profile in [ZensimProfile::A, ZensimProfile::E, ZensimProfile::ECodec] {
+    for profile in [ZensimProfile::A] {
         let mut last = f64::INFINITY;
         for amp in [0, 1, 2, 4, 8, 16, 32] {
             let dst: Vec<u8> = base
@@ -201,7 +171,7 @@ fn more_noise_never_scores_higher() {
 #[test]
 fn rev7_scores_are_identical_across_simd_tiers() {
     let p = pair("333x251-photo-blur");
-    for profile in [ZensimProfile::A, ZensimProfile::E, ZensimProfile::ECodec] {
+    for profile in [ZensimProfile::A] {
         let mut scores = Vec::new();
         let report = for_each_token_permutation(CompileTimePolicy::Warn, |perm| {
             scores.push((perm.label.clone(), score(profile, &p)));
@@ -223,7 +193,7 @@ fn rev7_scores_are_identical_across_thread_settings() {
     let p = pair("1024x768-edges-noise");
     let src = RgbSlice::new(bytemuck::cast_slice(&p.src), p.width, p.height);
     let dst = RgbSlice::new(bytemuck::cast_slice(&p.dst), p.width, p.height);
-    for profile in [ZensimProfile::A, ZensimProfile::E, ZensimProfile::ECodec] {
+    for profile in [ZensimProfile::A] {
         let parallel = Zensim::new(profile)
             .with_parallel(true)
             .compute(&src, &dst)
@@ -256,8 +226,6 @@ fn all_features_agree_with_compute_on_every_slot_compute_fills() {
         let dst = RgbSlice::new(bytemuck::cast_slice(&p.dst), p.width, p.height);
         for profile in [
             ZensimProfile::A,
-            ZensimProfile::E,
-            ZensimProfile::ECodec,
             ZensimProfile::LegacyA,
             ZensimProfile::PreviewV0_2,
         ] {
@@ -284,10 +252,8 @@ fn all_features_agree_with_compute_on_every_slot_compute_fills() {
 #[test]
 fn latest_and_codec_target_select_the_rev7_profiles() {
     assert_eq!(ZensimProfile::latest(), ZensimProfile::A);
-    assert_eq!(ZensimProfile::codec_target(), ZensimProfile::ECodec);
+    assert_eq!(ZensimProfile::codec_target(), ZensimProfile::A);
     assert_eq!(ZensimProfile::A.name(), "zensim-a");
-    assert_eq!(ZensimProfile::E.name(), "zensim-e");
-    assert_eq!(ZensimProfile::ECodec.name(), "zensim-e-codec");
 }
 
 /// Canonical names select the adopted and earlier development models. The
@@ -299,8 +265,6 @@ fn canonical_names_select_the_adopted_and_legacy_models() {
     for profile in [
         ZensimProfile::A,
         ZensimProfile::LegacyA,
-        ZensimProfile::E,
-        ZensimProfile::ECodec,
         ZensimProfile::PreviewV0_1,
         ZensimProfile::PreviewV0_2,
     ] {
@@ -310,6 +274,8 @@ fn canonical_names_select_the_adopted_and_legacy_models() {
     let legacy = "zensim-legacy-a".parse::<ZensimProfile>().unwrap();
     assert_eq!(legacy, ZensimProfile::LegacyA);
     assert!("zensim-f".parse::<ZensimProfile>().is_err());
+    assert!("zensim-e".parse::<ZensimProfile>().is_err());
+    assert!("zensim-e-codec".parse::<ZensimProfile>().is_err());
     for &(_, id, bits) in GOLDEN.iter().filter(|&&(name, _, _)| name == "LegacyA") {
         let want = f64::from_bits(bits);
         let got = score(legacy, &pair(id));

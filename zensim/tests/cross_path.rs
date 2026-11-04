@@ -16,7 +16,7 @@ fn rev7_cached_and_reused_scratch_scores_match_streaming_across_tiers() {
             let (src, dst) = pair(w, h);
             let src = RgbSlice::new(&src, w, h);
             let dst = RgbSlice::new(&dst, w, h);
-            for profile in [ZensimProfile::E, ZensimProfile::ECodec] {
+            for profile in [ZensimProfile::A] {
                 for parallel in [false, true] {
                     let z = Zensim::new(profile).with_parallel(parallel);
                     let direct = z.compute(&src, &dst).unwrap();
@@ -116,7 +116,7 @@ fn rev7_planar_and_interleaved_steering_maps_match_with_stride_and_postprocessin
                     }
                 }
             }
-            for profile in [ZensimProfile::E, ZensimProfile::ECodec] {
+            for profile in [ZensimProfile::A] {
                 for parallel in [false, true] {
                     let z = Zensim::new(profile).with_parallel(parallel);
                     let pre = z.precompute_reference(&source).unwrap();

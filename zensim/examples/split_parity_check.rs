@@ -41,8 +41,6 @@ fn main() {
         ("PreviewV0_1", ZensimProfile::PreviewV0_1),
         ("PreviewV0_2", ZensimProfile::PreviewV0_2),
         ("LegacyA", ZensimProfile::LegacyA),
-        ("E", ZensimProfile::E),
-        ("ECodec", ZensimProfile::ECodec),
         ("A", ZensimProfile::A),
     ];
     let hex = |x: f64| format!("{:016x}", x.to_bits());
@@ -156,7 +154,7 @@ fn hdr_surfaces(line: &impl Fn(&str, &str, &str, String)) {
         let src = mk(false);
         let dst = mk(true);
         let id = hdr_case_id(&c);
-        match Zensim::new(ZensimProfile::E)
+        match Zensim::new(ZensimProfile::A)
             .with_parallel(c.parallel)
             .compute_hdr(&src, &dst, enc)
         {

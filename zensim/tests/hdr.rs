@@ -65,7 +65,7 @@ fn features(c: &HdrCase) -> Vec<f64> {
     )
     .unwrap()
     .with_color_primaries(primaries);
-    Zensim::new(ZensimProfile::E)
+    Zensim::new(ZensimProfile::A)
         .with_parallel(c.parallel)
         .compute_hdr(&src, &dst, encoding(c))
         .unwrap()
@@ -104,7 +104,7 @@ fn sdr_pixel_formats_are_refused() {
     let _token = lock_token_testing();
     let px = vec![128u8; 64 * 64 * 3];
     let img = StridedBytes::try_new(&px, 64, 64, 64 * 3, PixelFormat::Srgb8Rgb).unwrap();
-    let err = Zensim::new(ZensimProfile::E)
+    let err = Zensim::new(ZensimProfile::A)
         .compute_hdr(&img, &img, HdrEncoding::Linear)
         .unwrap_err();
     assert!(

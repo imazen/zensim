@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### QUEUED BREAKING CHANGES
+- zensim 0.3.0: research profiles `E` and `ECodec` are withdrawn; `codec_target()` returns `A`.
 <!-- Breaking changes that ship together in the next major (or minor for 0.x).
      Persist across patch releases. Only clear when the breaking release ships. -->
 - zensim 0.3.0: `ZensimProfile::A` is the adopted general model (the earlier development `A` is
@@ -23,12 +24,11 @@
 ### Unreleased (0.3.0)
 
 #### Added
-- `ZensimProfile::A` (`zensim-a`, returned by `latest()`): the general-purpose model adopted on 2026-11-04, `E`'s
-  architecture with full-resolution chroma inputs, trained with the human-rating legs narrowed to TID2013 and MDID
+- `ZensimProfile::A` (`zensim-a`, returned by `latest()`): the general-purpose model adopted on 2026-11-04, with
+  full-resolution chroma inputs, trained with the human-rating legs narrowed to TID2013 and MDID
   and continued on the JPEG AIC-2026 public training set with rehearsal (`docs/PROFILES.md`).
 - Canonical profile string parsing via `FromStr`, including `zensim-a` and `zensim-legacy-a`.
-- `ZensimProfile::E` (`zensim-e`): general-purpose monotone MLP over revision-7 features, the default before the adopted `A`.
-- `ZensimProfile::ECodec` (`zensim-e-codec`) and `ZensimProfile::codec_target()`: the model specialised for codec output.
+- `ZensimProfile::codec_target()`: selects the adopted `A` model for codec-quality targets.
 - `ZensimProfile::LegacyA` (`zensim-legacy-a`): the legacy MLP profile of the 0.3.0 development line.
 - `Zensim::with_max_pixels` / `max_pixels` and `ZensimError::ImageTooLarge`: a pixel-count cap for untrusted input.
 - `Zensim::with_stop`, `ZensimError::Cancelled` and the `Stop`, `StopReason`, `Unstoppable` re-exports from `enough`.

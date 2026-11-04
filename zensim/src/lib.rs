@@ -167,8 +167,7 @@
 //! 100 = identical, higher = more similar. How a raw result becomes a
 //! score depends on the profile:
 //!
-//! - [`ZensimProfile::A`] (the default, [`ZensimProfile::latest`]), [`ZensimProfile::E`]
-//!   and [`ZensimProfile::ECodec`] ([`ZensimProfile::codec_target`]): a monotone
+//! - [`ZensimProfile::A`] ([`ZensimProfile::latest`] and [`ZensimProfile::codec_target`]): a monotone
 //!   MLP over revision-7 features plus a calibrated output spline. Severe
 //!   damage can score below 0 (the spline extrapolates past its knots).
 //! - [`ZensimProfile::LegacyA`] (legacy): an MLP forward pass and a monotone output
@@ -187,7 +186,7 @@
 //! ## Determinism
 //!
 //! Deterministic for the same input on the same architecture. The revision-7
-//! profiles ([`ZensimProfile::A`], [`ZensimProfile::E`], [`ZensimProfile::ECodec`]) use one fixed
+//! profile [`ZensimProfile::A`] uses one fixed
 //! arithmetic order, so their scores are bit-identical across the x86 SIMD tiers,
 //! scalar code and thread counts. The older profiles may differ by a few ULP
 //! between architectures because of different FMA contraction.
