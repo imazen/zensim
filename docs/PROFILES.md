@@ -90,6 +90,9 @@ and padded rows; float and 16-bit containers; both thread modes. The fixtures in
 identity and nonidentity pairs. See [golden values](../zensim/tests/fixtures/hdr_a_cube_root_203.tsv)
 and [reference source and commands](../benchmarks/hdr_cube_root_203_reference_2026-11-04.md).
 
+`A` uses serial streaming extraction below 36,864 pixels after the existing padding
+of small images, even when parallel execution is enabled; scores are unchanged.
+
 ## Parity with the research crate
 
 For public `A` (research `F` / `mixF3`), run the research `split_parity_golden` example with
