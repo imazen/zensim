@@ -40,6 +40,8 @@
   front end at 203 cd/m² and the revision-7 feature walk; features bit-identical to the research crate.
 
 #### Changed
+- Skip parallel streaming extraction below 36,864 pixels after existing small-image
+  padding; scores are unchanged (`398578fc`).
 - Share diffmap scoring and mask/sqrt/crop postprocessing across RGB and planar paths,
   preserving existing score and map bits. Extend revision-7 cross-path contracts to
   feature vectors, scratch reuse, SIMD dispatch, strided planes and map options.
