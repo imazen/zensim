@@ -19,7 +19,7 @@
 
 ## Workspace
 
-- Record the registered frozen-A assessment of the 0.3 development model, including the failed KADID TERMINAL confirmation; CLIC 2022 remains pending.
+- Complete the registered frozen-A assessment on all eight populations, with CLIC 2022 majority/soft-vote results and the failed KADID TERMINAL confirmation.
 
 - The repository continues the published crates from 0.2.7; development history after 0.2.7 moved to
   [imazen/zensimx](https://github.com/imazen/zensimx) (2026-10-28).

@@ -1,7 +1,7 @@
 # Frozen A: registered final-set assessment — 2026-11-05
 
-Seven of eight registered populations are complete. CLIC 2022 is pending; its
-57,300 questions over 57,243 reference crops will all be retained.
+All eight registered populations are complete. CLIC 2022 retains all
+57,300 questions over 57,243 reference crops.
 
 **KADID TERMINAL failed both registered confirmation rules.** No weights,
 calibration or acceptance limits were changed on these results.
@@ -33,6 +33,27 @@ Negative correlations against distortion-oriented targets retain their sign.
 KonJND within-reference SROCC is undefined: 100 pairs over 100 references.
 Its pooled signed result and reference interval above follow the registration.
 SDR25 is a subset of AIC-4, not an independent collection.
+
+## CLIC 2022
+
+All 57,300 questions over 57,243 reference crops were retained. Majority
+agreement is the registered primary; historical soft-vote agreement is the
+approved supplement. The cached targets match on all 57,300 questions, so
+both panels coincide. Tied majorities and tied predictions receive half credit.
+
+| Metric | Majority primary, 95% CI | Soft-vote supplement, 95% CI |
+|---|---|---|
+| A | 0.746632 [0.743006, 0.750179] | 0.746632 [0.743006, 0.750179] |
+| SSIMULACRA2 | 0.736230 [0.732504, 0.739863] | 0.736230 [0.732504, 0.739863] |
+| Butteraugli quality = −p3 | 0.688342 [0.684479, 0.692035] | 0.688342 [0.684479, 0.692035] |
+
+Intervals use 10,000 whole-reference draws, seed `20261105`, percentile/type7.
+CLIC 2022 shares the protocol of the earlier CLIC 2021 confirmation read.
+All 114,593 reference–candidate pairs were scored; all 229,186 feature RGB
+checks matched the native decode map. All 1,303 pixel-identical pairs returned
+exactly 100 through cached and native A scoring. All 64 serial/eight-thread
+peer controls matched exactly. The preference file was parsed once, retaining
+both targets together; statistics then used the cached targets.
 
 ## KADID confirmation
 
@@ -94,7 +115,7 @@ hashes and independent PNG readback. Public/research split parity matched
 135,625 normalized contract records with zero differences. This assessment
 did not fit, select or change A.
 
-The [complete research record](https://github.com/imazen/zensimx/blob/79fb564611256c5e2feb503fbe23c8de6ae46541/benchmarks/final_read_a_2026-11-05.md) contains the registration, exact exposure
+The [complete research record](https://github.com/imazen/zensimx/blob/6d639be157daf2d87be09eba9f445ebdf8eec137/benchmarks/final_read_a_2026-11-05.md) contains the registration, exact exposure
 ledger references, signed KROCC, PLCC after 4PL, collection-scale RMSE,
 within-reference intervals, all 25 KADID distortion panels, native scatter
 diagnostics, raw-file and binary hashes, and resource receipts.

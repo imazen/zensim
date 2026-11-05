@@ -196,8 +196,9 @@ did not train on. Arms kept the total MOS weight fixed, so an arm changed which 
 - **Controls.** Routing all original sources through the new path reproduced the previous scores
   exactly, and the training build reproduced its checkpoints bit for bit.
 
-Those nine collections chose the mix, so they are selection data for it. The held-out reads in section
-6.2 and the final read in section 6.5 are the independent evidence.
+Those nine collections chose the mix, so they are selection data for it. Further evidence comes from the
+held-out reads in section 6.2 and the frozen-A assessment in section 6.5, whose prior-exposure history is
+disclosed there.
 
 ### What was tried and not adopted
 
@@ -295,10 +296,10 @@ development rows through it, against 0.835 through the earlier PU21 front end, a
 rows. A retrain through the cube root was worse held out (section 5). HDR scores are not a calibrated
 human scale. See [HDR input](PROFILES.md#hdr-input).
 
-### 6.5 Final read on the sealed sets
+### 6.5 Registered frozen-A final assessment
 
 Registered on 2026-11-05 and read once for the shipped bake, with SSIMULACRA2 and butteraugli's 3-norm on the same
-pixels. Seven of eight populations are complete; CLIC 2022 is pending. Signed SROCC, with distortion-oriented
+pixels. All eight populations are complete. Signed SROCC below, with distortion-oriented
 targets keeping their sign. Intervals, the other statistics and every disclosure are in
 [`FINAL_READ_A_2026-11-05.md`](FINAL_READ_A_2026-11-05.md).
 
@@ -314,6 +315,22 @@ targets keeping their sign. Intervals, the other statistics and every disclosure
 | SDR25, a subset of AIC-4 | 50 / 5 | −0.855 | −0.841 | −0.842 |
 | MCL-JCI | 5,000 / 50 | −0.897 | −0.885 | −0.851 |
 | MCL-JCI, without KonFiG's ten sources | 4,000 / 40 | −0.904 | −0.891 | −0.856 |
+
+CLIC 2022 uses two-alternative agreement.
+
+All 57,300 questions over 57,243 reference crops were retained. Majority
+agreement is the registered primary; historical soft-vote agreement is the
+approved supplement. The cached targets match on all 57,300 questions, so
+both panels coincide. Tied majorities and tied predictions receive half credit.
+
+| Metric | Majority primary, 95% CI | Soft-vote supplement, 95% CI |
+|---|---|---|
+| A | 0.746632 [0.743006, 0.750179] | 0.746632 [0.743006, 0.750179] |
+| SSIMULACRA2 | 0.736230 [0.732504, 0.739863] | 0.736230 [0.732504, 0.739863] |
+| Butteraugli quality = −p3 | 0.688342 [0.684479, 0.692035] | 0.688342 [0.684479, 0.692035] |
+
+Intervals use 10,000 whole-reference draws, seed `20261105`, percentile/type7.
+CLIC 2022 shares the protocol of the earlier CLIC 2021 confirmation read.
 
 **KADID TERMINAL failed both of its registered confirmation rules.** The rules compare `A` with two research models,
 not with published metrics.

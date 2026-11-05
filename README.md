@@ -52,8 +52,9 @@ trained on none of these collections.
 | NITS-IQA | 0.734 | 0.777 | 0.706 |
 | VCL@FER | 0.950 | 0.945 | 0.877 |
 
-A separate [registered final read](docs/FINAL_READ_A_2026-11-05.md) on sealed sets has seven of eight populations complete.
-KADID TERMINAL failed both of its registered limits against two research models; CLIC 2022 is pending.
+A separate [registered frozen-A assessment](docs/FINAL_READ_A_2026-11-05.md) is complete on all eight populations.
+KADID TERMINAL failed both registered limits against two research models. CLIC 2022 majority agreement is
+0.747 for A, 0.736 for SSIMULACRA2 and 0.688 for butteraugli; the record gives intervals and exposure disclosures.
 
 ## Input
 
