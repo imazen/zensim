@@ -333,5 +333,6 @@ published yet.
 [PROFILES.md](PROFILES.md#parity-with-the-research-crate). The 2026-11-04 parallel-cutoff run matched all
 135,625 normalized contract rows.
 
-**Paper.** A companion paper on the metric and its evaluation exists as a private draft. It predates this
-model and is not cited here.
+**Paper.** A companion paper on the metric and its evaluation exists as a private draft. Its accuracy and
+HDR sections were rewritten on this model's panel on 2026-11-04; the other sections predate the model. It
+is not cited here.
