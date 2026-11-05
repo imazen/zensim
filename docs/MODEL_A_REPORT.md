@@ -318,7 +318,7 @@ targets keeping their sign. Intervals, the other statistics and every disclosure
 **KADID TERMINAL failed both of its registered confirmation rules.** The rules compare `A` with two research models,
 not with published metrics.
 
-| Comparison | SROCC | Difference | Registered limit | Result |
+| Comparison | Comparator's SROCC | Difference | Registered limit | Result |
 |---|---:|---:|---:|---|
 | `A` minus research `B` | 0.942 | −0.049 | −0.008 | Failed |
 | `A` minus research `by_v2fy` | 0.933 | −0.040 | −0.005 | Failed |
