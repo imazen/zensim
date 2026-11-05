@@ -23,6 +23,9 @@ The 0.1/0.2 linear profiles are available with the `legacy-models` feature for s
 
 ## The adopted mix (`A`)
 
+How it computes a score, what the trained network turned out to be, the development process and the
+full evaluation: [MODEL_A_REPORT.md](MODEL_A_REPORT.md).
+
 **What it is.** `A` (research profile `F`, recipe `mixF3`, "the TID2013 + MDID mix on F3's recipe")
 is a monotone network over 492 revision-7 damage features, including full-resolution chroma,
 and 492 fragility products. Its 128 hidden units feed 32 tied max-pairs and a calibrated
@@ -55,7 +58,7 @@ on.
 
 Two-alternative agreement with human choices: FG-IQA `A` 0.757, PieAPP 0.583.
 On CLIC 2021's validation questions (learned-codec pairs, read once as a confirmation) `A` agrees
-with the raters on 0.644, SSIMULACRA2 on 0.626 and butteraugli's 3-norm on 0.606. One
+with the raters on 0.642 at the shipped seed (0.644 over three seeds), SSIMULACRA2 on 0.626 and butteraugli's 3-norm on 0.606. One
 case of the label-free map-steering gate (an 8-pixel map-rank case on a text screenshot) scores 0.69
 against its 0.70 bar; the JPEG XL loop shows no byte cost from it.
 

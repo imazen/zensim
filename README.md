@@ -28,7 +28,8 @@ candidates against one reference with `precompute_reference` and `compute_with_r
 `A` is a monotone network over multi-scale SSIM, edge, detail-loss and
 high-frequency features in XYB: more damage never raises the score. Severe damage
 can score below 0. Scores are bit-identical across x86 SIMD tiers and thread counts.
-Training data and evaluation details: [docs/PROFILES.md](docs/PROFILES.md).
+Training data and evaluation details: [docs/PROFILES.md](docs/PROFILES.md). How it works and how it was
+built: [docs/MODEL_A_REPORT.md](docs/MODEL_A_REPORT.md).
 
 The 0.1/0.2 linear profiles are available with the `legacy-models` feature for score continuity with 0.2.7.
 
