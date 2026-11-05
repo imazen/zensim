@@ -297,17 +297,42 @@ human scale. See [HDR input](PROFILES.md#hdr-input).
 
 ### 6.5 Final read on the sealed sets
 
-Pending. Registered on 2026-11-05
-([`final_read_a_2026-11-05.md`](https://github.com/imazen/zensimx/blob/main/benchmarks/final_read_a_2026-11-05.md))
-and read once for the shipped bake, with SSIMULACRA2 and butteraugli's 3-norm on the same pixels. Sets:
-CID22-B, CSIQ, LIVE release 2, KonJND JPEG TERMINAL, KADID TERMINAL, the AIC-4 sample with SDR25 as its
-subset, MCL-JCI, and CLIC 2022. Results will land here with the registration's disclosures. Earlier
-frozen research models were scored on most of these sets, and third-party-metric studies read some of
-their labels. `A` was neither trained nor selected on them; the registration lists the known content
-overlaps with its training sources.
+Registered on 2026-11-05 and read once for the shipped bake, with SSIMULACRA2 and butteraugli's 3-norm on the same
+pixels. Seven of eight populations are complete; CLIC 2022 is pending. Signed SROCC, with distortion-oriented
+targets keeping their sign. Intervals, the other statistics and every disclosure are in
+[`FINAL_READ_A_2026-11-05.md`](FINAL_READ_A_2026-11-05.md).
+
+| Population | Pairs / references | `A` | SSIMULACRA2 | Butteraugli quality |
+|---|---:|---:|---:|---:|
+| CID22-B | 2,100 / 24 | 0.909 | 0.913 | 0.781 |
+| CSIQ | 866 / 30 | 0.946 | 0.905 | 0.814 |
+| LIVE release 2 | 779 / 29 | 0.967 | 0.960 | 0.916 |
+| LIVE, 10 content-disjoint references | 267 / 10 | 0.967 | 0.961 | 0.911 |
+| KonJND JPEG TERMINAL | 100 / 100 | −0.368 | −0.401 | +0.053 |
+| KADID TERMINAL | 2,000 / 16 | 0.893 | 0.800 | 0.572 |
+| AIC-4 sample | 300 / 5 | −0.922 | −0.913 | −0.897 |
+| SDR25, a subset of AIC-4 | 50 / 5 | −0.855 | −0.841 | −0.842 |
+| MCL-JCI | 5,000 / 50 | −0.897 | −0.885 | −0.851 |
+| MCL-JCI, without KonFiG's ten sources | 4,000 / 40 | −0.904 | −0.891 | −0.856 |
+
+**KADID TERMINAL failed both of its registered confirmation rules.** The rules compare `A` with two research models,
+not with published metrics.
+
+| Comparison | SROCC | Difference | Registered limit | Result |
+|---|---:|---:|---:|---|
+| `A` minus research `B` | 0.942 | −0.049 | −0.008 | Failed |
+| `A` minus research `by_v2fy` | 0.933 | −0.040 | −0.005 | Failed |
+
+The failure stands, and nothing was changed on it. Both comparators trained on KADID's other references and `A` did
+not train on KADID at all. That may contribute, but it has not been tested.
+
+Earlier frozen research models were scored on most of these sets, and third-party-metric studies read some of their
+labels. `A` was neither trained nor selected on them; the record lists the known content overlaps with its training
+sources.
 
 ## 7. Known limits
 
+- KADID TERMINAL failed its registered confirmation against two research models (section 6.5), though `A` leads SSIMULACRA2 and butteraugli there.
 - One map-steering case on a text screenshot misses its bar (0.69 against 0.70).
 - Near-ties on learned-codec pairs lean to the smoother crop where raters prefer fine detail.
 - CID:IQ's SGCK gamut mapping reads 0.87 against F3's 0.91.

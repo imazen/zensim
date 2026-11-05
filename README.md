@@ -52,6 +52,9 @@ trained on none of these collections.
 | NITS-IQA | 0.734 | 0.777 | 0.706 |
 | VCL@FER | 0.950 | 0.945 | 0.877 |
 
+A separate [registered final read](docs/FINAL_READ_A_2026-11-05.md) on sealed sets has seven of eight populations complete.
+KADID TERMINAL failed both of its registered limits against two research models; CLIC 2022 is pending.
+
 ## Input
 
 sRGB 8-bit RGB or RGBA (`RgbSlice`, `RgbaSlice`, `imgref`), 16-bit and linear `f32` through
