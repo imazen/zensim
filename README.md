@@ -34,6 +34,8 @@ Reproduce: `cargo bench -p zensim-bench --bench bench_compare` (C++ libjxl FFI r
 
 ## Correlation with human perception
 
+The 0.3 development model A has a separate [registered final-set assessment](docs/FINAL_READ_A_2026-11-05.md). Seven populations are complete; KADID TERMINAL failed both registered comparator limits, and CLIC 2022 is pending.
+
 Spearman rank-order correlation (SROCC) on raw perceptual distance against three independent human-rated image quality databases. Higher is better; 1.0 = perfect agreement with human rankings. None of these datasets were used for training.
 
 | Dataset | Pairs | SROCC | KROCC |
