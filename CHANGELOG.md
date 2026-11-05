@@ -27,6 +27,7 @@
 ### Unreleased (0.3.0)
 
 #### Added
+- `docs/MODEL_A_REPORT.md`: how `A` computes a score, the trained network's shape, development process, evaluation and known limits (`588e38a7`).
 - `ZensimProfile::A` (`zensim-a`, returned by `latest()`): the general-purpose model adopted on 2026-11-04, with
   full-resolution chroma inputs, trained with the human-rating legs narrowed to TID2013 and MDID
   and continued on the JPEG AIC-2026 public training set with rehearsal (`docs/PROFILES.md`).
