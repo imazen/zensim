@@ -1,0 +1,7 @@
+# `cross` config for the i686-unknown-linux-gnu CI job.
+#
+# codec-corpus's cache root is overridden via CODEC_CORPUS_CACHE (the default
+# `dirs::cache_dir()` is not writable inside the cross container); cross only
+# forwards host env vars that are listed here.
+[build.env]
+passthrough = ["CODEC_CORPUS_CACHE"]

@@ -106,7 +106,7 @@ pub fn render_text_height(
     let mut buf = vec![0u8; (out_w * out_h * 4) as usize];
 
     // Fill background
-    for pixel in buf.chunks_exact_mut(4) {
+    for pixel in buf.as_chunks_mut::<4>().0 {
         pixel.copy_from_slice(&bg);
     }
 
@@ -259,7 +259,7 @@ pub fn render_lines_fitted(
     );
 
     let mut buf = vec![0u8; (out_w * out_h * 4) as usize];
-    for pixel in buf.chunks_exact_mut(4) {
+    for pixel in buf.as_chunks_mut::<4>().0 {
         pixel.copy_from_slice(&bg);
     }
 

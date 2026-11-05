@@ -9,8 +9,8 @@
 /// before entering the XYB pipeline. The conversion happens at the linearization
 /// stage — the opsin matrix and SIMD kernels remain untouched.
 ///
-/// **No HDR:** All primaries assume SDR (values in \[0, 1\]). PQ/HLG transfer
-/// functions are not supported.
+/// **SDR pixel range:** All primaries assume input values in `[0, 1]` after
+/// linearization; out-of-gamut colours are clipped to the sRGB gamut.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum ColorPrimaries {
@@ -127,6 +127,22 @@ pub trait ImageSource: Sync {
     fn row_bytes(&self, y: usize) -> &[u8];
 }
 
+/// Read native-endian packed pixels without consuming trailing row bytes.
+/// Byte sources do not promise alignment. Aligned rows stay borrowed; an
+/// unaligned row copies only its pixel values, preserving their exact bits.
+#[inline]
+pub(crate) fn packed_row<T: bytemuck::Pod>(row: &[u8], width: usize) -> std::borrow::Cow<'_, [T]> {
+    let row = &row[..width * core::mem::size_of::<T>()];
+    match bytemuck::try_cast_slice(row) {
+        Ok(pixels) => std::borrow::Cow::Borrowed(pixels),
+        Err(_) => std::borrow::Cow::Owned(
+            row.chunks_exact(core::mem::size_of::<T>())
+                .map(bytemuck::pod_read_unaligned)
+                .collect(),
+        ),
+    }
+}
+
 /// Wraps `&[[u8; 3]]` (contiguous sRGB pixels) with width and height.
 #[derive(Clone, Copy, Debug)]
 pub struct RgbSlice<'a> {
@@ -144,7 +160,12 @@ impl<'a> RgbSlice<'a> {
         width: usize,
         height: usize,
     ) -> Result<Self, crate::ZensimError> {
-        if data.len() < width * height {
+        // Use checked_mul: on 32-bit / wasm32 a 1<<30 × 8 multiply wraps to 0
+        // and the length check would silently pass. Reject overflow up front.
+        let required = width
+            .checked_mul(height)
+            .ok_or(crate::ZensimError::ImageTooLarge)?;
+        if data.len() < required {
             return Err(crate::ZensimError::InvalidDataLength);
         }
         Ok(Self {
@@ -235,7 +256,11 @@ impl<'a> RgbaSlice<'a> {
         height: usize,
         alpha_mode: AlphaMode,
     ) -> Result<Self, crate::ZensimError> {
-        if data.len() < width * height {
+        // Checked multiply guards 32-bit / wasm32 from `width * height` wrap.
+        let required = width
+            .checked_mul(height)
+            .ok_or(crate::ZensimError::ImageTooLarge)?;
+        if data.len() < required {
             return Err(crate::ZensimError::InvalidDataLength);
         }
         Ok(Self {
@@ -365,12 +390,20 @@ impl<'a> StridedBytes<'a> {
         alpha_mode: AlphaMode,
     ) -> Result<Self, crate::ZensimError> {
         let bpp = pixel_format.bytes_per_pixel();
-        let min_stride = width * bpp;
+        // `width * bpp` and `(height - 1) * stride + min_stride` are
+        // attacker-influenced; on 32-bit / wasm32 they wrap silently. Use
+        // checked arithmetic and treat overflow as `ImageTooLarge`.
+        let min_stride = width
+            .checked_mul(bpp)
+            .ok_or(crate::ZensimError::ImageTooLarge)?;
         if stride < min_stride {
             return Err(crate::ZensimError::InvalidStride);
         }
         if height > 0 {
-            let required = (height - 1) * stride + min_stride;
+            let required = (height - 1)
+                .checked_mul(stride)
+                .and_then(|v| v.checked_add(min_stride))
+                .ok_or(crate::ZensimError::ImageTooLarge)?;
             if data.len() < required {
                 return Err(crate::ZensimError::InvalidDataLength);
             }
@@ -430,6 +463,7 @@ impl ImageSource for StridedBytes<'_> {
     fn alpha_mode(&self) -> AlphaMode {
         self.alpha_mode
     }
+
     #[inline]
     fn color_primaries(&self) -> ColorPrimaries {
         self.color_primaries
@@ -439,6 +473,73 @@ impl ImageSource for StridedBytes<'_> {
         let start = y * self.stride;
         let bpp = self.pixel_format.bytes_per_pixel();
         &self.data[start..start + self.width * bpp]
+    }
+}
+
+// ============================================================================
+// SubsetView — zero-copy Y-range slice of any ImageSource.
+// ============================================================================
+
+/// Zero-copy adapter exposing a Y-range `[y_start, y_end)` of an underlying
+/// [`ImageSource`] as a new [`ImageSource`] with `height() = y_end - y_start`.
+///
+/// Used by the strip-aggregating 372-feature path: split a large image into
+/// horizontal strips (with overlap rows for the blur stencil), wrap each
+/// strip in a `SubsetView`, run the existing pipeline on the strip
+/// per-strip, then aggregate per-scale `ScaleStats` across strips. Peak
+/// memory per pair drops from `O(full_image_size)` to
+/// `O(strip_size + pyramid_factor × strip_size)`.
+///
+/// Width is unchanged; pixel format / alpha / primaries pass through.
+/// `row_bytes(y)` delegates to `parent.row_bytes(y + y_start)`.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct SubsetView<'a, S: ImageSource + ?Sized> {
+    parent: &'a S,
+    y_start: usize,
+    height: usize,
+}
+
+impl<'a, S: ImageSource + ?Sized> SubsetView<'a, S> {
+    /// Wrap `[y_start, y_start + height)` of `parent`. Caller must ensure
+    /// `y_start + height <= parent.height()`.
+    pub(crate) fn new(parent: &'a S, y_start: usize, height: usize) -> Self {
+        debug_assert!(
+            y_start.saturating_add(height) <= parent.height(),
+            "SubsetView out of parent bounds"
+        );
+        Self {
+            parent,
+            y_start,
+            height,
+        }
+    }
+}
+
+impl<S: ImageSource + ?Sized> ImageSource for SubsetView<'_, S> {
+    #[inline]
+    fn width(&self) -> usize {
+        self.parent.width()
+    }
+    #[inline]
+    fn height(&self) -> usize {
+        self.height
+    }
+    #[inline]
+    fn pixel_format(&self) -> PixelFormat {
+        self.parent.pixel_format()
+    }
+    #[inline]
+    fn alpha_mode(&self) -> AlphaMode {
+        self.parent.alpha_mode()
+    }
+    #[inline]
+    fn color_primaries(&self) -> ColorPrimaries {
+        self.parent.color_primaries()
+    }
+    #[inline]
+    fn row_bytes(&self, y: usize) -> &[u8] {
+        debug_assert!(y < self.height);
+        self.parent.row_bytes(self.y_start + y)
     }
 }
 

@@ -13,6 +13,8 @@
 //!   cargo test -p zensim --test corpus_icc -- --ignored --nocapture
 //! ```
 
+#![allow(deprecated)] // exercises the adopted `ZensimProfile::A`
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
@@ -107,7 +109,7 @@ fn should_skip() -> bool {
 }
 
 fn zensim() -> Zensim {
-    Zensim::new(ZensimProfile::latest())
+    Zensim::new(ZensimProfile::A)
 }
 
 // ─── Wide-gamut corpus tests ─────────────────────────────────────────
