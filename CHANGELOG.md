@@ -19,6 +19,10 @@
 
 ## Workspace
 
+- Keep feature-plan fixtures identical on 32-bit and 64-bit targets by computing
+  their perturbation offsets in u64 (`b737a353`).
+- Update locked rand to 0.9.3 (`1624535e`).
+
 - CI's first run on the 0.3.0 line: generate the classification fixtures once and share them with the test jobs; keep test image pairs identical on 32-bit targets; silence dead code in feature permutations without AVX-512 or threads. Native scores are unchanged.
 
 - Use the released zenpredict 0.2.0. Scores are byte-identical against the previous git pin on all 134,932 parity rows.
@@ -90,9 +94,12 @@
 
 ## zensim-regress
 
+- Adopt zensim 0.3.0 and its default A scoring model; public error types now come
+  from zensim 0.3.0. The pending 0.4.0 release is a breaking update from the
+  published 0.3.1.
 - Declare minimum Rust 1.93, which zensim 0.3.0 and zenpredict 0.2.0 already require.
 
-### [0.4.0] - 2026-04-27
+### Unreleased (0.4.0)
 
 Semver-breaking bump because `MontageOptions` is now `#[non_exhaustive]`.
 Out-of-crate callers can no longer use struct-literal construction at all
