@@ -71,3 +71,7 @@ pushed tag and GitHub release.
   0.14 score points between native and WASM. The previews remain behind
   `legacy-models`; this does not relax their test expectations. The same audit
   reported bit-identical A scores on all 231 compute rows.
+
+- Resolved i686 fixture overflow (2026-11-06): two feature-plan tests multiplied
+  an index by 2654435761 in usize. The offsets now use u64, retaining all
+  20,480 existing 64-bit fixture offsets and unchanged assertions (`b737a353`).

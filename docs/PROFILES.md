@@ -19,7 +19,8 @@ Research names stay unchanged.
 
 The revision-7 research models `E` and `ECodec` stay in [imazen/zensimx](https://github.com/imazen/zensimx) and are not published.
 
-The 0.1/0.2 linear profiles are available with the `legacy-models` feature for score continuity with 0.2.7.
+The 0.1/0.2 linear models are available with the `legacy-models` feature. Extraction
+changes in 0.3 can shift their scores; see the [changelog](../CHANGELOG.md).
 
 ## The adopted mix (`A`)
 

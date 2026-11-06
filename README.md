@@ -25,14 +25,15 @@ candidates against one reference with `precompute_reference` and `compute_with_r
 |---|---|---|
 | `A` (`latest()`, `codec_target()`) | `zensim-a` | General purpose, the default: compression, noise, blur, colour and contrast changes |
 
-`A` is a monotone network over multi-scale SSIM, edge, detail-loss and
-high-frequency features in XYB: more damage never raises the score. Severe damage
-can score below 0. Scores are bit-identical across x86 SIMD tiers and thread counts.
+`A` uses a network constrained to be monotone in its multi-scale SSIM, edge,
+detail-loss and high-frequency damage features in XYB. This does not guarantee
+correct ordering of every distorted-image pair. Severe damage can score below 0. Scores are bit-identical across x86 SIMD tiers and thread counts.
 Training data and evaluation details: [docs/PROFILES.md](docs/PROFILES.md). How it works and how it was
 built: [docs/MODEL_A_REPORT.md](docs/MODEL_A_REPORT.md).
 Explore its features, score response and weights in the browser: [imazen.github.io/zensim](https://imazen.github.io/zensim/).
 
-The 0.1/0.2 linear profiles are available with the `legacy-models` feature for score continuity with 0.2.7.
+The 0.1/0.2 linear models are available with the `legacy-models` feature. Extraction
+changes in 0.3 can shift their scores; see the [changelog](CHANGELOG.md).
 
 ## Accuracy
 
@@ -62,7 +63,7 @@ KADID TERMINAL failed both registered limits against two research models. CLIC 2
 sRGB 8-bit RGB or RGBA (`RgbSlice`, `RgbaSlice`, `imgref`), 16-bit and linear `f32` through
 `StridedBytes`, Display P3 and BT.2020 primaries (clipped to sRGB), and `zenpixels` buffers
 with the `zenpixels` feature. Both images must have the same size; images smaller than 64
-pixels are reflect-padded.
+pixels in either dimension are reflect-padded.
 
 `compute_hdr` decodes declared linear, PQ or HLG input to absolute light and uses
 the anchored cube-root front end at a fixed 203 cd/m² SDR white, retaining brighter
