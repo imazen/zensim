@@ -26,9 +26,7 @@ imgref = "1.12"
 rgb = { version = "0.8", default-features = false, features = ["bytemuck"] }
 linear-srgb = { version = "0.6.7", default-features = false, features = ["std"] }
 enough = { version = "0.4.2", default-features = false, features = ["std"] }
-# zenpredict 0.2.0 (ZNPR v3) is unpublished; crates.io has 0.1.0 (v2 only). The
-# shipped bakes are v3, so a crates.io release of this crate waits on zenpredict 0.2.0.
-zenpredict = { version = "0.2.0", git = "https://github.com/imazen/zenanalyze", rev = "f0903489300aea240ffae2e3f1359f8f2b9a0ba4" }
+zenpredict = "0.2.0"
 zenpixels = { version = ">=0.2.10, <0.4.0", default-features = false }
 codec-corpus = "1.0.3"
 zenbench = { version = "0.1.11", default-features = false }

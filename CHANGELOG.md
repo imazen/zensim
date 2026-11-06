@@ -19,6 +19,10 @@
 
 ## Workspace
 
+- Use the released zenpredict 0.2.0. Scores are byte-identical against the previous git pin on all 134,932 parity rows.
+
+- Add the hand-run Pages workflow; the A explorer is live at https://imazen.github.io/zensim/.
+
 - Complete the registered frozen-A assessment on all eight populations, with CLIC 2022 majority/soft-vote results and the failed KADID TERMINAL confirmation.
 
 - The repository continues the published crates from 0.2.7; development history after 0.2.7 moved to

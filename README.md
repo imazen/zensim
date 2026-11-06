@@ -30,6 +30,7 @@ high-frequency features in XYB: more damage never raises the score. Severe damag
 can score below 0. Scores are bit-identical across x86 SIMD tiers and thread counts.
 Training data and evaluation details: [docs/PROFILES.md](docs/PROFILES.md). How it works and how it was
 built: [docs/MODEL_A_REPORT.md](docs/MODEL_A_REPORT.md).
+Explore its features, score response and weights in the browser: [imazen.github.io/zensim](https://imazen.github.io/zensim/).
 
 The 0.1/0.2 linear profiles are available with the `legacy-models` feature for score continuity with 0.2.7.
 

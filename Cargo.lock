@@ -206,9 +206,9 @@ checksum = "5d20789868f4b01b2f2caec9f5c4e0213b41e3e5702a50157d699ae31ced2fcb"
 
 [[package]]
 name = "bytemuck"
-version = "1.25.0"
+version = "1.25.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c8efb64bd706a16a1bdde310ae86b351e4d21550d98d056f22f8a7f7a2183fec"
+checksum = "95832e849adfb21180ccb6826a99da14e5d266ae5c2e668e1602cf234f153797"
 dependencies = [
  "bytemuck_derive",
 ]
@@ -786,9 +786,9 @@ dependencies = [
 
 [[package]]
 name = "lz4_flex"
-version = "0.11.6"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "373f5eceeeab7925e0c1098212f2fbc4d416adec9d35051a6ab251e824c1854a"
+checksum = "ecbdfe44b1bd960b68170b417450a628c43f7cf56bb3c5317e61cb230ee7f226"
 
 [[package]]
 name = "magetypes"
@@ -1986,7 +1986,19 @@ dependencies = [
 [[package]]
 name = "zenpredict"
 version = "0.2.0"
-source = "git+https://github.com/imazen/zenanalyze?rev=f0903489300aea240ffae2e3f1359f8f2b9a0ba4#f0903489300aea240ffae2e3f1359f8f2b9a0ba4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f6470acef02352e08e68f05cf80e5d66588844a366ad2038ad97beb8eb2bf652"
+dependencies = [
+ "archmage",
+ "bytemuck",
+ "libm",
+ "lz4_flex",
+]
+
+[[package]]
+name = "zenpredict"
+version = "0.2.0"
+source = "git+https://github.com/imazen/zenanalyze?rev=d291ba44170af9a65ec5cb8fd5ef0fa62f6409ba#d291ba44170af9a65ec5cb8fd5ef0fa62f6409ba"
 dependencies = [
  "archmage",
  "bytemuck",
@@ -1997,13 +2009,13 @@ dependencies = [
 [[package]]
 name = "zenpredict-bake"
 version = "0.1.0"
-source = "git+https://github.com/imazen/zenanalyze?rev=f0903489300aea240ffae2e3f1359f8f2b9a0ba4#f0903489300aea240ffae2e3f1359f8f2b9a0ba4"
+source = "git+https://github.com/imazen/zenanalyze?rev=d291ba44170af9a65ec5cb8fd5ef0fa62f6409ba#d291ba44170af9a65ec5cb8fd5ef0fa62f6409ba"
 dependencies = [
  "bytemuck",
  "lz4_flex",
  "serde",
  "serde_json",
- "zenpredict",
+ "zenpredict 0.2.0 (git+https://github.com/imazen/zenanalyze?rev=d291ba44170af9a65ec5cb8fd5ef0fa62f6409ba)",
 ]
 
 [[package]]
@@ -2043,7 +2055,7 @@ dependencies = [
  "thiserror 2.0.18",
  "zenbench",
  "zenpixels",
- "zenpredict",
+ "zenpredict 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "zenpredict-bake",
 ]
 
