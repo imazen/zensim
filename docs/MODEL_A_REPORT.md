@@ -369,8 +369,10 @@ is available at an unlisted URL: pixel archives, tables and tools, the extractor
 object passed a complete SHA-256 readback and a separately verified archive mirror. The URL is recorded
 in the private training repository.
 
-The archive excludes five members-only AIC-2026 inputs. Those remain in private storage and are
-required for the full training replay; the unlisted archive alone is not a complete public reproduction.
+The archive initially excluded five AIC-2026 inputs required for full replay. On November 6,
+the owner authorized those exact files as an unlisted supplement; each passed full hash readback
+and mirror verification. Access instructions remain in the private training repository. This
+limited distribution is not a generally redistributable public dataset release.
 The final seed-0 replay using the archive plus those five inputs passed all recorded checks: 2/2 base-fit,
 62/62 continuation, 1/1 packing and 1/1 stripping. It reproduced the shipped bake with SHA-256
 `d5e2a56db35c32620d9f9d9c19ba3bc78bd8fea2b8cd933cde8447428d85e62a`.

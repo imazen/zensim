@@ -67,6 +67,21 @@ against its 0.70 bar; the JPEG XL loop shows no byte cost from it.
 `185f43f7…`) with the training-provenance and sampler-statistics entries removed; SHA-256 `d5e2a56d…`. The stripped
 copy scored identically on all 1,386 surface and pair rows of the split parity run of 2026-11-04.
 
+## SDR color scope
+
+The SDR path converts Display P3 or BT.2020 linear RGB to linear sRGB and then
+clamps each component to `[0,1]`. This assumes a clipped sRGB display rendition;
+it can erase differences between distinct out-of-sRGB colors. The matrix
+conversion itself does not require that clamp. These scores therefore do not
+establish general wide-gamut fidelity.
+
+Primaries and transfer functions are separate: selecting `Bt2020` with an
+`Srgb8*` pixel format still uses sRGB linearization. Supply correctly linearized
+float pixels when the source uses another transfer function. This fixes the
+transfer interpretation but does not remove the SDR gamut clamp. The HDR path
+below preserves extended RGB values through the primaries conversion; its
+continuity tests are not human wide-gamut validation.
+
 ## HDR input
 
 `Zensim::compute_hdr(source, distorted, encoding)` scores HDR pairs. `HdrEncoding::Linear`
