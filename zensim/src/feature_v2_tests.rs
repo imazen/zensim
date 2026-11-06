@@ -196,7 +196,7 @@ pub(crate) mod tests {
         let dst: Vec<[u8; 3]> = src
             .iter()
             .enumerate()
-            .map(|(i, p)| p.map(|v| v.saturating_add((i * 2654435761 % 7) as u8)))
+            .map(|(i, p)| p.map(|v| v.saturating_add((i as u64 * 2654435761 % 7) as u8)))
             .collect();
         let (sref, dref) = (RgbSlice::new(&src, w, h), RgbSlice::new(&dst, w, h));
         let run = |plan: &Plan| {
@@ -276,7 +276,7 @@ pub(crate) mod tests {
         let dst: Vec<[u8; 3]> = src
             .iter()
             .enumerate()
-            .map(|(i, p)| p.map(|v| v.saturating_add((i * 2654435761 % 7) as u8)))
+            .map(|(i, p)| p.map(|v| v.saturating_add((i as u64 * 2654435761 % 7) as u8)))
             .collect();
         let (sref, dref) = (RgbSlice::new(&src, w, h), RgbSlice::new(&dst, w, h));
         let run = |plan: &Plan| {
