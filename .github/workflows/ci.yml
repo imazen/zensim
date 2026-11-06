@@ -40,8 +40,26 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --workspace --all-targets ${{ matrix.models.args }} -- -D warnings
 
+  fixtures:
+    name: Classification fixtures
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: sudo apt-get update && sudo apt-get install -y imagemagick
+      - run: bash zensim/tests/fixtures/generate.sh
+      - run: cargo test -p zensim --test generate_bitops -- --ignored
+      - uses: actions/upload-artifact@v7
+        with:
+          name: classification-fixtures
+          path: zensim/tests/fixtures/*.png
+          if-no-files-found: error
+          retention-days: 2
+
   test:
     name: Test (${{ matrix.os }}, ${{ matrix.models.name }})
+    needs: fixtures
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -57,6 +75,10 @@ jobs:
           - macos-latest
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v8
+        with:
+          name: classification-fixtures
+          path: zensim/tests/fixtures
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace --all-targets --no-fail-fast ${{ matrix.models.args }}
@@ -65,18 +87,28 @@ jobs:
 
   test-all-features:
     name: Test all features
+    needs: fixtures
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v8
+        with:
+          name: classification-fixtures
+          path: zensim/tests/fixtures
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace --no-fail-fast --all-features -- --nocapture
 
   i686:
     name: Test (i686-unknown-linux-gnu)
+    needs: fixtures
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v8
+        with:
+          name: classification-fixtures
+          path: zensim/tests/fixtures
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@cross
       - uses: Swatinem/rust-cache@v2

@@ -19,6 +19,8 @@
 
 ## Workspace
 
+- CI's first run on the 0.3.0 line: generate the classification fixtures once and share them with the test jobs; keep test image pairs identical on 32-bit targets; silence dead code in feature permutations without AVX-512 or threads. Native scores are unchanged.
+
 - Use the released zenpredict 0.2.0. Scores are byte-identical against the previous git pin on all 134,932 parity rows.
 
 - Add the hand-run Pages workflow; the A explorer is live at https://imazen.github.io/zensim/.

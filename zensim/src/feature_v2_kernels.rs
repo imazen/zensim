@@ -2739,6 +2739,7 @@ fn blockiness_row_l64(
 }
 
 #[derive(Default, Clone, Copy)]
+#[cfg_attr(not(feature = "threads"), allow(dead_code))]
 struct AppendAccum {
 }
 
@@ -2746,6 +2747,7 @@ impl AppendAccum {
 }
 
 #[derive(Default, Clone, Copy)]
+#[cfg_attr(not(feature = "threads"), allow(dead_code))]
 struct CsfwAccum {
 }
 

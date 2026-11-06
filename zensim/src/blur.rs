@@ -979,6 +979,7 @@ fn box_blur_h_inner_v4x(
 
 #[cfg(target_arch = "x86_64")]
 #[inline(always)]
+#[cfg_attr(not(feature = "avx512"), allow(dead_code))]
 fn box_blur_h_v4x_body(
     token: archmage::X64V4xToken,
     input: &[f32],
@@ -1032,6 +1033,7 @@ fn box_blur_h_v4x_body(
 // Physical row pitch changes storage only; preserve the original recurrence.
 #[cfg(target_arch = "x86_64")]
 #[inline(always)]
+#[cfg_attr(not(feature = "avx512"), allow(dead_code))]
 fn box_blur_h_v4x_strided(
     token: archmage::X64V4xToken,
     input: &[f32],
@@ -3200,6 +3202,7 @@ fn fused_blur_h_ssim3_inner_v4x(
 #[inline(always)]
 #[allow(clippy::too_many_arguments)]
 // callers live in the ssim3 v4x chain (v2-walk); the arcane-registered siblings mask their own liveness
+#[cfg_attr(not(feature = "avx512"), allow(dead_code))]
 fn fused_blur_h_ssim_v4x_body<const MU1: bool>(
     token: archmage::X64V4xToken,
     src: &[f32],
@@ -3294,6 +3297,7 @@ fn fused_blur_h_ssim_v4x_body<const MU1: bool>(
 #[cfg(target_arch = "x86_64")]
 #[inline(always)]
 #[allow(clippy::too_many_arguments)]
+#[cfg_attr(not(feature = "avx512"), allow(dead_code))]
 fn fused_blur_h_ssim_v4x_strided<const MU1: bool>(
     token: archmage::X64V4xToken,
     src: &[f32],

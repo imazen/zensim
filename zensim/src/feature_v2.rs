@@ -180,6 +180,7 @@ pub const C_GRAD_DECAY: f64 = 1e-4;
 pub(crate) const C_BV: f64 = 1e-4;
 
 #[derive(Default)]
+#[cfg_attr(not(feature = "threads"), allow(dead_code))]
 struct Rev4CellAccum {}
 
 /// Box blur radius at scale 0 — matches v1's `ZensimConfig::default()`.
@@ -2113,6 +2114,7 @@ fn stream_windows_shared<'w, S: ImageSource, D: ImageSource>(
     }
 }
 
+#[cfg_attr(not(feature = "threads"), allow(dead_code))]
 fn stream_gather_windows<S: ImageSource, D: ImageSource>(
     producer: &crate::feature_v2_stream::StripPlaneProducer<'_, S, D>,
     info: &crate::feature_v2_stream::StripInfo,

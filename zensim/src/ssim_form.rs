@@ -266,6 +266,7 @@ pub(crate) fn ssim_dissim_raw_scalar(
 /// exactly as it did when they were hand-declared above it. The struct stays
 /// public to this crate for any future site that wants to hoist explicitly.
 #[inline(always)]
+#[cfg_attr(not(feature = "avx512"), allow(dead_code))]
 pub(crate) fn ssim_dissim16<T: F32x16Backend + Copy>(
     token: T,
     form: SsimLumaForm,
@@ -313,6 +314,7 @@ pub(crate) fn ssim_direct_raw_scalar(
 
 /// 16-lane direct-error form; see [`SsimSplats16::direct`].
 #[inline(always)]
+#[cfg_attr(not(feature = "avx512"), allow(dead_code))]
 pub(crate) fn ssim_direct16<T: F32x16Backend + Copy>(
     token: T,
     form: SsimLumaForm,
