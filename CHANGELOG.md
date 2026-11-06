@@ -88,6 +88,8 @@
 
 ## zensim-regress
 
+- Declare minimum Rust 1.93, which zensim 0.3.0 and zenpredict 0.2.0 already require.
+
 ### [0.4.0] - 2026-04-27
 
 Semver-breaking bump because `MontageOptions` is now `#[non_exhaustive]`.
