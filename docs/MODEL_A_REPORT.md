@@ -364,11 +364,17 @@ sources.
 
 ## 8. Reproducing it, and parity
 
-**Recipe.** The recipe is declarative: every command, trainer build and expected hash for each seed. The
-seed-0 recipe replayed end to end in a sandbox that sees only released bytes, in 2,343 s with a 1.99 GiB
-peak, and reproduced the shipped file exactly. The recipe and its inputs live in a private training
-repository because the AIC-2026 leg's labels are members-only. A public reproduction archive has not been
-published yet.
+**Recipe.** The recipe declares each command, trainer build and expected hash. A reproduction archive
+is available at an unlisted URL: pixel archives, tables and tools, the extractor, and a README. Each
+object passed a complete SHA-256 readback and a separately verified archive mirror. The URL is recorded
+in the private training repository.
+
+The archive excludes five members-only AIC-2026 inputs. Those remain in private storage and are
+required for the full training replay; the unlisted archive alone is not a complete public reproduction.
+The final seed-0 replay using the archive plus those five inputs passed all recorded checks: 2/2 base-fit,
+62/62 continuation, 1/1 packing and 1/1 stripping. It reproduced the shipped bake with SHA-256
+`d5e2a56db35c32620d9f9d9c19ba3bc78bd8fea2b8cd933cde8447428d85e62a`.
+This verifies seed 0, not every seed declared in the recipe.
 
 **Parity.** This crate serves frozen models. `examples/split_parity_check.rs` here and the research crate's
 `split_parity_golden`, built on one machine, must produce identical output; the gate is described in

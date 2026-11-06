@@ -66,3 +66,8 @@ pushed tag and GitHub release.
   score mismatches and map rounding differences at 65×63 and 257×193.
   Those preview contracts remain behind `legacy-models`; see the historical
   `docs/CROSS_PATH_AUDIT.md`.
+
+- The 2026-11-05 cross-target audit reported preview-profile differences of up to
+  0.14 score points between native and WASM. The previews remain behind
+  `legacy-models`; this does not relax their test expectations. The same audit
+  reported bit-identical A scores on all 231 compute rows.
