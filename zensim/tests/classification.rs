@@ -421,18 +421,16 @@ fn adobe_as_srgb_detected() {
     let cr = classify_rgb("blocks.png", "blocks_adobe_as_srgb.png");
     print_delta_stats("blocks → adobe_as_srgb", &cr);
 
-    // NOTE: IM6 `-set colorspace AdobeRGB -colorspace sRGB` just relabels
-    // data without ICC profile conversion, so images may be identical.
-    // This test validates the fixture loads and classify() doesn't crash.
-    // A real AdobeRGB→sRGB conversion would produce visible differences
-    // on non-primary colors.
+    // The fixture applies a real Adobe RGB (1998) → sRGB matrix conversion,
+    // so non-primary colors shift visibly. This test validates the fixture
+    // loads and classify() doesn't crash.
     let max_d = cr
         .delta_stats
         .max_abs_delta
         .iter()
         .copied()
         .fold(0.0f64, f64::max);
-    println!("    (max_d = {max_d:.6}, IM6 may not apply ICC conversion)");
+    println!("    (max_d = {max_d:.6})");
 }
 
 // ─── Alpha compositing ────────────────────────────────────────────────
@@ -613,7 +611,7 @@ fn delta_stats_deterministic() {
     println!("  delta stats deterministic across 3 runs");
 }
 
-// ─── Flatten over background (IM-generated) ────────────────────────────
+// ─── Flatten over background ────────────────────────────────────────────
 
 #[test]
 fn flatten_over_black_vs_white() {

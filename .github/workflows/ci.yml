@@ -47,9 +47,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: sudo apt-get update && sudo apt-get install -y imagemagick
-      - run: bash zensim/tests/fixtures/generate.sh
-      - run: cargo test -p zensim --test generate_bitops -- --ignored
+      - run: cargo test -p zensim --test generate_fixtures -- --ignored
       - uses: actions/upload-artifact@v7
         with:
           name: classification-fixtures

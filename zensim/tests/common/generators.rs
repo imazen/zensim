@@ -122,6 +122,69 @@ pub fn gen_color_blocks(w: usize, h: usize) -> Vec<[u8; 3]> {
     pixels
 }
 
+// ─── Classification-fixture base patterns (64x64) ──────────────────────
+// These reproduce the source images the classification suite loads from
+// tests/fixtures/. All integer/f64 math, byte-identical on every platform.
+
+/// Per-axis gradient: R varies with x, G with y, B with (x+y).
+pub fn gen_rgb_gradient(w: usize, h: usize) -> Vec<[u8; 3]> {
+    let mut pixels = vec![[0u8; 3]; w * h];
+    for y in 0..h {
+        for x in 0..w {
+            pixels[y * w + x] = [
+                (255.0 * x as f64 / w as f64).round() as u8,
+                (255.0 * y as f64 / h as f64).round() as u8,
+                (255.0 * (x + y) as f64 / (w + h) as f64).round() as u8,
+            ];
+        }
+    }
+    pixels
+}
+
+/// 8 gray levels as horizontal bands of equal height.
+pub fn gen_gray_ramp(w: usize, h: usize) -> Vec<[u8; 3]> {
+    const LEVELS: [u8; 8] = [0, 36, 73, 109, 146, 182, 219, 255];
+    let mut pixels = vec![[0u8; 3]; w * h];
+    for y in 0..h {
+        let v = LEVELS[y * LEVELS.len() / h];
+        for x in 0..w {
+            pixels[y * w + x] = [v, v, v];
+        }
+    }
+    pixels
+}
+
+/// Constant color (200,100,50) in 5 horizontal alpha bands,
+/// opaque at top descending to nearly transparent.
+pub fn gen_alpha_patches(w: usize, h: usize) -> Vec<[u8; 4]> {
+    const ALPHAS: [u8; 5] = [255, 191, 128, 64, 1];
+    let mut pixels = vec![[0u8; 4]; w * h];
+    for y in 0..h {
+        let a = ALPHAS[y * ALPHAS.len() / h];
+        for x in 0..w {
+            pixels[y * w + x] = [200, 100, 50, a];
+        }
+    }
+    pixels
+}
+
+/// RGBA gradient: R varies with x, G constant, B varies with y,
+/// alpha descends left→right from 255 to ~5.
+pub fn gen_alpha_gradient(w: usize, h: usize) -> Vec<[u8; 4]> {
+    let mut pixels = vec![[0u8; 4]; w * h];
+    for y in 0..h {
+        for x in 0..w {
+            pixels[y * w + x] = [
+                (255.0 * x as f64 / w as f64).round() as u8,
+                128,
+                (255.0 * y as f64 / h as f64).round() as u8,
+                (254.0 * (1.0 - x as f64 / w as f64) + 1.0).round() as u8,
+            ];
+        }
+    }
+    pixels
+}
+
 // ─── Format conversion helpers ─────────────────────────────────────────
 
 /// sRGB u8 → linear f32 (exact formula, no LUT).

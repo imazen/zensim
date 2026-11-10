@@ -246,7 +246,8 @@ fn map_feature_goldens_a() {
     let mandel = gen_mandelbrot(W, H);
     let noise = gen_value_noise(W, H, 42);
     let blocks = gen_color_blocks(W, H);
-    let pairs: Vec<(&str, Vec<[u8; 3]>, Vec<[u8; 3]>)> = vec![
+    type Pair = (&'static str, Vec<[u8; 3]>, Vec<[u8; 3]>);
+    let pairs: Vec<Pair> = vec![
         (
             "checkerboard+blur",
             checker.clone(),
