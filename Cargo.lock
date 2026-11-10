@@ -1965,6 +1965,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "zenhash"
+version = "0.1.0"
+source = "git+https://github.com/imazen/zenhash?rev=ce2bbdf669b90513d30d8dd86ad764ee3de68c6e#ce2bbdf669b90513d30d8dd86ad764ee3de68c6e"
+dependencies = [
+ "archmage",
+ "whereat",
+]
+
+[[package]]
 name = "zenlayout"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2054,6 +2063,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "zenbench",
+ "zenhash",
  "zenpixels",
  "zenpredict 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "zenpredict-bake",

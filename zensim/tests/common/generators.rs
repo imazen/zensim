@@ -224,6 +224,38 @@ pub fn to_srgb16_rgba(pixels: &[[u8; 3]], w: usize, h: usize) -> (Vec<u8>, usize
 
 // ─── Distortion functions ──────────────────────────────────────────────
 
+/// Seeded additive noise: dst = src + signed noise in [-amp, amp] per channel
+/// (xorshift64*, integer-only, identical on every platform).
+pub fn distort_noise(src: &[[u8; 3]], w: usize, h: usize, amp: u8, seed: u64) -> Vec<[u8; 3]> {
+    let mut s = seed | 1;
+    let mut next = || {
+        s ^= s << 13;
+        s ^= s >> 7;
+        s ^= s << 17;
+        s
+    };
+    let range = 2 * amp as u64 + 1;
+    let mut dst = vec![[0u8; 3]; w * h];
+    for (i, p) in dst.iter_mut().enumerate() {
+        for c in 0..3 {
+            let n = (next() % range) as i32 - amp as i32;
+            p[c] = (src[i][c] as i32 + n).clamp(0, 255) as u8;
+        }
+    }
+    dst
+}
+
+/// 4-bit-per-channel posterize: banding/quantization distortion.
+pub fn distort_posterize(src: &[[u8; 3]], _w: usize, _h: usize) -> Vec<[u8; 3]> {
+    let mut dst = src.to_vec();
+    for p in dst.iter_mut() {
+        for c in p.iter_mut() {
+            *c = (*c & 0xF0) | 0x08;
+        }
+    }
+    dst
+}
+
 /// Separable box blur with given radius.
 pub fn distort_blur(src: &[[u8; 3]], w: usize, h: usize, radius: usize) -> Vec<[u8; 3]> {
     let mut tmp = vec![[0u16; 3]; w * h];

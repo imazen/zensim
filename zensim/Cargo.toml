@@ -64,6 +64,8 @@ image = { workspace = true }
 # Unpublished; dev-only, so cargo removes it from the published manifest.
 zenpredict-bake = { git = "https://github.com/imazen/zenanalyze", rev = "d291ba44170af9a65ec5cb8fd5ef0fa62f6409ba" }
 archmage = { workspace = true, features = ["testable_dispatch"] }
+# XXH3-128 for the cross-platform diffmap/feature goldens; git pin until 0.1.0 ships.
+zenhash = { git = "https://github.com/imazen/zenhash", rev = "ce2bbdf669b90513d30d8dd86ad764ee3de68c6e", default-features = false, features = ["std"] }
 serde_json = "1"
 
 [lints.clippy]

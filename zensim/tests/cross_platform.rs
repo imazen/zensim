@@ -11,7 +11,10 @@
 mod common;
 
 use common::generators::*;
-use zensim::{PixelFormat, RgbSlice, RgbaSlice, StridedBytes, Zensim, ZensimError, ZensimProfile};
+use zensim::{
+    DiffmapOptions, PixelFormat, RgbSlice, RgbaSlice, StridedBytes, Zensim, ZensimError,
+    ZensimProfile,
+};
 
 // ─── Test pair generation ──────────────────────────────────────────────────
 
@@ -201,6 +204,226 @@ fn hardcoded_reference_scores_a() {
     assert!(
         failures.is_empty(),
         "Profile A is not bit-exact on this platform:\n{}",
+        failures.join("\n")
+    );
+}
+
+/// Profile-A output goldens across the full representative distortion set:
+/// per-pixel diffmap (XXH3-128), feature vector (XXH3-128) and score bits —
+/// all pinned **exact** across platforms.
+///
+/// Every distortion class the codec-facing metric sees is covered at least
+/// once per generated source: blur (lowpass), sharpen (HF gain), color shift
+/// (chroma), JPEG-style block artifacts, additive noise and posterize
+/// (banding/quantization), plus an identity control.
+///
+/// Why exact hashes are legitimate: Rev7 score math uses `PowForm::PureRust`
+/// (no platform libm), the canonical kernels are bit-identical across SIMD
+/// tiers (maxNum-safe clamps), and the reductions are thread-count invariant.
+/// The diffmap additionally exercises the multi-scale fused map, edge/MSE/HF
+/// accumulators, contrast masking and the final sqrt — hashed over canonical
+/// little-endian f32 bytes, so the golden is endianness-independent.
+///
+/// Verified bit-identical on x86-64 (Zen4) and Apple M6 (AArch64 NEON).
+/// Regenerate the table with `ZENSIM_GOLDEN_HARVEST=1 cargo test -p zensim
+/// --release --test cross_platform map_feature_goldens_a -- --nocapture`.
+#[test]
+fn map_feature_goldens_a() {
+    const W: usize = 128;
+    const H: usize = 128;
+    let z = Zensim::new(ZensimProfile::A);
+    // Exercise the full map machinery: SSIM + edge/MSE + HF accumulators,
+    // contrast masking and the final sqrt.
+    let options = DiffmapOptions {
+        include_edge_mse: true,
+        include_hf: true,
+        masking_strength: Some(4.0),
+        sqrt: true,
+        ..Default::default()
+    };
+
+    let checker = gen_checkerboard(W, H, 8);
+    let mandel = gen_mandelbrot(W, H);
+    let noise = gen_value_noise(W, H, 42);
+    let blocks = gen_color_blocks(W, H);
+    let pairs: Vec<(&str, Vec<[u8; 3]>, Vec<[u8; 3]>)> = vec![
+        (
+            "checkerboard+blur",
+            checker.clone(),
+            distort_blur(&checker, W, H, 3),
+        ),
+        (
+            "checkerboard+sharpen",
+            checker.clone(),
+            distort_sharpen(&checker, W, H),
+        ),
+        (
+            "checkerboard+posterize",
+            checker.clone(),
+            distort_posterize(&checker, W, H),
+        ),
+        (
+            "mandelbrot+blur",
+            mandel.clone(),
+            distort_blur(&mandel, W, H, 3),
+        ),
+        (
+            "mandelbrot+color_shift",
+            mandel.clone(),
+            distort_color_shift(&mandel, W, H),
+        ),
+        (
+            "mandelbrot+noise",
+            mandel.clone(),
+            distort_noise(&mandel, W, H, 10, 0x5EED_0001),
+        ),
+        ("mandelbrot+identity", mandel.clone(), mandel.clone()),
+        ("noise+blur", noise.clone(), distort_blur(&noise, W, H, 3)),
+        (
+            "noise+block_artifacts",
+            noise.clone(),
+            distort_block_artifacts(&noise, W, H),
+        ),
+        (
+            "noise+posterize",
+            noise.clone(),
+            distort_posterize(&noise, W, H),
+        ),
+        (
+            "color_blocks+color_shift",
+            blocks.clone(),
+            distort_color_shift(&blocks, W, H),
+        ),
+        (
+            "color_blocks+sharpen",
+            blocks.clone(),
+            distort_sharpen(&blocks, W, H),
+        ),
+        (
+            "color_blocks+noise",
+            blocks.clone(),
+            distort_noise(&blocks, W, H, 10, 0x5EED_0002),
+        ),
+    ];
+
+    let le_bytes = |v: &[f64]| -> Vec<u8> { v.iter().flat_map(|f| f.to_le_bytes()).collect() };
+    let le_bytes32 = |v: &[f32]| -> Vec<u8> { v.iter().flat_map(|f| f.to_le_bytes()).collect() };
+
+    // (name, score_bits, features_xxh3_128, diffmap_xxh3_128)
+    let expected: &[(&str, u64, u128, u128)] = &[
+        (
+            "checkerboard+blur",
+            0xc04a71132b781358,
+            0xb6e78a5c84308e9b92860bc2c828ee6d,
+            0xc33bca8b398d0f2bb98d60922b34c606,
+        ),
+        (
+            "checkerboard+sharpen",
+            0x4051eaec883df850,
+            0x19a3d15f7e8e49df267445d88514dffd,
+            0xe174681bcba287ba133b5780a771c1dc,
+        ),
+        (
+            "checkerboard+posterize",
+            0x4052b58923c27b22,
+            0xf40eb381de092409fb690b462da6a019,
+            0x4e9eb4f5fe7a7af2027328a984fec78b,
+        ),
+        (
+            "mandelbrot+blur",
+            0xc0324213b1d90bb0,
+            0x4a99b5851b71b028e980e6f108e4f37d,
+            0x25ee677c7bd9d6166bbdc5f2628ac397,
+        ),
+        (
+            "mandelbrot+color_shift",
+            0x4029cbcd84d43acc,
+            0xd7c10743f2c7afcab039fb87aeb1c333,
+            0xd4e21adae47c9fbe6dbab1036cee6007,
+        ),
+        (
+            "mandelbrot+noise",
+            0x404df7eeb7fc8632,
+            0x70ec26b762bdace3d461a7e22fa31d0f,
+            0x921dc839f3fb8e3452256656e4298b8f,
+        ),
+        (
+            "mandelbrot+identity",
+            0x4059000000000000,
+            0xde4886cdae5cc3cc9d9af848e275ad75,
+            0xfd5ee061c8433a0f33b202d302b65caa,
+        ),
+        (
+            "noise+blur",
+            0x40491b6b0aed6865,
+            0x3cf5413296dc40d616a5fa457fdc1b0e,
+            0x399345a3070de0ffe93513691934be83,
+        ),
+        (
+            "noise+block_artifacts",
+            0x403df7d44f23d45d,
+            0x8c8e783807a4b1e78b237c08e3481c19,
+            0xa8cc04f74e8c45ee00e087491b8f0227,
+        ),
+        (
+            "noise+posterize",
+            0x405336b23e4937a6,
+            0x1814f7e982e2ab440af46dae1483c495,
+            0x56497f6fb14ff180f9892cac5e2b9950,
+        ),
+        (
+            "color_blocks+color_shift",
+            0x40413b80fb2969e6,
+            0x3b60d29b00916dbee4908ab1e86e1311,
+            0x761bdf1bdd43dad4cad93e806665ee3d,
+        ),
+        (
+            "color_blocks+sharpen",
+            0x4031223d84002ebe,
+            0x0294cd69cfd0131e9b15bcf80fac25bd,
+            0x3f49b6a6b04a1c39bb7fbac41f6e4eed,
+        ),
+        (
+            "color_blocks+noise",
+            0x404d15118458c341,
+            0x72defb8a37829bcd2ff8221d42fca45d,
+            0x8520cd85151c985e02407308faa02907,
+        ),
+    ];
+
+    let harvest = std::env::var_os("ZENSIM_GOLDEN_HARVEST").is_some();
+    let mut failures = Vec::new();
+    for ((name, src, dst), &(exp_name, exp_score, exp_feat, exp_map)) in
+        pairs.iter().zip(expected.iter())
+    {
+        assert_eq!(*name, exp_name, "Test pair order mismatch");
+        let r = z
+            .compute_with_diffmap(
+                &RgbSlice::new(src, W, H),
+                &RgbSlice::new(dst, W, H),
+                options,
+            )
+            .expect("compute_with_diffmap failed");
+        let score_bits = r.score().to_bits();
+        let feat_hash = zenhash::xxh3_128(&le_bytes(r.result().features()));
+        let map_hash = zenhash::xxh3_128(&le_bytes32(r.diffmap()));
+        println!("  ({name:?}, 0x{score_bits:016x}, 0x{feat_hash:032x}, 0x{map_hash:032x}),",);
+        if harvest {
+            continue;
+        }
+        if score_bits != exp_score || feat_hash != exp_feat || map_hash != exp_map {
+            failures.push(format!(
+                "{name}: got (score=0x{score_bits:016x}, feat=0x{feat_hash:032x}, map=0x{map_hash:032x}) \
+                 expected (0x{exp_score:016x}, 0x{exp_feat:032x}, 0x{exp_map:032x})",
+            ));
+        }
+    }
+    if harvest {
+        panic!("harvest mode: re-run without ZENSIM_GOLDEN_HARVEST to assert");
+    }
+    assert!(
+        failures.is_empty(),
+        "Profile A outputs are not bit-exact on this platform:\n{}",
         failures.join("\n")
     );
 }
