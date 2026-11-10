@@ -13,10 +13,12 @@ type V8<T> = GenericF32x8<T>;
 
 /// The element ops the vector term helpers use, at either vector width.
 /// magetypes' 8- and 16-lane generic types implement each with the same
-/// per-lane semantics (the same `max` operand order, `GT_OQ`/`LT_OQ`
-/// compares, mask select; v3's 16-lane type is two 8-lane halves), so a
-/// helper computes the same bits per lane at either width.
-trait Vf32:
+/// per-lane semantics (`GT_OQ`/`LT_OQ` compares, mask select; v3's 16-lane
+/// type is two 8-lane halves), so a helper computes the same bits per lane
+/// at either width. Clamps go through `max_num_zero_v` (not the backend
+/// `max`): the backends disagree on NaN — NEON `vmaxq` propagates it where
+/// maxNum drops it (imazen/archmage#145).
+pub(crate) trait Vf32:
     Copy
     + core::ops::Add<Output = Self>
     + core::ops::Sub<Output = Self>
@@ -26,7 +28,6 @@ trait Vf32:
     type Tok: Copy;
     fn splat_t(token: Self::Tok, v: f32) -> Self;
     fn zero_t(token: Self::Tok) -> Self;
-    fn max(self, other: Self) -> Self;
     fn abs(self) -> Self;
     fn sqrt(self) -> Self;
     fn simd_gt(self, other: Self) -> Self;
@@ -45,10 +46,6 @@ macro_rules! impl_vf32 {
             #[inline(always)]
             fn zero_t(token: T) -> Self {
                 $ty::<T>::zero_t(token)
-            }
-            #[inline(always)]
-            fn max(self, other: Self) -> Self {
-                $ty::<T>::max(self, other)
             }
             #[inline(always)]
             fn abs(self) -> Self {
@@ -159,6 +156,18 @@ pub(crate) const fn steps_sixteen<T: archmage::SimdToken>() -> bool {
 //      the pre-phase-6 originals.
 // ============================================================================
 
+/// `x.max(0)` with canonical NaN-drop semantics on every backend: an ordered
+/// `>` compare plus `blend`, so a NaN lane yields `+0` exactly like
+/// `f32::max`'s maxNum — where NEON `vmaxq` would propagate it (the REV4VEC
+/// aarch64 failure; imazen/archmage#145). Bit-identical to `x.max(zero)` on
+/// finite lanes and to the prior x86 lowering on all lanes (`maxps` already
+/// returned the second operand for NaN/equal), so x86 outputs are unchanged.
+#[inline(always)]
+pub(crate) fn max_num_zero_v<V: Vf32>(token: V::Tok, x: V) -> V {
+    let zero = V::zero_t(token);
+    V::blend(x.simd_gt(zero), x, zero)
+}
+
 /// Vectorized [`ssim_d_local`] — fused to one division via `(a*c)/(b*d)`.
 /// Identical algebra, f32 lanes. Bounded `[0, 2]`.
 #[inline(always)]
@@ -176,20 +185,19 @@ fn ssim_d_local_v<V: Vf32>(
 ) -> V {
     let two = V::splat_t(token, 2.0);
     let one = V::splat_t(token, 1.0);
-    let zero = V::zero_t(token);
     let a = two * mu1 * mu2 + c1;
     let b = mu1 * mu1 + mu2 * mu2 + c1;
     let d = ssq - mu1 * mu1 - mu2 * mu2 + c2;
     if direct {
         let mu_diff = mu1 - mu2;
-        let err_var = (s12 - mu_diff * mu_diff).max(zero);
+        let err_var = max_num_zero_v(token, s12 - mu_diff * mu_diff);
         let lum = if stable { mu_diff * mu_diff } else { b - a };
-        ((d * lum + a * err_var) / (b * d)).max(zero)
+        max_num_zero_v(token, (d * lum + a * err_var) / (b * d))
     } else {
         let cov = s12 - mu1 * mu2;
         let c = two * cov + c2;
         let local = (a * c) / (b * d);
-        (one - local).max(zero)
+        max_num_zero_v(token, one - local)
     }
 }
 
@@ -223,8 +231,7 @@ fn bounded_dissim_v<V: Vf32>(
 /// paired form). Bounded `[0, 1)`.
 #[inline(always)]
 fn bounded_excess_v<V: Vf32>(token: V::Tok, a: V, b: V, c: V) -> V {
-    let zero = V::zero_t(token);
-    (a - b).max(zero) / (a + b + c)
+    max_num_zero_v(token, a - b) / (a + b + c)
 }
 
 /// Vectorized [`bounded_excess_pair`] — `bounded_excess(a,b,c)` PAIRED with
@@ -239,9 +246,11 @@ fn bounded_excess_pair_v<V: Vf32>(
     b: V,
     c: V,
 ) -> (V, V) {
-    let zero = V::zero_t(token);
     let denom = a + b + c;
-    ((a - b).max(zero) / denom, (b - a).max(zero) / denom)
+    (
+        max_num_zero_v(token, a - b) / denom,
+        max_num_zero_v(token, b - a) / denom,
+    )
 }
 
 /// [`bounded_excess_pair_v`] for non-negative `a` and `b` (squares), with one
@@ -259,8 +268,7 @@ fn bounded_excess_split_v<V: Vf32>(token: V::Tok, a: V, b: V, c: V) -> (V, V) {
 /// Vectorized [`saturate`] — `max(x,0)/(max(x,0)+c)`. Bounded `[0, 1)`.
 #[inline(always)]
 fn saturate_v<V: Vf32>(token: V::Tok, x: V, c: V) -> V {
-    let zero = V::zero_t(token);
-    let x = x.max(zero);
+    let x = max_num_zero_v(token, x);
     x / (x + c)
 }
 
@@ -2038,7 +2046,7 @@ fn gradient_terms32_v<V: Vf32>(
     (gsrc, gdst, g, g2, ring_i, band, bv_gain, bv_loss)
 }
 
-#[magetypes(define(f32x8, f32x16), v4x, v4, v3, -scalar)]
+#[magetypes(define(f32x8, f32x16), v4x, v4, v3, neon, -scalar)]
 #[allow(clippy::too_many_arguments)]
 fn gradient_block_kernel_canon64_vec<
     P: crate::featcanon::Pool64,
@@ -2532,31 +2540,9 @@ fn gradient_block_kernel_canon64_vec_wasm128<
     )
 }
 
-/// NEON runs the scalar canonical body (2026-10-03): NEON vector `max`/`min` propagate NaN where the canon's `f32::max`/
-/// `f64::max` drop it (the REV4VEC CI aarch64 failure), so only the x86_64 fused tiers run a lane-parallel body.
-#[cfg(target_arch = "aarch64")]
-#[allow(clippy::too_many_arguments)]
-fn gradient_block_kernel_canon64_vec_neon<
-    P: crate::featcanon::Pool64,
-    const R7: bool,
->(
-    _token: archmage::NeonToken,
-    src_h: &[f32],
-    dst_h: &[f32],
-    activity: &[f32],
-    act_dst: &[f32],
-    mu1: &[f32],
-    mu2: &[f32],
-    width: usize,
-    height: usize,
-    bv_lo: f32,
-    bv_hi: f32,
-    mode: crate::featcanon::Mode,
-) -> GradientAccum {
-    gradient_block_kernel_canon::<P, R7>(
-        src_h, dst_h, activity, act_dst, mu1, mu2, width, height, bv_lo, bv_hi,  mode,
-    )
-}
+// NEON emits the generated lane-parallel body (imazen/archmage#145): every
+// term helper clamps with `gt`+`blend` (`max_num_zero_v`), so the NEON chunk
+// matches the scalar canon bit-for-bit on NaN lanes too.
 
 /// The gradient block kernel at `revision`: the 16-lane canonical body at revision 5 and 7
 /// (with revision 7's row lanes), the production SIMD bodies at revision 1.

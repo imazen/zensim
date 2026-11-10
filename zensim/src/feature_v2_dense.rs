@@ -933,7 +933,7 @@ fn dense_band_add<P: crate::featcanon::Pool>(band: &mut [f64; 35], pools: &[P; 2
     }
 }
 
-#[magetypes(define(f32x8, f32x16, f64x8), v4x, v4, v3, -scalar)]
+#[magetypes(define(f32x8, f32x16, f64x8), v4x, v4, v3, neon, -scalar)]
 #[allow(clippy::too_many_arguments)]
 fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64, const R7: bool>(
     token: Token,
@@ -1450,8 +1450,11 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64, const R7: bool>(
     acc
 }
 
-/// Scalar-tier siblings of [`dense_block_kernel_canon64_vec`]: scalar and
-/// wasm128 keep the `LanesF64` canonical body.
+/// Scalar-tier sibling of [`dense_block_kernel_canon64_vec`]: scalar keeps
+/// the `LanesF64` canonical body. NEON runs the generated lane-parallel
+/// body — its `x.max(0)` clamps go through `max_num_zero_v` (ordered
+/// compare + blend), which is `f32::max` maxNum semantics that NEON `vmaxq`
+/// would not have (the REV4VEC aarch64 failure).
 #[allow(clippy::too_many_arguments)]
 fn dense_block_kernel_canon64_vec_scalar<P: crate::featcanon::Pool64, const R7: bool>(
     _token: archmage::ScalarToken,
@@ -1514,35 +1517,8 @@ fn dense_block_kernel_canon64_vec_wasm128<P: crate::featcanon::Pool64, const R7:
     )
 }
 
-/// NEON runs the scalar canonical body (2026-10-03): NEON vector `max`/`min` propagate NaN where the canon's `f32::max`/
-/// `f64::max` drop it (the REV4VEC CI aarch64 failure), so only the x86_64 fused tiers run a lane-parallel body.
-#[cfg(target_arch = "aarch64")]
-#[allow(clippy::too_many_arguments)]
-fn dense_block_kernel_canon64_vec_neon<P: crate::featcanon::Pool64, const R7: bool>(
-    _token: archmage::NeonToken,
-    src: &[f32],
-    dst: &[f32],
-    mu1: &[f32],
-    mu2: &[f32],
-    ssq: &[f32],
-    s12: &[f32],
-    activity: &[f32],
-    width: usize,
-    height: usize,
-    transducer_bank: bool,
-    revision: FormulaRevision,
-) -> DenseAccum {
-    dense_block_kernel_canon::<P>(
-        src,
-        dst,
-        mu1,
-        mu2,
-        ssq,
-        s12,
-        activity,
-        width,
-        height,
-        transducer_bank,
-        revision,
-    )
-}
+// NEON ran the scalar canonical body (2026-10-03) because NEON vector
+// `max`/`min` propagate NaN where the canon's `f32::max`/`f64::max` drop it
+// (the REV4VEC CI aarch64 failure): since 2026-11-08 the clamps go through
+// `max_num_zero_v`, which is maxNum on every backend, so the generated
+// lane-parallel NEON body is live again.

@@ -3166,7 +3166,10 @@ impl VWin {
     }
 } // impl VWin
 
-#[cfg(target_arch = "x86_64")] // only the x86_64 canon64 bodies invoke it
+// The canon64 bodies invoke it on every lane-parallel arch (x86_64 and,
+// since the NEON canon body was enabled, aarch64 — f64x8 add/sub are plain
+// IEEE ops on NEON too). Only the F64Recurrence arm needs it; rev7's Local
+// window never reaches it.
 macro_rules! vwin_slide64x8 {
     ($win:expr, $token:expr, $y:expr, $p:expr) => {{
         match &mut $win {
@@ -3616,7 +3619,7 @@ fn fused_vblur_ssim_local<P: crate::featcanon::Pool>(
     acc
 }
 
-#[magetypes(define(f32x8, f32x16, f64x8), v4x, v4, v3, -scalar)]
+#[magetypes(define(f32x8, f32x16, f64x8), v4x, v4, v3, neon, -scalar)]
 #[allow(clippy::too_many_arguments)]
 fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
     token: Token,
@@ -3814,7 +3817,7 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
             macro_rules! chunk {
                 ($vt:ident, $w:literal, $splats:expr, $consts:expr, $add:ident, $add64:ident, $window:ident, $x0:expr) => {{
                     let x0: usize = $x0;
-                    let (one, zero) = $consts;
+                    let (one, _zero) = $consts;
                     let m1v = $window!(planes.m1, wm1, tm1, x0);
                     let m2v = $window!(planes.m2, wm2, tm2, x0);
                     let ssqv = $window!(planes.sq, wsq, tsq, x0);
@@ -3822,12 +3825,14 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
                     let sv = $vt::load_t(token, srow[x0..x0 + $w].try_into().unwrap());
                     let dv = $vt::load_t(token, drow[x0..x0 + $w].try_into().unwrap());
 
-                    let sd = if direct {
-                        $splats.direct(m1v, m2v, ssqv, s12v)
-                    } else {
-                        $splats.dissim(m1v, m2v, ssqv, s12v)
-                    }
-                    .max(zero);
+                    let sd = crate::feature_v2::max_num_zero_v(
+                        token,
+                        if direct {
+                            $splats.direct(m1v, m2v, ssqv, s12v)
+                        } else {
+                            $splats.dissim(m1v, m2v, ssqv, s12v)
+                        },
+                    );
                     let sd2 = sd * sd;
                     let sd4 = sd2 * sd2;
                     $add!(row, row32, ssim_d, x0, sd);
@@ -3859,8 +3864,8 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
                     } else {
                         (one + diff2) / (one + diff1) - one
                     };
-                    let artifact = ed.max(zero);
-                    let detail_lost = (-ed).max(zero);
+                    let artifact = crate::feature_v2::max_num_zero_v(token, ed);
+                    let detail_lost = crate::feature_v2::max_num_zero_v(token, -ed);
                     let a2 = artifact * artifact;
                     let dl2 = detail_lost * detail_lost;
                     let a4 = a2 * a2;
@@ -4010,7 +4015,10 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
                         let s12v = f32x16::load_t(token, s12p[at..at + 16].try_into().unwrap());
                         let sv = f32x16::load_t(token, srow[x0..x0 + 16].try_into().unwrap());
                         let dv = f32x16::load_t(token, drow[x0..x0 + 16].try_into().unwrap());
-                        let sd = splats16.direct(m1v, m2v, ssqv, s12v).max(zero);
+                        let sd = crate::feature_v2::max_num_zero_v(
+                            token,
+                            splats16.direct(m1v, m2v, ssqv, s12v),
+                        );
                         let sd2 = sd * sd;
                         let sd4 = sd2 * sd2;
                         p[0] = p[0] + sd;
@@ -4023,8 +4031,8 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
                         } else {
                             (one + diff2) / (one + diff1) - one
                         };
-                        let artifact = ed.max(zero);
-                        let detail_lost = (-ed).max(zero);
+                        let artifact = crate::feature_v2::max_num_zero_v(token, ed);
+                        let detail_lost = crate::feature_v2::max_num_zero_v(token, -ed);
                         let a2 = artifact * artifact;
                         let dl2 = detail_lost * detail_lost;
                         p[3] = p[3] + artifact;
@@ -4085,7 +4093,10 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
                             (f32x8::load_t(token, lanes) + $v).store(lanes);
                         }};
                     }
-                    let sd = splats.direct(m1v, m2v, ssqv, s12v).max(zero);
+                    let sd = crate::feature_v2::max_num_zero_v(
+                        token,
+                        splats.direct(m1v, m2v, ssqv, s12v),
+                    );
                     let sd2 = sd * sd;
                     let sd4 = sd2 * sd2;
                     add8!(ssim_d, sd);
@@ -4098,8 +4109,8 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
                     } else {
                         (one + diff2) / (one + diff1) - one
                     };
-                    let artifact = ed.max(zero);
-                    let detail_lost = (-ed).max(zero);
+                    let artifact = crate::feature_v2::max_num_zero_v(token, ed);
+                    let detail_lost = crate::feature_v2::max_num_zero_v(token, -ed);
                     let a2 = artifact * artifact;
                     let dl2 = detail_lost * detail_lost;
                     add8!(edge_art, artifact);
@@ -4350,86 +4361,10 @@ fn fused_vblur_ssim_canon64_vec_wasm128<P: crate::featcanon::Pool64>(
     )
 }
 
-/// NEON runs the scalar canonical body (2026-10-03): NEON vector `max`/`min` propagate NaN where the canon's `f32::max`/
-/// `f64::max` drop it (the REV4VEC CI aarch64 failure), so only the x86_64 fused tiers run a lane-parallel body.
-#[cfg(target_arch = "aarch64")]
-#[allow(clippy::too_many_arguments)]
-fn fused_vblur_ssim_canon64_vec_neon<P: crate::featcanon::Pool64>(
-    _token: archmage::NeonToken,
-    h_mu1: &[f32],
-    h_mu2: &[f32],
-    h_sigma_sq: &[f32],
-    h_sigma12: &[f32],
-    src: &[f32],
-    dst: &[f32],
-    width: usize,
-    height: usize,
-    inner_start: usize,
-    inner_h: usize,
-    radius: usize,
-    mu1_out: &mut [f32],
-    mu2_out: &mut [f32],
-    store_mu: bool,
-    sd_out: &mut [f32],
-    store_sd: bool,
-    ssq_out: &mut [f32],
-    s12_out: &mut [f32],
-    store_sigma: bool,
-    free: FusedWork,
-    direct: bool,
-    mode: crate::featcanon::Mode,
-) -> StripChannelAccum {
-    if P::LANES == 16 {
-        return fused_vblur_ssim_local::<P>(
-            h_mu1,
-            h_mu2,
-            h_sigma_sq,
-            h_sigma12,
-            src,
-            dst,
-            width,
-            height,
-            inner_start,
-            inner_h,
-            radius,
-            mu1_out,
-            mu2_out,
-            store_mu,
-            sd_out,
-            store_sd,
-            ssq_out,
-            s12_out,
-            store_sigma,
-            free,
-            direct,
-            mode,
-        );
-    }
-    fused_vblur_ssim_canon::<P>(
-        h_mu1,
-        h_mu2,
-        h_sigma_sq,
-        h_sigma12,
-        src,
-        dst,
-        width,
-        height,
-        inner_start,
-        inner_h,
-        radius,
-        mu1_out,
-        mu2_out,
-        store_mu,
-        sd_out,
-        store_sd,
-        ssq_out,
-        s12_out,
-        store_sigma,
-        free,
-        direct,
-        mode,
-    )
-}
+// NEON emits the generated lane-parallel body (imazen/archmage#145): the
+// canon's clamps are `gt`+`blend` — NaN-drop `maxNum` semantics — so the
+// NEON chunk matches the scalar canon bit-for-bit on NaN lanes, and aarch64
+// `vfmaq` is a true FMA matching the scalar `mul_add` spellings.
 
 /// Canonical (candidate) edge-only fused V-blur — same structure as the SSIM
 /// body with the SSIM/ext arms absent, mirroring `fused_vblur_edge_inner`.
@@ -5330,6 +5265,14 @@ mod tests {
                         run!(fused_vblur_ssim_canon64_vec_v4x::<P>, t),
                         want,
                         "v4x {w}x{h}"
+                    );
+                }
+                #[cfg(target_arch = "aarch64")]
+                if let Some(t) = archmage::NeonToken::summon() {
+                    assert_eq!(
+                        run!(fused_vblur_ssim_canon64_vec_neon::<P>, t),
+                        want,
+                        "neon {w}x{h}"
                     );
                 }
             }

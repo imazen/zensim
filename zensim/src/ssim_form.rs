@@ -17,6 +17,39 @@ use magetypes::simd::generic::{f32x8 as GenericF32x8, f32x16};
 /// FROM.
 pub(crate) const C2: f32 = 0.0009;
 
+/// `x.max(+0)` / `x.min(1)` with canonical NaN-drop semantics on every
+/// backend: an ordered compare plus `blend`, so a NaN lane yields the
+/// constant exactly like `f32::max`/`min` — where NEON `vmaxq`/`vminq` would
+/// propagate it (the REV4VEC aarch64 failure; imazen/archmage#145).
+/// Bit-identical on finite lanes and to the prior x86 lowering (`maxps`/
+/// `minps` already returned the second operand for NaN), so x86 output is
+/// unchanged.
+#[inline(always)]
+fn max_num_zero_x16<T: F32x16Backend + Copy>(x: f32x16<T>, zero: f32x16<T>) -> f32x16<T> {
+    f32x16::blend(x.simd_gt(zero), x, zero)
+}
+
+#[inline(always)]
+fn min_num_one_x16<T: F32x16Backend + Copy>(x: f32x16<T>, one: f32x16<T>) -> f32x16<T> {
+    f32x16::blend(x.simd_lt(one), x, one)
+}
+
+#[inline(always)]
+fn max_num_zero_x8<T: F32x8Backend + Copy>(
+    x: GenericF32x8<T>,
+    zero: GenericF32x8<T>,
+) -> GenericF32x8<T> {
+    GenericF32x8::blend(x.simd_gt(zero), x, zero)
+}
+
+#[inline(always)]
+fn min_num_one_x8<T: F32x8Backend + Copy>(
+    x: GenericF32x8<T>,
+    one: GenericF32x8<T>,
+) -> GenericF32x8<T> {
+    GenericF32x8::blend(x.simd_lt(one), x, one)
+}
+
 /// Which luminance term the per-pixel dissimilarity uses.
 ///
 /// The revision axis is owned by [`crate::feature_defs`]; this enum is the
@@ -127,7 +160,10 @@ impl<T: F32x16Backend + Copy> SsimSplats16<T> {
             }
             SsimLumaForm::Clamp => {
                 let mu_diff = m1 - m2;
-                (mu_diff.mul_add(-mu_diff, self.one).max(self.zero), self.one)
+                (
+                    max_num_zero_x16(mu_diff.mul_add(-mu_diff, self.one), self.zero),
+                    self.one,
+                )
             }
         };
         // `den_m` is exactly 1.0 for the two arms that do not need it, and
@@ -145,11 +181,11 @@ impl<T: F32x16Backend + Copy> SsimSplats16<T> {
     ) -> f32x16<T> {
         let mu_diff = m1 - m2;
         let mean_error2 = mu_diff * mu_diff;
-        let variance_sum = (-m2).mul_add(m2, (-m1).mul_add(m1, ssq)).max(self.zero);
-        let error_variance = (err - mean_error2).max(self.zero);
+        let variance_sum = max_num_zero_x16((-m2).mul_add(m2, (-m1).mul_add(m1, ssq)), self.zero);
+        let error_variance = max_num_zero_x16(err - mean_error2, self.zero);
         let luma_loss = match self.form {
             SsimLumaForm::Ssim2Legacy => mean_error2,
-            SsimLumaForm::Clamp => mean_error2.min(self.one),
+            SsimLumaForm::Clamp => min_num_one_x16(mean_error2, self.one),
         };
         (self.one - luma_loss).mul_add(error_variance / (variance_sum + self.c2), luma_loss)
     }
@@ -195,7 +231,10 @@ impl<T: F32x8Backend + Copy> SsimSplats8<T> {
             }
             SsimLumaForm::Clamp => {
                 let mu_diff = m1 - m2;
-                (mu_diff.mul_add(-mu_diff, self.one).max(self.zero), self.one)
+                (
+                    max_num_zero_x8(mu_diff.mul_add(-mu_diff, self.one), self.zero),
+                    self.one,
+                )
             }
         };
         self.one - (num_m * num_s) / (den_m * denom_s)
@@ -212,11 +251,11 @@ impl<T: F32x8Backend + Copy> SsimSplats8<T> {
     ) -> GenericF32x8<T> {
         let mu_diff = m1 - m2;
         let mean_error2 = mu_diff * mu_diff;
-        let variance_sum = (-m2).mul_add(m2, (-m1).mul_add(m1, ssq)).max(self.zero);
-        let error_variance = (err - mean_error2).max(self.zero);
+        let variance_sum = max_num_zero_x8((-m2).mul_add(m2, (-m1).mul_add(m1, ssq)), self.zero);
+        let error_variance = max_num_zero_x8(err - mean_error2, self.zero);
         let luma_loss = match self.form {
             SsimLumaForm::Ssim2Legacy => mean_error2,
-            SsimLumaForm::Clamp => mean_error2.min(self.one),
+            SsimLumaForm::Clamp => min_num_one_x8(mean_error2, self.one),
         };
         (self.one - luma_loss).mul_add(error_variance / (variance_sum + self.c2), luma_loss)
     }

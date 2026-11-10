@@ -467,14 +467,27 @@ impl<T: F32x16Convert> CanonChunk<T> {
         let g = GenericF32x16::from_array_t(self.token, g_arr);
         let b = GenericF32x16::from_array_t(self.token, b_arr);
         if CLAMP {
-            (
-                r.max(self.zero).min(self.one),
-                g.max(self.zero).min(self.one),
-                b.max(self.zero).min(self.one),
-            )
+            (self.clamp01(r), self.clamp01(g), self.clamp01(b))
         } else {
             (r, g, b)
         }
+    }
+
+    /// `x.max(+0).min(1)` with the canon's NaN-drop semantics on every
+    /// backend: ordered compares plus `blend`, so a NaN lane yields the
+    /// constant exactly like `f32::max`/`min` — where NEON `vmaxq`/`vminq`
+    /// would propagate it (imazen/archmage#145). Bit-identical on finite
+    /// lanes and to the prior x86 lowering.
+    #[inline(always)]
+    fn clamp01(&self, x: GenericF32x16<T>) -> GenericF32x16<T> {
+        let hi = GenericF32x16::blend(x.simd_gt(self.zero), x, self.zero);
+        GenericF32x16::blend(hi.simd_lt(self.one), hi, self.one)
+    }
+
+    /// `x.max(+0)` with the same NaN-drop semantics as [`Self::clamp01`].
+    #[inline(always)]
+    fn max0(&self, x: GenericF32x16<T>) -> GenericF32x16<T> {
+        GenericF32x16::blend(x.simd_gt(self.zero), x, self.zero)
     }
 
     /// The canonical opsin absorbance mix — [`opsin_px_canon`]'s fused
@@ -488,15 +501,9 @@ impl<T: F32x16Convert> CanonChunk<T> {
     ) -> [GenericF32x16<T>; 3] {
         let [m0, m1, m2] = &self.m;
         [
-            m0[0]
-                .mul_add(r, m0[1].mul_add(g, m0[2].mul_add(b, self.bias)))
-                .max(self.zero),
-            m1[0]
-                .mul_add(r, m1[1].mul_add(g, m1[2].mul_add(b, self.bias)))
-                .max(self.zero),
-            m2[0]
-                .mul_add(r, m2[1].mul_add(g, m2[2].mul_add(b, self.bias)))
-                .max(self.zero),
+            self.max0(m0[0].mul_add(r, m0[1].mul_add(g, m0[2].mul_add(b, self.bias)))),
+            self.max0(m1[0].mul_add(r, m1[1].mul_add(g, m1[2].mul_add(b, self.bias)))),
+            self.max0(m2[0].mul_add(r, m2[1].mul_add(g, m2[2].mul_add(b, self.bias)))),
         ]
     }
 
@@ -539,7 +546,7 @@ impl<T: F32x16Convert> CanonChunk<T> {
 /// variant whose `mul_add` is unfused — not canonical. v4x is
 /// [`srgb_xyb_canon_vec_v4x`]: the same arithmetic with the table held in
 /// registers.
-#[magetypes(define(f32x16), v4, v3, -scalar)]
+#[magetypes(define(f32x16), v4, v3, neon, -scalar)]
 fn srgb_xyb_canon_vec(
     token: Token,
     pixels: &[[u8; 3]],
@@ -837,23 +844,14 @@ fn srgb_xyb_canon_vec_wasm128(
     srgb_xyb_canon_body(pixels, x_out, y_out, b_out, cbrt7);
 }
 
-/// NEON runs the scalar canonical body (2026-10-03): its vector `max`/`min` propagate NaN, while the canon clamps with
-/// `f32::max`/`min`, which drop it, so a lane-parallel NEON chunk differed from the scalar canon on NaN inputs (CI aarch64).
-#[cfg(target_arch = "aarch64")]
-fn srgb_xyb_canon_vec_neon(
-    _token: archmage::NeonToken,
-    pixels: &[[u8; 3]],
-    x_out: &mut [f32],
-    y_out: &mut [f32],
-    b_out: &mut [f32],
-    cbrt7: bool,
-) {
-    srgb_xyb_canon_body(pixels, x_out, y_out, b_out, cbrt7);
-}
+// NEON emits the generated lane-parallel body (imazen/archmage#145):
+// `CanonChunk` clamps via `gt`/`lt`+`blend` — NaN-drop `maxNum`/`minNum`
+// semantics — so the NEON chunk matches the scalar canon bit-for-bit, and
+// aarch64 `vfmaq` is a true FMA matching the scalar `mul_add` spellings.
 
 /// [`linear_xyb_canon`] lane-parallel — as [`srgb_xyb_canon_vec`], with
 /// [`CanonChunk::linear_lanes`] for the input side.
-#[magetypes(define(f32x16), v4x, v4, v3, -scalar)]
+#[magetypes(define(f32x16), v4x, v4, v3, neon, -scalar)]
 fn linear_xyb_canon_vec<const CLAMP: bool>(
     token: Token,
     pixels: &[[f32; 3]],
@@ -908,19 +906,8 @@ fn linear_xyb_canon_vec_wasm128<const CLAMP: bool>(
     linear_xyb_canon_body::<CLAMP>(pixels, x_out, y_out, b_out, cbrt7);
 }
 
-/// NEON runs the scalar canonical body (2026-10-03): its vector `max`/`min` propagate NaN, while the canon clamps with
-/// `f32::max`/`min`, which drop it, so a lane-parallel NEON chunk differed from the scalar canon on NaN inputs (CI aarch64).
-#[cfg(target_arch = "aarch64")]
-fn linear_xyb_canon_vec_neon<const CLAMP: bool>(
-    _token: archmage::NeonToken,
-    pixels: &[[f32; 3]],
-    x_out: &mut [f32],
-    y_out: &mut [f32],
-    b_out: &mut [f32],
-    cbrt7: bool,
-) {
-    linear_xyb_canon_body::<CLAMP>(pixels, x_out, y_out, b_out, cbrt7);
-}
+// NEON emits the generated lane-parallel body — same `CanonChunk` clamps as
+// [`srgb_xyb_canon_vec`] (imazen/archmage#145).
 
 // --- SIMD implementations ---
 
