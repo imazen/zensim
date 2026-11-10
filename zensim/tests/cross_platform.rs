@@ -145,6 +145,66 @@ fn hardcoded_reference_scores() {
     );
 }
 
+/// Hardcoded profile-A reference scores — pinned **bit-exact**, unlike the
+/// V0_2 table above.
+///
+/// A (revision 7) is designed for cross-platform bit-exactness: every
+/// transcendental in the score path goes through `PowForm::PureRust`
+/// (pure-Rust libm, no platform libc variance), the canonical kernels are
+/// bit-identical across SIMD tiers (the maxNum-safe clamp forms; verified by
+/// `cross_tier` and `nan_repro` on every CI architecture), and the f64
+/// reductions are thread-count invariant (parallel and serial compute the
+/// same bits).
+///
+/// Verified bit-identical on x86-64 (Zen4, v4x/v3 tiers) and Apple M6
+/// (AArch64 NEON): all 8 scores below match to_bits() on both platforms.
+/// A failure here means some backend produced different bits — the exact
+/// class of bug the 2026-10-03 REV4VEC scalar-fallback hid.
+#[test]
+fn hardcoded_reference_scores_a() {
+    const W: usize = 128;
+    const H: usize = 128;
+    let z = Zensim::new(ZensimProfile::A);
+    let pairs = generate_test_pairs(W, H);
+
+    #[allow(clippy::excessive_precision)]
+    let expected: &[(&str, u64)] = &[
+        ("checkerboard+blur", 0xc04a71132b781358),
+        ("checkerboard+sharpen", 0x4051eaec883df850),
+        ("mandelbrot+blur", 0xc0324213b1d90bb0),
+        ("mandelbrot+color_shift", 0x4029cbcd84d43acc),
+        ("noise+blur", 0x40491b6b0aed6865),
+        ("noise+block_artifacts", 0x403df7d44f23d45d),
+        ("color_blocks+color_shift", 0x40413b80fb2969e6),
+        ("color_blocks+sharpen", 0x4031223d84002ebe),
+    ];
+
+    let mut failures = Vec::new();
+    for (pair, &(name, expected_bits)) in pairs.iter().zip(expected.iter()) {
+        assert_eq!(pair.name, name, "Test pair order mismatch");
+        let src = RgbSlice::new(&pair.source, W, H);
+        let dst = RgbSlice::new(&pair.distorted, W, H);
+        let result = z.compute(&src, &dst).expect("compute failed");
+        let bits = result.score().to_bits();
+        println!(
+            "  {name:30} score={:.15}  bits={bits:016x}  expected={expected_bits:016x}",
+            result.score(),
+        );
+        if bits != expected_bits {
+            failures.push(format!(
+                "{name}: score bits {bits:016x} != expected {expected_bits:016x} ({:.15} vs {:.15})",
+                result.score(),
+                f64::from_bits(expected_bits),
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "Profile A is not bit-exact on this platform:\n{}",
+        failures.join("\n")
+    );
+}
+
 #[cfg(feature = "legacy-models")]
 /// All features must be non-trivial (max > 1e-6 across all 8 test pairs).
 /// Layout: [0..156) scored (13/ch × 3ch × 4), [156..228) peaks (6/ch × 3ch × 4)
