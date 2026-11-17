@@ -34,8 +34,8 @@ monotone output spline. The derived-input declaration `fx2` is embedded in the b
 chroma-teacher leg of the round-3 recipe and narrows the human-rating legs to TID2013's training
 split and MDID, which share the recipe's MOS weight equally; PIPAL, LIVE-MD, CID:IQ, CID:OA,
 IRCCyN/IVC and Colourlab are not trained on. It was then continued for 60 epochs on the JPEG AIC-2026
-public training set (weighted ×256, 48 percent of the continuation's draws) with the base legs
-rehearsed; the checkpoint after epoch 59 ships (seed 0 of three; the other seeds agree on every
+public training set (group weight 256, 76.25 percent of continuation sampling attempts before skipped
+pairs) with the base legs rehearsed; the checkpoint after epoch 59 ships (seed 0 of three; the other seeds agree on every
 evaluation within their intervals). The owner adopted it on 2026-11-04 after the E36 candidate
 comparison (zensimx `benchmarks/e36_subset_test_2026-11-01.md`). The complete recipe, with every
 command, trainer build and hash, is `recipes/MixF3-s0.json` and `docs/RECIPE_MIXF3.md` in the private

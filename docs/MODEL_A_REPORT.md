@@ -153,8 +153,11 @@ Colourlab trained earlier recipes and do not train `A`.
 
 **Continuation (60 epochs at learning rate 1e-5).** The same groups, plus the JPEG AIC-2026 public
 training set (3,920 crops of 28 sources, weight 256) and the human leg again as a cross-reference. The
-AIC leg takes 48.3% of the continuation's draws and 16.1% of all draws over both steps. Its labels are
-available to JPEG committee members only, so no AIC-2026 result appears in this repository.
+AIC leg accounts for 76.25% of continuation sampling attempts and 25.42% of attempts over both steps,
+before same-row or tied-pair skips. The frozen CPU trainer samples groups directly from their weights;
+row counts do not multiply those weights. Earlier 48.3% / 16.1% figures used an incorrect row-count
+multiplier (corrected 2026-11-17). These are nominal probabilities, not measured accepted-pair or gradient
+shares. Its labels are available to JPEG committee members only, so no AIC-2026 result appears in this repository.
 
 **Pack.** Epoch 59 becomes the production f16 bake with the dial spline refit on the CID22 fit table and
 the derived-input declaration embedded. Removing training provenance gives the shipped file,
