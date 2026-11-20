@@ -15,8 +15,8 @@ opt-level = 2
 [workspace.dependencies]
 zensim = { version = "0.3.0", path = "zensim", default-features = false }
 zensim-regress = { version = "0.4.0", path = "zensim-regress", default-features = false }
-archmage = { version = "0.9.30", features = ["macros", "avx512"] }
-magetypes = { version = "0.9.30", features = ["avx512"] }
+archmage = { version = "0.9.32", features = ["macros", "avx512"] }
+magetypes = { version = "0.9.32", features = ["avx512"] }
 libm = { version = "0.2.16", default-features = false }
 bytemuck = { version = "1.25", default-features = false, features = ["derive"] }
 thiserror = "2"
