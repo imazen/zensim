@@ -23,6 +23,9 @@ jobs:
         run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
       - uses: actions/checkout@v7
         with:
+          path: self
+      - uses: actions/checkout@v7
+        with:
           repository: imazen/zensimx
           ref: ${{ env.VIZ_SOURCE }}
           path: research
@@ -61,6 +64,11 @@ jobs:
           tar -xzf "$RUNNER_TEMP/bindgen.tar.gz" -C "$RUNNER_TEMP"
           "$RUNNER_TEMP/wasm-bindgen-0.2.129-x86_64-unknown-linux-musl/wasm-bindgen" --target web --out-dir site/pkg "$CARGO_TARGET_DIR/wasm32-unknown-unknown/release/zensim_workbench.wasm"
           python3 research/tools/zensim-viz/pages_build.py site --source "$VIZ_SOURCE" --out site
+      - name: Add verified evaluations page and privacy gate
+        run: |
+          set -euo pipefail
+          python3 self/scripts/stage_evaluations_page.py --self self --site site
+          python3 self/scripts/check_pages_site.py site
       - uses: actions/upload-pages-artifact@v5
         with:
           path: site

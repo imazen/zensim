@@ -31,6 +31,7 @@ correct ordering of every distorted-image pair. Severe damage can score below 0.
 Training data and evaluation details: [docs/PROFILES.md](docs/PROFILES.md). How it works and how it was
 built: [docs/MODEL_A_REPORT.md](docs/MODEL_A_REPORT.md).
 Explore its features, score response and weights in the browser: [imazen.github.io/zensim](https://imazen.github.io/zensim/).
+Evaluations, scatter diagnostics and runtime benchmarks: [imazen.github.io/zensim/evaluations.html](https://imazen.github.io/zensim/evaluations.html).
 
 The 0.1/0.2 linear models are available with the `legacy-models` feature. Extraction
 changes in 0.3 can shift their scores; see the [changelog](CHANGELOG.md).
