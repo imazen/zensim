@@ -4,6 +4,10 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 html,
 body {
   margin: 0;
@@ -83,6 +87,8 @@ button[aria-pressed="true"],
 
 button:focus-visible,
 select:focus-visible,
+input[type="checkbox"]:focus-visible,
+summary:focus-visible,
 .nav-btn:focus-visible,
 a:focus-visible {
   outline: 2px solid var(--focus);
@@ -254,6 +260,30 @@ section.eval-section {
   color: var(--ink-2);
 }
 
+label.check-ctl {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-0);
+  color: var(--ink-2);
+  cursor: pointer;
+  user-select: none;
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-ctl);
+  background: var(--surface-1);
+}
+
+label.check-ctl:hover {
+  color: var(--ink);
+  background: var(--surface-2);
+}
+
+label.check-ctl input[type="checkbox"] {
+  margin: 0;
+  accent-color: var(--series-1);
+}
+
 .card {
   background: var(--surface-1);
   border: 1px solid var(--border);
@@ -270,6 +300,13 @@ section.eval-section {
   align-items: flex-start;
   gap: 12px;
   flex-wrap: wrap;
+}
+
+.card-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
 }
 
 .card-title {
@@ -310,6 +347,17 @@ section.eval-section {
 
 .callout strong {
   color: var(--ink);
+}
+
+details.details-compact {
+  margin-top: 8px;
+}
+
+details.details-compact > summary {
+  cursor: pointer;
+  font-size: var(--fs-0);
+  color: var(--series-1);
+  user-select: none;
 }
 
 .legend-row {
@@ -368,7 +416,7 @@ section.eval-section {
 
 .scatter-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 285px), 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 14px;
 }
 
@@ -527,7 +575,8 @@ footer.page-foot {
 @media (max-width: 1024px) {
   .hero-block,
   .grid-2,
-  .gate-grid {
+  .gate-grid,
+  .scatter-grid {
     grid-template-columns: 1fr;
   }
   .kpi-row {

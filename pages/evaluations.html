@@ -20,19 +20,19 @@
 
     <main class="page-shell">
       <nav class="jump-bar" aria-label="Sections">
-        <a href="#frozen-assessment">Frozen-A panels</a>
+        <a href="#frozen-assessment">Frozen-A vs peers</a>
         <a href="#clic-2022">CLIC 2022 2AFC</a>
-        <a href="#scatters">Density scatters &amp; tails</a>
+        <a href="#scatters">Dot &amp; density scatters</a>
         <a href="#kadid-breakdown">KADID 25 distortions</a>
         <a href="#engineering-gates">Dial, steering &amp; HDR</a>
         <a href="#runtime-benchmarks">Speed &amp; memory</a>
-        <a href="#selection-data">Selection data</a>
+        <a href="#selection-data">9-set peer panel</a>
         <a href="#limits-citations">Limits &amp; citations</a>
       </nav>
 
       <section class="hero-block" aria-labelledby="page-title">
         <div>
-          <h1 id="page-title">zensim 0.3.0 profile A: verified evaluations and runtime benchmarks</h1>
+          <h1 id="page-title">zensim 0.3.0 profile A: peer comparisons, scatter plots, and runtime benchmarks</h1>
           <p>
             <code>zensim-a</code> is a full-reference perceptual image similarity metric built for codec quality control,
             encoder steering, and visual regression testing. It converts both images to XYB across four dyadic scales,
@@ -41,11 +41,14 @@
             below <code>0</code> for severe damage).
           </p>
           <p>
-            In the shipped unpruned bake, one tied max pair carries 99.998% of the mean raw score contribution
-            (approximately two additive damage budgets, plus a 31-unit residual with output weight −0.000031).
-            Monotonicity holds in the damage features up to floating-point rounding, not across every pixel edit or
-            close encoder step. The per-region steering map (<code>compute_with_diffmap</code>) uses a separate fixed
-            156-coefficient projection.
+            This page compares frozen <code>A</code> primarily against published external full-reference metrics
+            (<strong>SSIMULACRA2</strong>, <strong>Butteraugli</strong>, <strong>FSIMc / FSIM</strong>,
+            <strong>HaarPSI</strong>, and <strong>ColorVideoVDP</strong>, plus registry <code>fast-ssim2</code> in
+            runtime benchmarks). In the shipped unpruned bake, one tied max pair carries 99.998% of the mean raw score
+            contribution (approximately two additive damage budgets, plus a 31-unit residual with output weight
+            −0.000031). Monotonicity holds in the damage features up to floating-point rounding, not across every pixel
+            edit or close encoder step. The per-region steering map (<code>compute_with_diffmap</code>) uses a separate
+            fixed 156-coefficient projection.
           </p>
         </div>
         <aside class="identity-box mono" aria-label="Assessed artifact identity">
@@ -66,62 +69,39 @@
 
       <div class="kpi-row" aria-label="Summary outcomes">
         <div class="stat-tile">
-          <span class="stat-label">Registered frozen-A sets</span>
-          <span class="stat-value">8 populations</span>
-          <span class="stat-note">57,300 CLIC 2022 2AFC questions + 7 continuous sets (3 subsets)</span>
-        </div>
-        <div class="stat-tile">
-          <span class="stat-label">CLIC 2022 majority agreement</span>
+          <span class="stat-label">CLIC 2022 2AFC agreement</span>
           <span class="stat-value">0.747</span>
-          <span class="stat-note">95% CI [0.743, 0.750] · SSIMULACRA2 0.736 · Butteraugli 0.688</span>
+          <span class="stat-note">57,300 questions, CI [0.743, 0.750] · SSIMULACRA2 0.736 · Butteraugli 0.688</span>
         </div>
         <div class="stat-tile">
-          <span class="stat-label">KADID TERMINAL confirmation</span>
-          <span class="stat-value">Failed (0 / 2)</span>
-          <span class="stat-note">−0.049 vs research B, −0.040 vs by_v2fy; leads SSIMULACRA2 (0.893 vs 0.800)</span>
+          <span class="stat-label">Frozen-A MOS &amp; JND sets vs peers</span>
+          <span class="stat-value">5 / 6</span>
+          <span class="stat-note">Higher |SROCC| than SSIMULACRA2 &amp; Butteraugli on CSIQ, LIVE, KADID, AIC-4 &amp; MCL-JCI; trails SSIMULACRA2 on CID22-B (0.909 vs 0.913)</span>
+        </div>
+        <div class="stat-tile">
+          <span class="stat-label">8-collection peer MedAE / span</span>
+          <span class="stat-value">8.18%</span>
+          <span class="stat-note">vs HaarPSI 8.92%, SSIMULACRA2 9.13%, CVVDP 9.82%, FSIMc 9.97%; FSIMc leads codec rows (0.906 vs 0.895)</span>
         </div>
         <div class="stat-tile">
           <span class="stat-label">Resident RGB8 speed (16T AVX2)</span>
           <span class="stat-value">8.67 ms/MP</span>
-          <span class="stat-note">+ 2.04 ms on Core Ultra 7 270K Plus; slower than fast-ssim2 at 64² pre-cutoff</span>
+          <span class="stat-note">+ 2.04 ms vs fast-ssim2 29.72 ms/MP on Core Ultra 7 270K Plus; slower than fast-ssim2 at 64²</span>
         </div>
       </div>
 
-      <!-- Section 1: Frozen-A Final Assessment -->
+      <!-- Section 1: Frozen-A Final Assessment vs Published Peers -->
       <section id="frozen-assessment" class="eval-section">
         <div class="section-head">
-          <h2>1. Registered frozen-A final assessment</h2>
+          <h2>1. Registered frozen-A assessment against SSIMULACRA2 and Butteraugli</h2>
           <p>
             Registered on 2026-11-05 and read once per population on the frozen 0.3 development bake without changing
-            weights, calibration, or acceptance thresholds. Comparators ran on identical decoded RGB8 pixels;
+            weights, calibration, or acceptance thresholds. All metrics scored identical decoded RGB8 pixels;
             Butteraugli quality is explicitly <code>−ba_p3</code>. Signed values preserve target polarity (positive on
             quality targets, negative on distortion targets); RMSE stays in each dataset’s native unit and is never
             averaged across collections. Marginal 95% intervals resample whole reference images and are not paired
             significance tests.
           </p>
-        </div>
-
-        <div class="callout" data-kind="critical">
-          <strong>KADID-10k TERMINAL failed both registered confirmation rules.</strong>
-          The rules compared frozen <code>A</code> against two internal research models (formula-5 <code>B</code> and
-          formula-4 seed-0 epoch-119 <code>by_v2fy</code>, served via its approved metadata-only revision tag) rather
-          than published metrics. Both comparators trained on KADID’s other references while <code>A</code> did not
-          train on KADID; that difference is disclosed, not proved to explain the gap. The failure stands unchanged.
-          <div class="table-wrap" style="margin-top:10px">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th>Registered comparison (2,000 pairs / 16 refs)</th>
-                  <th class="num">Comparator SROCC</th>
-                  <th class="num">Signed Δ SROCC</th>
-                  <th class="num">Required limit</th>
-                  <th class="num">Paired 95% CI (10,000 draws)</th>
-                  <th>Verdict</th>
-                </tr>
-              </thead>
-              <tbody id="kadid-conf-tbody"></tbody>
-            </table>
-          </div>
         </div>
 
         <div class="card">
@@ -130,12 +110,19 @@
               <h3>Continuous-target populations and registered subsets</h3>
               <span class="sub">
                 KonJND JPEG TERMINAL (−0.368 A, −0.401 SSIMULACRA2, +0.053 Butteraugli) is a 1-pair-per-reference PJND
-                threshold set and appears in the full table view and scatter selector rather than the MOS/JND rank bars.
+                threshold instrument and appears in the full table view and scatter selector rather than the MOS/JND
+                rank bars.
               </span>
             </div>
-            <div id="frozen-toggle" class="seg" role="group" aria-label="Frozen assessment view">
-              <button type="button" data-mode="chart" aria-pressed="true">Interval chart</button>
-              <button type="button" data-mode="table" aria-pressed="false">Full 5-metric table</button>
+            <div class="card-controls">
+              <label id="frozen-internal-wrap" class="check-ctl" hidden>
+                <input type="checkbox" id="frozen-internal-check" />
+                Include KADID internal checkpoints
+              </label>
+              <div id="frozen-toggle" class="seg" role="group" aria-label="Frozen assessment view">
+                <button type="button" data-mode="chart" aria-pressed="true">Interval chart</button>
+                <button type="button" data-mode="table" aria-pressed="false">Full 5-statistic table</button>
+              </div>
             </div>
           </div>
 
@@ -158,9 +145,37 @@
             </table>
           </div>
         </div>
+
+        <div class="callout" data-kind="critical">
+          <strong>Registration disclosure — KADID-10k TERMINAL internal confirmation rule failed (0 / 2):</strong>
+          While frozen <code>A</code> (0.8928) led published comparators SSIMULACRA2 (0.8002) and Butteraugli (0.5718)
+          on the 2,000 KADID TERMINAL pairs, the pre-registered confirmation rules tested <code>A</code> against two
+          unpublished internal research checkpoints (formula-5 <code>B</code> and formula-4 seed-0 epoch-119
+          <code>by_v2fy</code>, served via its approved metadata-only revision tag). Both internal checkpoints trained on
+          KADID’s other references whereas <code>A</code> did not train on KADID; that training difference is disclosed,
+          not proved to explain the gap, and the failed verdict stands unchanged.
+          <details class="details-compact">
+            <summary>Show registered internal comparator intervals (B and by_v2fy)</summary>
+            <div class="table-wrap" style="margin-top:8px">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Registered comparison (2,000 pairs / 16 refs)</th>
+                    <th class="num">Comparator SROCC</th>
+                    <th class="num">Signed Δ SROCC</th>
+                    <th class="num">Required limit</th>
+                    <th class="num">Paired 95% CI (10,000 draws)</th>
+                    <th>Verdict</th>
+                  </tr>
+                </thead>
+                <tbody id="kadid-conf-tbody"></tbody>
+              </table>
+            </div>
+          </details>
+        </div>
       </section>
 
-      <!-- Section 1B: CLIC 2022 -->
+      <!-- Section 2: CLIC 2022 -->
       <section id="clic-2022" class="eval-section">
         <div class="section-head">
           <h2>2. CLIC 2022 perceptual two-alternative forced choice</h2>
@@ -176,7 +191,7 @@
         <div class="grid-2">
           <div class="card">
             <div class="card-title">
-              <h3>Overall 2AFC agreement (57,300 questions)</h3>
+              <h3>Overall 2AFC agreement vs SSIMULACRA2 &amp; Butteraugli</h3>
               <span class="sub">10,000 whole-reference crop resamples, seed 20261105, 95% type-7 percentile CI</span>
             </div>
             <div class="table-wrap">
@@ -226,17 +241,19 @@
         </div>
       </section>
 
-      <!-- Section 2: Density Scatters & Tail Diagnostics -->
+      <!-- Section 3: Dot & Density Scatters -->
       <section id="scatters" class="eval-section">
         <div class="section-head">
-          <h2>3. Score-versus-human density scatters and tail diagnostics</h2>
+          <h2>3. Score-versus-human scatter plots and tail diagnostics</h2>
           <p>
-            Each panel plots every pair in the selected view without clipping negative score tails (for example,
-            <code>A</code> reaches −179.2 on LIVE and −152.6 on KADID) or out-of-unit targets (LIVE reaches
-            [−0.118, 1.026]). To represent full-population density, saturation, and tails without redistributing
-            row-level third-party human rating tables or substituting an unverified browser-side 4PL curve, each view
-            uses an exact 8×8 count histogram over observed bounds overlaid with tie-preserving score-quantile target
-            medians and p25–p75 interquartile bands.
+            Side-by-side comparison of <strong>zensim A</strong>, <strong>SSIMULACRA2</strong>, and
+            <strong>Butteraugli (−p3)</strong> across every pair in each view without clipping negative score tails (for
+            example, <code>A</code> reaches −179.2 on LIVE and −152.6 on KADID) or out-of-unit targets (LIVE reaches
+            [−0.118, 1.026]). <strong>Dot scatter</strong> plots all observations per panel on a 256×256 display grid
+            (256 quantized positions per axis, exact cell multiplicity preserved with zero subsampling, no stimulus IDs,
+            and no cross-metric row joins); <strong>8×8 density</strong> shows exact log-scaled bin counts; both
+            optionally overlay tie-preserving score-quantile target medians and p25–p75 interquartile bands (no
+            unverified browser-side 4PL fit is drawn).
           </p>
         </div>
 
@@ -246,11 +263,19 @@
             <select id="scatter-select"></select>
           </label>
           <div id="scatter-toggle" class="seg" role="group" aria-label="Scatter view">
-            <button type="button" data-mode="chart" aria-pressed="true">Density panels</button>
-            <button type="button" data-mode="table" aria-pressed="false">Quantile bin table</button>
+            <button type="button" data-mode="dots" aria-pressed="true">Dot scatter</button>
+            <button type="button" data-mode="density" aria-pressed="false">8×8 density</button>
+            <button type="button" data-mode="table" aria-pressed="false">Quantile table</button>
           </div>
-          <span class="legend-item muted" style="font-size:12px">
-            Cell count (log): 1 <span id="scatter-ramp" class="ramp-bar" aria-hidden="true"></span> max · Line + band = target median &amp; IQR
+          <label id="scatter-trend-wrap" class="check-ctl">
+            <input type="checkbox" id="scatter-trend-check" checked />
+            Median &amp; IQR band
+          </label>
+          <span id="scatter-legend-dots" class="legend-item muted" style="font-size:12px">
+            Every pair plotted (256×256 display grid; larger/brighter dot = stacked pairs) · Hover any point
+          </span>
+          <span id="scatter-legend-density" class="legend-item muted" style="font-size:12px" hidden>
+            Cell count (log): 1 <span id="scatter-ramp" class="ramp-bar" aria-hidden="true"></span> max
           </span>
         </div>
 
@@ -275,15 +300,22 @@
         </div>
 
         <div class="card">
-          <div class="card-title">
-            <h3>KADID-10k TERMINAL native scatter diagnostics (<code>zenstats::scatter</code> v2, 2,000 rows)</h3>
-            <span class="sub">
-              Descriptive geometry from the registered Rust statistical owner (only KADID had native scatter diagnostics
-              registered in the frozen read). <code>geo.*</code> evaluates tie-averaged quantile-mapped predictions
-              against MOS (span = p99 − p1 = 3.64); <code>geo.clump = 0.078</code> is identical across all five models
-              under rank mapping, whereas <code>raw.clump</code> (largest share in 20 equal-width bins over raw
-              <code>[pred_min, pred_max]</code>) exposes nonlinear score compression such as Butteraugli’s 0.2800.
-            </span>
+          <div class="card-head">
+            <div class="card-title">
+              <h3>KADID-10k TERMINAL native scatter diagnostics (<code>zenstats::scatter</code> v2, 2,000 rows)</h3>
+              <span class="sub">
+                Descriptive geometry from the registered Rust statistical owner (only KADID had native scatter
+                diagnostics registered in the frozen read). <code>geo.*</code> evaluates tie-averaged quantile-mapped
+                predictions against MOS (span = p99 − p1 = 3.64); <code>geo.clump = 0.078</code> is identical across
+                all evaluated models under rank mapping, whereas <code>raw.clump</code> (largest share in 20 equal-width
+                bins over raw <code>[pred_min, pred_max]</code>) exposes nonlinear score compression such as
+                Butteraugli’s 0.2800.
+              </span>
+            </div>
+            <label class="check-ctl">
+              <input type="checkbox" id="kadid-diag-internal-check" />
+              Include internal checkpoints
+            </label>
           </div>
           <div class="table-wrap">
             <table class="data-table">
@@ -307,18 +339,18 @@
         </div>
       </section>
 
-      <!-- Section 3: KADID 25 Distortion Breakdown -->
+      <!-- Section 4: KADID 25 Distortion Breakdown -->
       <section id="kadid-breakdown" class="eval-section">
         <div class="section-head">
-          <h2>4. Per-distortion breakdown: all 25 KADID-10k TERMINAL types</h2>
+          <h2>4. Per-distortion breakdown vs peers: all 25 KADID-10k TERMINAL types</h2>
           <p>
             Each distortion code (<code>01</code>–<code>25</code>) has 80 pairs across 16 reference images (10,000
             reference resamples, seed 20261105; 16-reference percentile intervals are descriptive and may under-cover).
             Codes are canonical from the cached evaluation keys; human-readable labels follow KADID-10k’s
-            <code>imdist_generator.m</code> specification. <code>A</code> tracks blur, compression, and noise closely
-            (<code>01</code> Gaussian blur 0.959, <code>03</code> Motion blur 0.965, <code>09</code> JPEG2000 0.940) but
-            drops sharply on local patch/block/contrast edits (<code>23</code> Color block 0.489, <code>20</code>
-            Non-eccentricity patch 0.500, <code>21</code> Pixelate 0.577).
+            <code>imdist_generator.m</code> specification. <code>A</code> leads SSIMULACRA2 and Butteraugli across most
+            blur, noise, and color-shift types (for example <code>04</code> Color diffusion 0.922 vs 0.720 / 0.340 and
+            <code>18</code> Mean shift 0.808 vs 0.659 / 0.365), while SSIMULACRA2 leads on <code>21</code> Pixelate
+            (0.684 vs 0.577) and local patch/block edits remain hard for every metric.
           </p>
         </div>
 
@@ -337,9 +369,13 @@
             </select>
           </label>
           <div id="kadid-toggle" class="seg" role="group" aria-label="KADID breakdown view">
-            <button type="button" data-mode="chart" aria-pressed="true">Comparison chart</button>
-            <button type="button" data-mode="table" aria-pressed="false">25×5 CI table</button>
+            <button type="button" data-mode="chart" aria-pressed="true">Peer chart</button>
+            <button type="button" data-mode="table" aria-pressed="false">CI table</button>
           </div>
+          <label class="check-ctl">
+            <input type="checkbox" id="kadid-internal-check" />
+            Include internal checkpoints (B, by_v2fy)
+          </label>
         </div>
 
         <div class="card">
@@ -347,16 +383,7 @@
           <div id="kadid-table-wrap" class="table-wrap" hidden>
             <table class="data-table">
               <thead>
-                <tr>
-                  <th>Code</th>
-                  <th>Distortion (<code>imdist_generator.m</code>)</th>
-                  <th>Family</th>
-                  <th class="num">zensim A [95% CI]</th>
-                  <th class="num">Research B [95% CI]</th>
-                  <th class="num">by_v2fy [95% CI]</th>
-                  <th class="num">SSIMULACRA2 [95% CI]</th>
-                  <th class="num">Butteraugli (−p3) [95% CI]</th>
-                </tr>
+                <tr id="kadid-types-thead-row"></tr>
               </thead>
               <tbody id="kadid-types-tbody"></tbody>
             </table>
@@ -364,14 +391,14 @@
         </div>
       </section>
 
-      <!-- Section 4: Engineering Gates, Codec Steering & HDR -->
+      <!-- Section 5: Engineering Gates, Codec Steering & HDR -->
       <section id="engineering-gates" class="eval-section">
         <div class="section-head">
           <h2>5. Engineering qualification gates, JPEG XL steering, and HDR front end</h2>
           <p>
             Rank correlation on MOS collections does not verify dial monotonicity, SIMD determinism, or spatial
             quantization steering. Model selection enforced five engineering gates alongside human-rating panels; all
-            imperfect pass rates and byte costs are retained below.
+            imperfect pass rates and byte costs against external judges are retained below.
           </p>
         </div>
 
@@ -386,8 +413,8 @@
               identical images, nothing above an identical copy) passed across seeds 0–2 on both evaluation grids, and
               exact identity passed across 12 x86 SIMD tier permutations. On near-identity ladders,
               <strong>132 / 144</strong> were monotone per seed. Across <strong>646,677</strong> held-out close
-              encoder-ladder pairs where Butteraugli and CVVDP agree, <code>A</code> still misorders
-              <strong>3.39%</strong> of pairs (<code>F3</code>: 3.35%).
+              encoder-ladder pairs where <strong>Butteraugli and CVVDP agree</strong>, <code>A</code> still misorders
+              <strong>3.39%</strong> of pairs (prior recipe <code>F3</code>: 3.35%).
             </p>
           </div>
 
@@ -400,10 +427,10 @@
               Chroma level (worst MAE ratio <code>1.008</code> vs bar <code>1.05</code>) and chroma trade misordering
               (<code>2.47%</code> vs <code>F3</code> 2.50%) passed. Seed 0 passed <strong>133 / 135</strong> regional
               map-steering cases (one text-screenshot case read <code>0.69</code> against a <code>0.70</code> bar at
-              every seed). In a closed JPEG XL quantization loop against <code>F3</code>, the reported byte-delta
-              intervals include zero (<code>+0.19% [−0.09, +0.46]</code> bytes by SSIMULACRA2;
-              <code>−0.21% [−0.56, +0.12]</code> by Butteraugli), whereas <strong>against a Butteraugli-steered loop,
-              zensim’s map costs +2.18% bytes under SSIMULACRA2 and +5.31% under Butteraugli</strong>.
+              every seed). <strong>Against a Butteraugli-steered JPEG XL quantization loop, zensim’s map costs +2.18%
+              bytes under SSIMULACRA2 and +5.31% under Butteraugli</strong> (against <code>F3</code>, the reported
+              byte-delta intervals include zero: <code>+0.19% [−0.09, +0.46]</code> by SSIMULACRA2 and
+              <code>−0.21% [−0.56, +0.12]</code> by Butteraugli).
             </p>
           </div>
 
@@ -423,7 +450,7 @@
         </div>
       </section>
 
-      <!-- Section 5: Runtime & Memory Benchmarks -->
+      <!-- Section 6: Runtime & Memory Benchmarks -->
       <section id="runtime-benchmarks" class="eval-section">
         <div class="section-head">
           <h2>6. Runtime latency, parallel cutoff, and process memory</h2>
@@ -432,9 +459,10 @@
             20 real images per size, <code>zenjpeg</code> q40 YCbCr 4:2:0 reconstructions, resident RGB8 sRGB bytes
             scored in-process (decode, encode, resize, I/O, and CLI startup excluded), 100 ms warmup, first 32 clean
             interleaved <code>zenbench</code> rounds per image (640 calls per arm/cell), type-7 quantiles, thin LTO, no
-            <code>-C target-cpu=native</code>. Comparators are registry <code>fast-ssim2 0.9.1</code> and the unchanged
-            in-process <code>margarine</code> <code>simd-row-malta</code> kernel (primary max pooling; runtime baseline,
-            not an accuracy comparator). Does not measure Zen 5 AVX-512, ARM NEON, Wasm, or GPU.
+            <code>-C target-cpu=native</code>. Comparators are registry <code>fast-ssim2 0.9.1</code> (published Rust
+            SSIMULACRA2) and the in-process <code>margarine</code> <code>simd-row-malta</code> Butteraugli-family kernel
+            (primary max pooling; runtime baseline, not an accuracy comparator). Does not measure Zen 5 AVX-512, ARM
+            NEON, Wasm, or GPU.
           </p>
         </div>
 
@@ -545,34 +573,49 @@
         </div>
       </section>
 
-      <!-- Section 6: Selection Data & Confirmation Reads -->
+      <!-- Section 7: 9-Collection Peer Panel & Confirmation Reads -->
       <section id="selection-data" class="eval-section">
         <div class="section-head">
-          <h2>7. Development / selection data and earlier confirmation reads</h2>
+          <h2>7. Multi-peer breakdown across 9 human-MOS collections and confirmation reads</h2>
           <p>
-            The nine human-MOS collections below chose the <code>TID2013 + MDID</code> training mix over the 11-source
-            <code>F3</code> recipe, so they are <strong>selection data</strong>, not held-out validation. MDID uses
-            evaluation references disjoint from training; the other eight collections were not trained on. Error here is
-            the median absolute residual around a 4PL fit divided by each collection’s 1–99% rating span (lower is
-            better), distinct from the frozen assessment’s RMSE.
+            The nine human-MOS collections below selected the <code>TID2013 + MDID</code> training mix over the earlier
+            11-source <code>F3</code> recipe, so they are <strong>development / selection data</strong> for
+            <code>A</code>; the published external metrics (<strong>SSIMULACRA2</strong>, <strong>HaarPSI</strong>,
+            <strong>FSIMc / FSIM</strong>, <strong>CVVDP</strong>, and <strong>Butteraugli 3-norm</strong>) are
+            evaluated as frozen published implementations on the same rows without selection here. MDID uses evaluation
+            references disjoint from <code>A</code>’s training; the other eight collections were not trained on by
+            <code>A</code>. Residual error here (<code>MedAE%</code>) is the median absolute residual around a 4PL fit
+            divided by each collection’s 1–99% rating span (lower is better), distinct from the frozen assessment’s RMSE.
           </p>
+        </div>
+
+        <div class="filter-row">
+          <label class="check-ctl">
+            <input type="checkbox" id="eval-f3-check" />
+            Include internal recipe baseline (F3)
+          </label>
         </div>
 
         <div class="grid-2">
           <div class="card">
-            <div class="card-title">
-              <h3>Selection data: 9 human-MOS collections (seed 0)</h3>
-              <span class="sub">Format: SROCC / PLCC (4PL) / KROCC / median absolute error ÷ rating span (MedAE%)</span>
+            <div class="card-head">
+              <div class="card-title">
+                <h3>9-collection SROCC vs SSIMULACRA2 &amp; Butteraugli</h3>
+                <span class="sub">
+                  Peer SROCC from <code>README.md</code>; table view adds <code>A</code>’s PLCC (4PL), KROCC, and
+                  median absolute error ÷ rating span (MedAE%)
+                </span>
+              </div>
+              <div id="eval9-toggle" class="seg" role="group" aria-label="9-collection view">
+                <button type="button" data-mode="chart" aria-pressed="true">Chart</button>
+                <button type="button" data-mode="table" aria-pressed="false">Table</button>
+              </div>
             </div>
-            <div class="table-wrap">
+            <div id="eval9-chart-wrap"></div>
+            <div id="eval9-table-wrap" class="table-wrap" hidden>
               <table class="data-table">
                 <thead>
-                  <tr>
-                    <th>Collection</th>
-                    <th class="num">Rows</th>
-                    <th class="num">F3 (11-MOS recipe)</th>
-                    <th class="num">zensim A (mixF3)</th>
-                  </tr>
+                  <tr id="eval9-thead-row"></tr>
                 </thead>
                 <tbody id="eval9-tbody"></tbody>
               </table>
@@ -581,11 +624,12 @@
 
           <div class="card">
             <div class="card-title">
-              <h3>Selection panel beside published metrics</h3>
+              <h3>Published FR metrics across subsets and distortion regimes</h3>
               <span class="sub">
                 “Eight” (excludes MDID) and “Shared three” (IQA-ODI, NITS-IQA, VCL@FER; in no candidate’s training) are
-                collection means. “Codec 417” and “Non-codec 871” are row-weighted across their pooled rows (FSIMc leads
-                codec rows; SSIMULACRA2, A, and F3 are within 0.001).
+                collection means. “Codec 417” and “Non-codec 871” are row-weighted across their pooled rows (FSIMc and
+                FSIM lead codec rows; SSIMULACRA2 and FSIMc rank higher than <code>A</code> on Shared three with higher
+                MedAE%).
               </span>
             </div>
             <div class="table-wrap">
@@ -593,10 +637,10 @@
                 <thead>
                   <tr>
                     <th>Metric</th>
-                    <th class="num">Eight (MedAE% / SROCC)</th>
-                    <th class="num">Shared 3 (MedAE% / SROCC)</th>
-                    <th class="num">Codec 417 (SROCC / MedAE%)</th>
-                    <th class="num">Non-codec 871 (SROCC / MedAE%)</th>
+                    <th class="num">Eight<span class="ci-sub">MedAE% / SROCC</span></th>
+                    <th class="num">Shared 3<span class="ci-sub">MedAE% / SROCC</span></th>
+                    <th class="num">Codec 417<span class="ci-sub">SROCC / MedAE%</span></th>
+                    <th class="num">Non-codec 871<span class="ci-sub">SROCC / MedAE%</span></th>
                   </tr>
                 </thead>
                 <tbody id="eval-peers-tbody"></tbody>
@@ -607,7 +651,36 @@
 
         <div class="card">
           <div class="card-title">
-            <h3>Registered pre-final confirmation reads</h3>
+            <h3>Non-codec distortions across 7 collections vs 6 published peers (871 rows)</h3>
+            <span class="sub">
+              Per-collection SROCC on blur, noise, optical aberrations, gamut mapping, color/contrast, and sharpening
+              rows with no codec (<a href="https://github.com/imazen/zensimx/blob/f3bc01a9ac8fd664c4798250aab628c6e050243c/benchmarks/e36_subset_test_2026-11-01.md">e36_subset_test_2026-11-01.md</a>;
+              MDID, IQA-ODI, and LIVE-MD blur+JPEG have a codec in every row and are excluded).
+            </span>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Metric</th>
+                  <th class="num">Pooled 871 (SROCC / MedAE%)</th>
+                  <th class="num">CID:IQ</th>
+                  <th class="num">Colourlab</th>
+                  <th class="num">CID:OA</th>
+                  <th class="num">IRCCyN blur</th>
+                  <th class="num">LIVE-MD B+N</th>
+                  <th class="num">NITS D1–D6</th>
+                  <th class="num">VCL@FER</th>
+                </tr>
+              </thead>
+              <tbody id="noncodec-peers-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">
+            <h3>Registered pre-final confirmation reads vs published peers</h3>
             <span class="sub">Registered before reading; no model or hyperparameter was selected on them</span>
           </div>
           <div class="table-wrap">
@@ -617,7 +690,7 @@
                   <th>Read</th>
                   <th>Scope &amp; protocol caveats</th>
                   <th>zensim A</th>
-                  <th>Comparators</th>
+                  <th>Published peer metrics</th>
                 </tr>
               </thead>
               <tbody id="conf-reads-tbody"></tbody>
@@ -626,7 +699,7 @@
         </div>
       </section>
 
-      <!-- Section 7: Known Limits & Verified Bibliography -->
+      <!-- Section 8: Known Limits & Verified Bibliography -->
       <section id="limits-citations" class="eval-section">
         <div class="section-head">
           <h2>8. Known limits, primary records, and citations</h2>
@@ -637,9 +710,10 @@
             <h3>Summary of established limits</h3>
           </div>
           <ul class="bib-list">
-            <li><strong>KADID TERMINAL confirmation failed</strong> against both registered research comparators (<code>B</code> and <code>by_v2fy</code>), despite leading SSIMULACRA2 and Butteraugli on the same 2,000 pairs.</li>
-            <li><strong>Global tone, gamut, and geometric edits remain weak across all tested FR metrics:</strong> NITS-IQA D4 contrast change reads 0.22 for <code>A</code> (best tested metric: 0.46); KADID color-block (0.489), non-eccentricity patch (0.500), and pixelate (0.577) show similar local-metric limits; CID:IQ SGCK gamut mapping reads 0.87 vs <code>F3</code>’s 0.91.</li>
-            <li><strong>Close learned-codec and ladder ordering:</strong> on CLIC 2021 pairs within 2.4 points, <code>A</code> leans toward smoother reconstructions where raters prefer fine detail; 3.39% of close encoder-ladder pairs remain misordered despite feature-level monotonicity.</li>
+            <li><strong>Where published peers rank higher:</strong> SSIMULACRA2 edges <code>A</code> on CID22-B (0.913 vs 0.909), MMSPG JPEG XR (0.934 vs 0.920), IRCCyN/IVC (0.949 vs 0.919), LIVE-MD (0.913 vs 0.902), NITS-IQA (0.777 vs 0.734), and KADID pixelation (0.684 vs 0.577); FSIMc leads the 417 codec rows (0.906 vs 0.895) and the Shared-three SROCC mean (0.864 vs 0.850); CVVDP (0.94) and SSIMULACRA2 (0.93) lead CID:IQ SGCK gamut mapping (<code>A</code>: 0.87, <code>F3</code>: 0.91).</li>
+            <li><strong>KADID TERMINAL internal confirmation failed</strong> against both registered KADID-trained research checkpoints (<code>B</code> and <code>by_v2fy</code>), despite leading SSIMULACRA2 and Butteraugli on the same 2,000 pairs.</li>
+            <li><strong>Global tone, contrast, and geometric edits remain weak across all tested FR metrics:</strong> NITS-IQA D4 contrast change reads 0.22 for <code>A</code> (best tested metric: SSIMULACRA2 0.46); KADID color-block (0.489) and non-eccentricity patch (0.500) show similar local-metric limits.</li>
+            <li><strong>Close learned-codec and ladder ordering:</strong> on CLIC 2021 pairs within 2.4 points, <code>A</code> leans toward smoother reconstructions where raters prefer fine detail; 3.39% of close encoder-ladder pairs agreed on by Butteraugli and CVVDP remain misordered despite feature-level monotonicity.</li>
             <li><strong>Spatial steering vs Butteraugli:</strong> one text-screenshot map case reads 0.69 vs 0.70, and closed-loop JPEG XL quantization steered by <code>zensim</code>’s 156-coefficient map uses 2.18%–5.31% more bytes than a Butteraugli-steered loop at matched judge scores.</li>
             <li><strong>Small images, HDR, and restricted sets:</strong> images below 64 px are reflect-padded (where SSIMULACRA2 is invalid); HDR scores depend on declared white/boost and are not a calibrated human scale; committee-only benchmark labels are excluded from public reports.</li>
           </ul>
@@ -661,14 +735,16 @@
           <div class="card-title">
             <h3>Dataset and comparator citations</h3>
             <span class="sub">
-              Aggregate histograms on this page contain derived 8×8 bin counts and summary quantiles only, never raw
-              rating tables or stimulus files. Recorded dataset license/notice terms are stated where established below;
-              CSIQ, the AIC-4 sample / SDR25, and MCL-JCI have no separate license string recorded in our catalog for
-              derived statistical summaries.
+              Scatter views on this page store derived 256×256 per-panel display-grid cell counts, 8×8 bin counts, and
+              summary quantiles only — never stimulus files, filenames, IDs, cross-metric row joins, or raw unquantized
+              rating tables (note that on small populations, fine display cells still approximate individual
+              score–target coordinates). Recorded dataset license/notice terms are stated where established below; CSIQ,
+              the AIC-4 sample / SDR25, and MCL-JCI have no separate license string recorded in our catalog for derived
+              statistical summaries.
             </span>
           </div>
           <ol class="bib-list">
-            <li><strong>CID22:</strong> J. Sneyers, E. Ben Baruch, and Y. Vaxman, “AIC-3 Contribution from Cloudinary: CID22,” ISO/IEC JTC 1/SC 29/WG 1 wg1m99012 / TechRxiv, 2023, <a href="https://doi.org/10.36227/techrxiv.22659061">doi:10.36227/techrxiv.22659061</a> (<a href="https://cloudinary.com/labs/cid22">project page</a>; dataset licensed under <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>; 8×8 histograms and quantile summaries here are derived from the CID22 validation set).</li>
+            <li><strong>CID22:</strong> J. Sneyers, E. Ben Baruch, and Y. Vaxman, “AIC-3 Contribution from Cloudinary: CID22,” ISO/IEC JTC 1/SC 29/WG 1 wg1m99012 / TechRxiv, 2023, <a href="https://doi.org/10.36227/techrxiv.22659061">doi:10.36227/techrxiv.22659061</a> (<a href="https://cloudinary.com/labs/cid22">project page</a>; dataset licensed under <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>; display-grid scatters, 8×8 histograms, and quantile summaries here are derived from the CID22 validation set).</li>
             <li><strong>CSIQ:</strong> E. C. Larson and D. M. Chandler, “Most apparent distortion: full-reference image quality assessment and the role of strategy,” <em>Journal of Electronic Imaging</em> 19(1), 011006, 2010, <a href="https://doi.org/10.1117/1.3267105">doi:10.1117/1.3267105</a> (no separate dataset license string recorded in catalog).</li>
             <li><strong>LIVE Release 2:</strong> H. R. Sheikh, M. F. Sabir, and A. C. Bovik, “A Statistical Evaluation of Recent Full Reference Image Quality Assessment Algorithms,” <em>IEEE Trans. Image Processing</em> 15(11), 3440–3451, 2006, <a href="https://doi.org/10.1109/TIP.2006.881959">doi:10.1109/TIP.2006.881959</a>; H. R. Sheikh, Z. Wang, L. Cormack, and A. C. Bovik, <a href="http://live.ece.utexas.edu/research/quality">LIVE Image Quality Assessment Database Release 2</a> (acknowledged per the LIVE copyright notice of the Laboratory for Image and Video Engineering / Center for Perceptual Systems, The University of Texas at Austin, which permits use, copying, modification, and distribution provided the copyright notice and acknowledgment are retained).</li>
             <li><strong>KonJND-1k:</strong> H. Lin, G. Chen, M. Jenadeleh, V. Hosu, U.-D. Reips, R. Hamzaoui, and D. Saupe, “Large-scale crowdsourced subjective assessment of picturewise just noticeable difference,” <em>IEEE Trans. Circuits Syst. Video Technol.</em> 32(9), 5859–5873, 2022, <a href="https://doi.org/10.1109/TCSVT.2022.3163860">doi:10.1109/TCSVT.2022.3163860</a> (<a href="https://database.mmsp-kn.de/konjnd-1k-database.html">database page</a>; made freely available to the research community with citation of Lin et al. 2022).</li>

@@ -1,4 +1,4 @@
-// Interactive SVG charts, accessible table twins, and tooltips for zensim A evaluations.
+// Interactive SVG charts, dot & density scatters, accessible table twins, and tooltips for zensim A evaluations.
 // Uses DOM creation + textContent exclusively (never innerHTML with data strings).
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -10,6 +10,8 @@ const MODEL_META = {
   B: { label: "Research B (rev 5)", color: "var(--series-4)" },
   V2: { label: "Research by_v2fy (rev 4)", color: "var(--series-5)" },
 };
+
+const PEER_KEYS = ["A", "S2", "BA"];
 
 const VIEW_META = {
   cid22_b: {
@@ -55,7 +57,7 @@ const VIEW_META = {
     polarity: "quality",
     is_subset: false,
     disclosure:
-      "Failed both registered research-comparator confirmation rules (A − B = −0.049, A − by_v2fy = −0.040). First zensim model read; prior third-party label studies 2026-10-24..26.",
+      "Leads SSIMULACRA2 (0.893 vs 0.800) and Butteraugli (0.572), while failing both registered internal research-comparator confirmation rules (A − B = −0.049, A − by_v2fy = −0.040). First zensim model read; prior third-party label studies 2026-10-24..26.",
   },
   aic4: {
     title: "AIC-4 sample",
@@ -163,45 +165,60 @@ const SPEED_BENCHMARK = {
   ],
 };
 
+// Committed per-collection SROCC from zensim/README.md:46-56 + MODEL_A_REPORT.md:228-238 + e36_subset_test_2026-11-01.md:1620-1730
 const SELECTION_EVAL = {
   collections: [
-    { name: "CID:IQ", n: 210, f3: [0.863, 0.865, 0.684, 8.3], a: [0.868, 0.869, 0.692, 7.8] },
-    { name: "CID:OA", n: 91, f3: [0.905, 0.921, 0.749, 8.7], a: [0.911, 0.923, 0.753, 8.3] },
-    { name: "Colourlab (2022)", n: 192, f3: [0.689, 0.684, 0.516, 12.7], a: [0.735, 0.728, 0.562, 10.7] },
-    { name: "IQA-ODI", n: 48, f3: [0.858, 0.924, 0.674, 7.5], a: [0.867, 0.928, 0.679, 7.6] },
-    { name: "IRCCyN/IVC", n: 60, f3: [0.926, 0.942, 0.757, 6.4], a: [0.919, 0.931, 0.752, 6.8] },
-    { name: "LIVE-MD", n: 180, f3: [0.892, 0.915, 0.716, 7.0], a: [0.902, 0.926, 0.73, 7.0] },
-    { name: "MDID (other refs)", n: 480, f3: [0.886, 0.895, 0.705, 7.5], a: [0.927, 0.931, 0.765, 6.1] },
-    { name: "NITS-IQA", n: 405, f3: [0.708, 0.709, 0.518, 12.2], a: [0.734, 0.734, 0.542, 11.3] },
-    { name: "VCL@FER", n: 192, f3: [0.939, 0.937, 0.778, 6.6], a: [0.95, 0.95, 0.8, 5.9] },
+    { name: "CID:IQ", n: 210, s2: 0.757, ba: 0.592, a: [0.868, 0.869, 0.692, 7.8], f3: [0.863, 0.865, 0.684, 8.3] },
+    { name: "CID:OA", n: 91, s2: 0.847, ba: 0.577, a: [0.911, 0.923, 0.753, 8.3], f3: [0.905, 0.921, 0.749, 8.7] },
+    { name: "Colourlab (2022)", n: 192, s2: 0.604, ba: 0.373, a: [0.735, 0.728, 0.562, 10.7], f3: [0.689, 0.684, 0.516, 12.7] },
+    { name: "IQA-ODI", n: 48, s2: 0.854, ba: 0.806, a: [0.867, 0.928, 0.679, 7.6], f3: [0.858, 0.924, 0.674, 7.5] },
+    { name: "IRCCyN/IVC", n: 60, s2: 0.949, ba: 0.912, a: [0.919, 0.931, 0.752, 6.8], f3: [0.926, 0.942, 0.757, 6.4] },
+    { name: "LIVE-MD", n: 180, s2: 0.913, ba: 0.827, a: [0.902, 0.926, 0.73, 7.0], f3: [0.892, 0.915, 0.716, 7.0] },
+    { name: "MDID (other refs)", n: 480, s2: 0.787, ba: 0.572, a: [0.927, 0.931, 0.765, 6.1], f3: [0.886, 0.895, 0.705, 7.5] },
+    { name: "NITS-IQA", n: 405, s2: 0.777, ba: 0.706, a: [0.734, 0.734, 0.542, 11.3], f3: [0.708, 0.709, 0.518, 12.2] },
+    { name: "VCL@FER", n: 192, s2: 0.945, ba: 0.877, a: [0.95, 0.95, 0.8, 5.9], f3: [0.939, 0.937, 0.778, 6.6] },
   ],
   peers: [
-    { metric: "zensim A", eight: [8.18, 0.861], shared3: [8.27, 0.85], compression: [0.895, 6.95], noncodec: [0.79, 8.66] },
-    { metric: "F3 (all-MOS recipe)", eight: [8.67, 0.848], shared3: [8.79, 0.835], compression: [0.895, 7.03], noncodec: [0.767, 9.28] },
-    { metric: "SSIMULACRA2", eight: [9.13, 0.831], shared3: [8.52, 0.859], compression: [0.896, 6.92], noncodec: [0.759, 10.59] },
-    { metric: "HaarPSI", eight: [8.92, 0.843], shared3: [8.99, 0.828], compression: [0.888, 6.9], noncodec: [0.774, 9.76] },
-    { metric: "CVVDP", eight: [9.82, 0.823], shared3: [9.52, 0.829], compression: [0.876, 7.07], noncodec: [0.755, 10.76] },
-    { metric: "FSIMc", eight: [9.97, 0.83], shared3: [8.84, 0.864], compression: [0.906, 6.73], noncodec: [0.745, 10.79] },
-    { metric: "Butteraugli 3-norm", eight: [11.57, 0.709], shared3: [10.47, 0.796], compression: [0.854, 8.61], noncodec: [0.661, 13.07] },
+    { metric: "zensim A", internal: false, eight: [8.18, 0.861], shared3: [8.27, 0.85], compression: [0.895, 6.95], noncodec: [0.79, 8.66] },
+    { metric: "HaarPSI", internal: false, eight: [8.92, 0.843], shared3: [8.99, 0.828], compression: [0.888, 6.9], noncodec: [0.774, 9.76] },
+    { metric: "SSIMULACRA2", internal: false, eight: [9.13, 0.831], shared3: [8.52, 0.859], compression: [0.896, 6.92], noncodec: [0.759, 10.59] },
+    { metric: "CVVDP", internal: false, eight: [9.82, 0.823], shared3: [9.52, 0.829], compression: [0.876, 7.07], noncodec: [0.755, 10.76] },
+    { metric: "FSIMc", internal: false, eight: [9.97, 0.83], shared3: [8.84, 0.864], compression: [0.906, 6.73], noncodec: [0.745, 10.79] },
+    { metric: "FSIM (luma)", internal: false, eight: [10.06, 0.822], shared3: [8.86, 0.857], compression: [0.902, 6.67], noncodec: [0.734, 11.02] },
+    { metric: "Butteraugli 3-norm", internal: false, eight: [11.57, 0.709], shared3: [10.47, 0.796], compression: [0.854, 8.61], noncodec: [0.661, 13.07] },
+    { metric: "F3 (internal 11-MOS recipe)", internal: true, eight: [8.67, 0.848], shared3: [8.79, 0.835], compression: [0.895, 7.03], noncodec: [0.767, 9.28] },
+  ],
+  noncodec_sets: [
+    { metric: "zensim A", internal: false, pooled: [0.79, 8.66], sets: [0.837, 0.714, 0.911, 0.915, 0.903, 0.672, 0.955] },
+    { metric: "HaarPSI", internal: false, pooled: [0.774, 9.76], sets: [0.768, 0.708, 0.882, 0.976, 0.89, 0.672, 0.956] },
+    { metric: "SSIMULACRA2", internal: false, pooled: [0.759, 10.59], sets: [0.698, 0.575, 0.847, 0.915, 0.921, 0.748, 0.96] },
+    { metric: "CVVDP", internal: false, pooled: [0.755, 10.76], sets: [0.744, 0.579, 0.912, 0.915, 0.891, 0.699, 0.95] },
+    { metric: "FSIMc", internal: false, pooled: [0.745, 10.79], sets: [0.657, 0.596, 0.889, 0.976, 0.896, 0.712, 0.938] },
+    { metric: "FSIM (luma)", internal: false, pooled: [0.734, 11.02], sets: [0.645, 0.577, 0.887, 0.976, 0.891, 0.706, 0.907] },
+    { metric: "Butteraugli 3-norm", internal: false, pooled: [0.661, 13.07], sets: [0.652, 0.316, 0.577, 0.794, 0.84, 0.749, 0.95] },
+    { metric: "F3 (internal 11-MOS recipe)", internal: true, pooled: [0.767, 9.28], sets: [0.832, 0.664, 0.905, 0.915, 0.885, 0.643, 0.947] },
   ],
   confirmation_reads: [
     {
       name: "CLIC 2021 validation",
       scope: "4,812 2AFC questions / 315 crops (learned codecs; soft-vote agreement; read 3 times across program)",
       a: "0.642 (seed 0; 0.644 3-seed mean)",
-      peers: "F3 0.643, FSIM 0.638, FSIMc 0.637, SSIMULACRA2 0.626, Butteraugli 0.606",
+      peers: "FSIM 0.638 [0.625, 0.652], FSIMc 0.637 [0.624, 0.652], SSIMULACRA2 0.626 [0.612, 0.640], Butteraugli 0.606 [0.592, 0.620], HaarPSI 0.603 [0.589, 0.618]",
+      peers_f3: " (internal F3: 0.643 3-seed mean)",
+    },
+    {
+      name: "MMSPG JPEG XR",
+      scope: "186 rated conditions / 6 photographs (SROCC / within-ref SROCC / MedAE%)",
+      a: "0.920 (seed 0; 3-seed 0.920–0.922 / 0.928–0.931 / 5.47–5.63%)",
+      peers: "SSIMULACRA2 0.934 / 0.942 / 5.19%, FSIM 0.931 / 0.922 / 4.26%, FSIMc 0.929 / 0.912 / 4.69%, HaarPSI 0.921 / 0.923 / 5.64%, Butteraugli 0.902 / 0.896 / 6.58%",
+      peers_f3: " (internal F3: 0.920 seed 0; 3-seed 0.920–0.922 / 0.925–0.928 / 5.43–5.47%)",
     },
     {
       name: "CIQA",
       scope: "7,902 2AFC questions / 6,596 photos (JPEG quality pairs)",
       a: "0.675",
-      peers: "All metrics 0.675–0.676; 'higher JPEG q wins' = 0.675 vs 0.698 observer ceiling (non-separating)",
-    },
-    {
-      name: "MMSPG JPEG XR",
-      scope: "186 rated conditions / 6 photographs",
-      a: "SROCC 0.920",
-      peers: "SSIMULACRA2 0.934, FSIMc 0.929, F3 0.920, Butteraugli 0.902",
+      peers: "HaarPSI 0.676, SSIMULACRA2 0.675, FSIMc 0.675, FSIM 0.675, Butteraugli 0.675; 'higher JPEG q wins' = 0.675 vs 0.698 observer ceiling (non-separating)",
+      peers_f3: " (internal F3: 0.675)",
     },
   ],
 };
@@ -321,7 +338,7 @@ function bindInteractiveMark(node, getTooltipSpec) {
   node.addEventListener("blur", hideTooltip);
 }
 
-function wireViewToggle(btnGroup, chartNode, tableNode) {
+function wireViewToggle(btnGroup, chartNode, tableNode, onModeChange) {
   const btns = btnGroup.querySelectorAll("button[data-mode]");
   btns.forEach((b) => {
     b.addEventListener("click", () => {
@@ -329,6 +346,7 @@ function wireViewToggle(btnGroup, chartNode, tableNode) {
       btns.forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
       chartNode.hidden = mode !== "chart";
       tableNode.hidden = mode !== "table";
+      if (onModeChange) onModeChange(mode);
     });
   });
 }
@@ -342,6 +360,44 @@ function makeLegend(keys) {
     row.appendChild(el("span", { className: "legend-item" }, [sw, m.label]));
   }
   return row;
+}
+
+const dotCache = new Map();
+
+function decodeDots256(b64, dotGrid) {
+  if (dotCache.has(b64)) return dotCache.get(b64);
+  const bin = atob(b64);
+  const len = bin.length;
+  const pts = [];
+  let pos = 0;
+  let maxCnt = 1;
+  while (pos < len) {
+    const ix = bin.charCodeAt(pos);
+    const nSingle = bin.charCodeAt(pos + 1);
+    pos += 2;
+    for (let i = 0; i < nSingle; i++) {
+      const iy = bin.charCodeAt(pos++);
+      pts.push([ix, iy, 1]);
+    }
+    const nMulti = bin.charCodeAt(pos++);
+    for (let i = 0; i < nMulti; i++) {
+      const iy = bin.charCodeAt(pos);
+      const c0 = bin.charCodeAt(pos + 1);
+      let cnt;
+      if (c0 < 255) {
+        cnt = c0;
+        pos += 2;
+      } else {
+        cnt = bin.charCodeAt(pos + 2) | (bin.charCodeAt(pos + 3) << 8);
+        pos += 4;
+      }
+      if (cnt > maxCnt) maxCnt = cnt;
+      pts.push([ix, iy, cnt]);
+    }
+  }
+  const out = { pts, maxCnt, grid: dotGrid };
+  dotCache.set(b64, out);
+  return out;
 }
 
 function renderFrozenChart(container, views) {
@@ -361,7 +417,7 @@ function renderFrozenChart(container, views) {
     },
   ];
 
-  const models = ["A", "S2", "BA"];
+  const models = PEER_KEYS;
   container.appendChild(makeLegend(models));
 
   for (const grp of groups) {
@@ -479,13 +535,13 @@ function renderFrozenChart(container, views) {
   }
 }
 
-function renderFrozenTable(tbody, views) {
+function renderFrozenTable(tbody, views, includeInternal) {
   tbody.replaceChildren();
   for (const v of views) {
     const meta = VIEW_META[v.id];
-    const modelKeys = Object.keys(v.m);
+    const modelKeys = Object.keys(v.m).filter((k) => includeInternal || PEER_KEYS.includes(k));
     modelKeys.forEach((m, idx) => {
-      const tuple = v.m[m]; // [srocc, krocc, plcc, rmse, within]
+      const tuple = v.m[m];
       const tr = el("tr", { className: meta.is_subset ? "sub-row" : "" });
       if (idx === 0) {
         tr.appendChild(
@@ -516,7 +572,7 @@ function renderFrozenTable(tbody, views) {
 
 function renderClicSection(chartWrap, tableBody, summaryBody, clic) {
   summaryBody.replaceChildren();
-  const models = ["A", "S2", "BA"];
+  const models = PEER_KEYS;
   for (const m of models) {
     const md = clic.models[m];
     const sw = el("span", { className: "swatch-dot" });
@@ -633,35 +689,31 @@ function renderClicSection(chartWrap, tableBody, summaryBody, clic) {
   }
 }
 
-function renderScatters(stageNode, tableBody, disclosureNode, view) {
+function renderScatters(stageNode, tableBody, disclosureNode, view, dotGrid, mode, showTrend) {
   const meta = VIEW_META[view.id];
+  hideTooltip();
   stageNode.replaceChildren();
   tableBody.replaceChildren();
-  disclosureNode.textContent = `${meta.title} (${fmtInt(view.rows)} pairs / ${fmtInt(view.refs)} references) — ${meta.disclosure}`;
+  disclosureNode.textContent = `${meta.title} (${fmtInt(view.rows)} pairs / ${fmtInt(view.refs)} references) · y-axis: ${meta.y_label} — ${meta.disclosure}`;
 
-  const modelKeys = Object.keys(view.sc);
   const nb = 8;
   const [ymin, ymax] = view.yr;
 
-  for (const m of modelKeys) {
+  for (const m of PEER_KEYS) {
     const sc = view.sc[m];
     const sroccVal = view.m[m][0][0];
+    const kroccVal = view.m[m][1][0];
     const [xmin, xmax] = sc.xr;
-    const W = 310;
-    const H = 285;
-    const left = 48;
-    const right = 14;
-    const top = 14;
-    const bottom = 40;
+    const W = 360;
+    const H = 310;
+    const left = 52;
+    const right = 16;
+    const top = 16;
+    const bottom = 42;
     const pw = W - left - right;
     const ph = H - top - bottom;
     const cw = pw / nb;
     const ch = ph / nb;
-
-    let maxCount = 1;
-    for (let i = 1; i < sc.c.length; i += 2) {
-      if (sc.c[i] > maxCount) maxCount = sc.c[i];
-    }
 
     const xOf = (val) => left + ((val - xmin) / Math.max(1e-9, xmax - xmin)) * pw;
     const yOf = (val) => top + (1 - (val - ymin) / Math.max(1e-9, ymax - ymin)) * ph;
@@ -670,7 +722,7 @@ function renderScatters(stageNode, tableBody, disclosureNode, view) {
       viewBox: `0 0 ${W} ${H}`,
       class: "chart",
       role: "img",
-      "aria-label": `${meta.title} ${MODEL_META[m].label} 8x8 density scatter`,
+      "aria-label": `${meta.title} ${MODEL_META[m].label} ${mode === "dots" ? "dot" : "8x8 density"} scatter`,
     });
 
     svg.appendChild(
@@ -684,87 +736,243 @@ function renderScatters(stageNode, tableBody, disclosureNode, view) {
       })
     );
 
-    for (let k = 0; k < sc.c.length; k += 2) {
-      const idx = sc.c[k];
-      const cnt = sc.c[k + 1];
-      const ix = Math.floor(idx / nb);
-      const iy = idx % nb;
-      const t = Math.log1p(cnt) / Math.log1p(maxCount);
-      const rampIdx = Math.min(6, Math.floor(t * 6.999));
-      const rx = left + ix * cw + 1;
-      const ry = top + (nb - 1 - iy) * ch + 1;
-      const xLo = xmin + (ix / nb) * (xmax - xmin);
-      const xHi = xmin + ((ix + 1) / nb) * (xmax - xmin);
-      const yLo = ymin + (iy / nb) * (ymax - ymin);
-      const yHi = ymin + ((iy + 1) / nb) * (ymax - ymin);
+    const gridG = svgEl("g", { class: "grid" });
+    for (const frac of [0.25, 0.5, 0.75]) {
+      const gx = left + frac * pw;
+      const gy = top + frac * ph;
+      gridG.appendChild(svgEl("line", { x1: gx, y1: top, x2: gx, y2: top + ph }));
+      gridG.appendChild(svgEl("line", { x1: left, y1: gy, x2: left + pw, y2: gy }));
+    }
+    svg.appendChild(gridG);
 
-      const rect = svgEl("rect", {
-        x: rx,
-        y: ry,
-        width: Math.max(1, cw - 2),
-        height: Math.max(1, ch - 2),
-        rx: 2,
-        fill: RAMP_SEQ[rampIdx],
-        style: "cursor:pointer",
+    let footerNote = "";
+
+    if (mode === "dots") {
+      const decoded = decodeDots256(sc.d, dotGrid);
+      const gScale = Math.max(1, decoded.grid - 1);
+      const isDense = view.rows >= 1500;
+      const baseR = view.rows <= 150 ? 2.8 : isDense ? 1.85 : 2.25;
+      const baseAlpha = view.rows <= 150 ? 0.72 : isDense ? 0.44 : 0.56;
+      const logDenom = Math.log1p(Math.max(1, decoded.maxCnt - 1));
+
+      const dotsG = svgEl("g", { "pointer-events": "none" });
+      const screenPts = new Array(decoded.pts.length);
+
+      for (let i = 0; i < decoded.pts.length; i++) {
+        const [ix, iy, cnt] = decoded.pts[i];
+        const fx = ix / gScale;
+        const fy = iy / gScale;
+        const cx = left + fx * pw;
+        const cy = top + (1 - fy) * ph;
+        const weight = cnt > 1 ? Math.log1p(cnt - 1) / logDenom : 0;
+        const r = baseR + weight * 1.9;
+        const alpha = Math.min(0.95, baseAlpha + weight * 0.46);
+        dotsG.appendChild(
+          svgEl("circle", {
+            cx: cx.toFixed(1),
+            cy: cy.toFixed(1),
+            r: r.toFixed(2),
+            fill: MODEL_META[m].color,
+            "fill-opacity": alpha.toFixed(2),
+          })
+        );
+        screenPts[i] = {
+          cx,
+          cy,
+          cnt,
+          xVal: xmin + fx * (xmax - xmin),
+          yVal: ymin + fy * (ymax - ymin),
+        };
+      }
+      svg.appendChild(dotsG);
+
+      const hoverRing = svgEl("circle", {
+        cx: 0,
+        cy: 0,
+        r: 5.5,
+        fill: "none",
+        stroke: "var(--ink)",
+        "stroke-width": "1.8",
+        "pointer-events": "none",
+        visibility: "hidden",
       });
-      bindInteractiveMark(rect, () => ({
-        heading: `${MODEL_META[m].label} · bin (${ix + 1}, ${iy + 1})`,
-        rows: [
-          { value: `${fmtInt(cnt)} pairs`, label: `of ${fmtInt(view.rows)}` },
-          { value: `[${fmt(xLo, 2)}, ${fmt(xHi, 2)}]`, label: "score bin" },
-          { value: `[${fmt(yLo, 2)}, ${fmt(yHi, 2)}]`, label: meta.rmse_unit },
-        ],
-      }));
-      svg.appendChild(rect);
+
+      const hitRect = svgEl("rect", {
+        x: left,
+        y: top,
+        width: pw,
+        height: ph,
+        fill: "transparent",
+        style: "cursor:crosshair",
+      });
+
+      hitRect.addEventListener("pointermove", (e) => {
+        const box = svg.getBoundingClientRect();
+        const sx = ((e.clientX - box.left) / Math.max(1, box.width)) * W;
+        const sy = ((e.clientY - box.top) / Math.max(1, box.height)) * H;
+        let best = null;
+        let bestD2 = 28 * 28;
+        for (let i = 0; i < screenPts.length; i++) {
+          const p = screenPts[i];
+          const dx = p.cx - sx;
+          const dy = p.cy - sy;
+          const d2 = dx * dx + dy * dy;
+          if (d2 < bestD2) {
+            bestD2 = d2;
+            best = p;
+          }
+        }
+        if (!best) {
+          hoverRing.setAttribute("visibility", "hidden");
+          hideTooltip();
+          return;
+        }
+        hoverRing.setAttribute("cx", best.cx.toFixed(1));
+        hoverRing.setAttribute("cy", best.cy.toFixed(1));
+        hoverRing.setAttribute("visibility", "visible");
+        const stepX = (xmax - xmin) / gScale;
+        const stepY = (ymax - ymin) / gScale;
+        showTooltip(e, `${MODEL_META[m].label} · display cell`, [
+          {
+            color: MODEL_META[m].color,
+            value: fmt(best.xVal, stepX < 0.05 ? 3 : 2),
+            label: `score (±${fmt(stepX / 2, stepX < 0.05 ? 3 : 2)})`,
+          },
+          {
+            value: fmt(best.yVal, stepY < 0.05 ? 3 : 2),
+            label: `${meta.rmse_unit} (±${fmt(stepY / 2, stepY < 0.05 ? 3 : 2)})`,
+          },
+          {
+            value: `${fmtInt(best.cnt)} pair${best.cnt > 1 ? "s" : ""}`,
+            label: `of ${fmtInt(view.rows)} total`,
+          },
+        ]);
+      });
+      hitRect.addEventListener("pointerleave", () => {
+        hoverRing.setAttribute("visibility", "hidden");
+        hideTooltip();
+      });
+
+      svg._hitRect = hitRect;
+      svg._hoverRing = hoverRing;
+      footerNote = `Observed x: [${fmt(xmin, 2)}, ${fmt(xmax, 2)}] · ${fmtInt(decoded.pts.length)} occupied cells (${fmtInt(view.rows)} pairs)`;
+    } else {
+      let maxCount = 1;
+      for (let i = 1; i < sc.c.length; i += 2) {
+        if (sc.c[i] > maxCount) maxCount = sc.c[i];
+      }
+      for (let k = 0; k < sc.c.length; k += 2) {
+        const idx = sc.c[k];
+        const cnt = sc.c[k + 1];
+        const ix = Math.floor(idx / nb);
+        const iy = idx % nb;
+        const t = Math.log1p(cnt) / Math.log1p(maxCount);
+        const rampIdx = Math.min(6, Math.floor(t * 6.999));
+        const rx = left + ix * cw + 1;
+        const ry = top + (nb - 1 - iy) * ch + 1;
+        const xLo = xmin + (ix / nb) * (xmax - xmin);
+        const xHi = xmin + ((ix + 1) / nb) * (xmax - xmin);
+        const yLo = ymin + (iy / nb) * (ymax - ymin);
+        const yHi = ymin + ((iy + 1) / nb) * (ymax - ymin);
+
+        const rect = svgEl("rect", {
+          x: rx,
+          y: ry,
+          width: Math.max(1, cw - 2),
+          height: Math.max(1, ch - 2),
+          rx: 2,
+          fill: RAMP_SEQ[rampIdx],
+          style: "cursor:pointer",
+        });
+        bindInteractiveMark(rect, () => ({
+          heading: `${MODEL_META[m].label} · bin (${ix + 1}, ${iy + 1})`,
+          rows: [
+            { value: `${fmtInt(cnt)} pairs`, label: `of ${fmtInt(view.rows)}` },
+            { value: `[${fmt(xLo, 2)}, ${fmt(xHi, 2)}]`, label: "score bin" },
+            { value: `[${fmt(yLo, 2)}, ${fmt(yHi, 2)}]`, label: meta.rmse_unit },
+          ],
+        }));
+        svg.appendChild(rect);
+      }
+      footerNote = `Observed x: [${fmt(xmin, 2)}, ${fmt(xmax, 2)}] · max 8×8 cell: ${fmtInt(maxCount)} pairs`;
     }
 
-    if (sc.q.length >= 2) {
+    if (showTrend && sc.q.length >= 2) {
       const upper = sc.q.map((q) => `${xOf(q[0])},${yOf(q[3])}`);
       const lower = [...sc.q].reverse().map((q) => `${xOf(q[0])},${yOf(q[2])}`);
       svg.appendChild(
         svgEl("polygon", {
           points: [...upper, ...lower].join(" "),
-          fill: MODEL_META[m].color,
-          "fill-opacity": "0.18",
+          fill: mode === "dots" ? "var(--ink)" : MODEL_META[m].color,
+          "fill-opacity": mode === "dots" ? "0.11" : "0.18",
+          "pointer-events": "none",
         })
       );
       svg.appendChild(
         svgEl("polyline", {
           points: sc.q.map((q) => `${xOf(q[0])},${yOf(q[1])}`).join(" "),
           fill: "none",
-          stroke: MODEL_META[m].color,
-          "stroke-width": "2.2",
+          stroke: "var(--surface-0)",
+          "stroke-width": "3.8",
           "stroke-linejoin": "round",
           "stroke-linecap": "round",
+          "pointer-events": "none",
+        })
+      );
+      svg.appendChild(
+        svgEl("polyline", {
+          points: sc.q.map((q) => `${xOf(q[0])},${yOf(q[1])}`).join(" "),
+          fill: "none",
+          stroke: mode === "dots" ? "var(--ink)" : MODEL_META[m].color,
+          "stroke-width": "2",
+          "stroke-linejoin": "round",
+          "stroke-linecap": "round",
+          "pointer-events": "none",
         })
       );
     }
 
     sc.q.forEach((q, qi) => {
-      const cx = xOf(q[0]);
-      const cy = yOf(q[1]);
-      const g = svgEl("g", { style: "cursor:pointer" });
-      g.appendChild(
-        svgEl("circle", {
-          cx,
-          cy,
-          r: 3.8,
-          fill: MODEL_META[m].color,
-          stroke: "var(--surface-1)",
-          "stroke-width": "1.8",
-        })
-      );
-      g.appendChild(svgEl("circle", { cx, cy, r: 11, fill: "transparent" }));
-      bindInteractiveMark(g, () => ({
-        heading: `${MODEL_META[m].label} · score quantile bin ${qi + 1}/${sc.q.length}`,
-        rows: [
-          { color: MODEL_META[m].color, value: fmt(q[1], 3), label: `median ${meta.rmse_unit}` },
-          { value: `[${fmt(q[2], 3)}, ${fmt(q[3], 3)}]`, label: "target IQR (p25–p75)" },
-          { value: fmt(q[0], 2), label: "median score" },
-          { value: `${fmtInt(q[4])} pairs`, label: "bin count" },
-        ],
-      }));
-      svg.appendChild(g);
+      if (showTrend) {
+        const cx = xOf(q[0]);
+        const cy = yOf(q[1]);
+        if (mode === "dots") {
+          svg.appendChild(
+            svgEl("circle", {
+              cx,
+              cy,
+              r: 3.0,
+              fill: "var(--ink)",
+              stroke: "var(--surface-1)",
+              "stroke-width": "1.5",
+              "pointer-events": "none",
+            })
+          );
+        } else {
+          const g = svgEl("g", { style: "cursor:pointer" });
+          g.appendChild(
+            svgEl("circle", {
+              cx,
+              cy,
+              r: 3.4,
+              fill: MODEL_META[m].color,
+              stroke: "var(--surface-1)",
+              "stroke-width": "1.6",
+            })
+          );
+          g.appendChild(svgEl("circle", { cx, cy, r: 9, fill: "transparent" }));
+          bindInteractiveMark(g, () => ({
+            heading: `${MODEL_META[m].label} · score quantile bin ${qi + 1}/${sc.q.length}`,
+            rows: [
+              { color: MODEL_META[m].color, value: fmt(q[1], 3), label: `median ${meta.rmse_unit}` },
+              { value: `[${fmt(q[2], 3)}, ${fmt(q[3], 3)}]`, label: "target IQR (p25–p75)" },
+              { value: fmt(q[0], 2), label: "median score" },
+              { value: `${fmtInt(q[4])} pairs`, label: "bin count" },
+            ],
+          }));
+          svg.appendChild(g);
+        }
+      }
 
       tableBody.appendChild(
         el("tr", {}, [
@@ -778,8 +986,20 @@ function renderScatters(stageNode, tableBody, disclosureNode, view) {
       );
     });
 
-    svg.appendChild(svgEl("text", { x: left, y: H - 22, "text-anchor": "start", text: fmt(xmin, 1) }));
-    svg.appendChild(svgEl("text", { x: W - right, y: H - 22, "text-anchor": "end", text: fmt(xmax, 1) }));
+    if (svg._hitRect) {
+      svg.appendChild(svg._hitRect);
+      delete svg._hitRect;
+    }
+    if (svg._hoverRing) {
+      svg.appendChild(svg._hoverRing);
+      delete svg._hoverRing;
+    }
+
+    const xMid = (xmin + xmax) / 2;
+    const yMid = (ymin + ymax) / 2;
+    svg.appendChild(svgEl("text", { x: left, y: H - 23, "text-anchor": "start", text: fmt(xmin, 1) }));
+    svg.appendChild(svgEl("text", { x: left + pw / 2, y: H - 23, "text-anchor": "middle", text: fmt(xMid, 1) }));
+    svg.appendChild(svgEl("text", { x: W - right, y: H - 23, "text-anchor": "end", text: fmt(xmax, 1) }));
     svg.appendChild(
       svgEl("text", {
         x: left + pw / 2,
@@ -789,28 +1009,56 @@ function renderScatters(stageNode, tableBody, disclosureNode, view) {
         text: `${MODEL_META[m].label} quality score`,
       })
     );
-    svg.appendChild(svgEl("text", { x: left - 5, y: top + 10, "text-anchor": "end", text: fmt(ymax, 2) }));
-    svg.appendChild(svgEl("text", { x: left - 5, y: top + ph, "text-anchor": "end", text: fmt(ymin, 2) }));
+    svg.appendChild(svgEl("text", { x: left - 6, y: top + 10, "text-anchor": "end", text: fmt(ymax, 2) }));
+    svg.appendChild(svgEl("text", { x: left - 6, y: top + ph / 2 + 4, "text-anchor": "end", text: fmt(yMid, 2) }));
+    svg.appendChild(svgEl("text", { x: left - 6, y: top + ph, "text-anchor": "end", text: fmt(ymin, 2) }));
 
     const sw = el("span", { className: "swatch-dot" });
     sw.style.background = MODEL_META[m].color;
     const card = el("div", { className: "scatter-panel" }, [
       el("div", { className: "scatter-panel-head" }, [
         el("strong", {}, [el("span", { className: "legend-item" }, [sw, MODEL_META[m].label])]),
-        el("span", { className: "muted mono", text: `SROCC ${fmt(sroccVal, 3)}` }),
+        el("span", {
+          className: "muted mono",
+          text: `SROCC ${fmt(sroccVal, 3)} · KROCC ${fmt(kroccVal, 3)}`,
+        }),
       ]),
       svg,
       el("div", {
         className: "muted-3",
         style: "font-size:11px",
-        text: `Observed x: [${fmt(xmin, 2)}, ${fmt(xmax, 2)}] · max cell: ${fmtInt(maxCount)} pairs`,
+        text: footerNote,
       }),
     ]);
     stageNode.appendChild(card);
   }
 }
 
-function renderKadidTypes(chartWrap, tableBody, typesMap, groupFilter) {
+function renderKadidDiagTable(diagBody, diagMap, includeInternal) {
+  diagBody.replaceChildren();
+  const keys = includeInternal ? ["A", "S2", "BA", "B", "V2"] : PEER_KEYS;
+  for (const m of keys) {
+    const d = diagMap[m];
+    const sw = el("span", { className: "swatch-dot" });
+    sw.style.background = MODEL_META[m].color;
+    diagBody.appendChild(
+      el("tr", {}, [
+        el("td", {}, [el("span", { className: "legend-item" }, [sw, MODEL_META[m].label])]),
+        el("td", { className: "num", text: fmt(d.geo.mad, 4) }),
+        el("td", { className: "num", text: fmt(d.geo.p99d, 4) }),
+        el("td", { className: "num", text: fmt(d.geo.maxd, 4) }),
+        el("td", { className: "num", text: fmt(d.geo.out4, 4) }),
+        el("td", { className: "num", text: fmt(d.geo.clump, 4) }),
+        el("td", { className: "num", text: fmt(d.raw.mad, 2) }),
+        el("td", { className: "num", text: fmt(d.raw.residual_p99, 2) }),
+        el("td", { className: "num", text: fmt(d.raw.clump, 4) }),
+        el("td", { className: "num", text: `[${fmt(d.raw.pred_min, 1)}, ${fmt(d.raw.pred_max, 1)}]` }),
+      ])
+    );
+  }
+}
+
+function renderKadidTypes(chartWrap, theadRow, tableBody, typesMap, groupFilter, includeInternal) {
   const rows = Object.keys(KADID_DISTORTION_META)
     .sort()
     .map((code) => ({
@@ -821,7 +1069,7 @@ function renderKadidTypes(chartWrap, tableBody, typesMap, groupFilter) {
     }))
     .filter((r) => groupFilter === "all" || r.group === groupFilter);
 
-  const models = ["A", "B", "S2", "BA"];
+  const models = includeInternal ? ["A", "S2", "BA", "B", "V2"] : PEER_KEYS;
   const W = 880;
   const left = 240;
   const right = 28;
@@ -886,16 +1134,17 @@ function renderKadidTypes(chartWrap, tableBody, typesMap, groupFilter) {
       })
     );
 
+    const mid = (models.length - 1) / 2;
     models.forEach((m, mi) => {
       const st = row.models[m];
       const cx = xOf(st[0]);
-      const yOff = cy + (mi - 1.5) * 3.5;
+      const yOff = cy + (mi - mid) * 3.6;
       const g = svgEl("g", { style: "cursor:pointer" });
       g.appendChild(
         svgEl("circle", {
           cx,
           cy: yOff,
-          r: m === "A" ? 4.8 : 3.8,
+          r: m === "A" ? 4.8 : 3.9,
           fill: MODEL_META[m].color,
           stroke: "var(--surface-1)",
           "stroke-width": "1.8",
@@ -904,7 +1153,7 @@ function renderKadidTypes(chartWrap, tableBody, typesMap, groupFilter) {
       g.appendChild(svgEl("circle", { cx, cy, r: 12, fill: "transparent" }));
       bindInteractiveMark(g, () => ({
         heading: `KADID type ${row.code} · ${row.name} (80 pairs / 16 refs)`,
-        rows: ["A", "B", "V2", "S2", "BA"].map((mk) => {
+        rows: models.map((mk) => {
           const ms = row.models[mk];
           return {
             color: MODEL_META[mk].color,
@@ -919,6 +1168,13 @@ function renderKadidTypes(chartWrap, tableBody, typesMap, groupFilter) {
 
   chartWrap.replaceChildren(makeLegend(models), el("div", { className: "svg-wrap" }, [svg]));
 
+  theadRow.replaceChildren(
+    el("th", { text: "Code" }),
+    el("th", { text: "Distortion (imdist_generator.m)" }),
+    el("th", { text: "Family" }),
+    ...models.map((m) => el("th", { className: "num", text: `${MODEL_META[m].label} [95% CI]` }))
+  );
+
   tableBody.replaceChildren();
   for (const row of rows) {
     tableBody.appendChild(
@@ -926,11 +1182,7 @@ function renderKadidTypes(chartWrap, tableBody, typesMap, groupFilter) {
         el("td", { className: "mono", text: row.code }),
         el("td", { text: row.name }),
         el("td", { className: "muted", text: row.group }),
-        fmtStatCell(row.models.A, 3),
-        fmtStatCell(row.models.B, 3),
-        fmtStatCell(row.models.V2, 3),
-        fmtStatCell(row.models.S2, 3),
-        fmtStatCell(row.models.BA, 3),
+        ...models.map((m) => fmtStatCell(row.models[m], 3)),
       ])
     );
   }
@@ -1054,6 +1306,187 @@ function renderSpeedCharts(latWrap, rssWrap, threads) {
   rssWrap.replaceChildren(legend, el("div", { className: "svg-wrap" }, [rssSvg]));
 }
 
+function renderSelectionSection(includeF3) {
+  // 1. 9-collection peer chart + table
+  const chartWrap = document.getElementById("eval9-chart-wrap");
+  const theadRow = document.getElementById("eval9-thead-row");
+  const evalBody = document.getElementById("eval9-tbody");
+
+  const series = [
+    { key: "a0", label: "zensim A", color: "var(--series-1)", get: (c) => c.a[0] },
+    { key: "s2", label: "SSIMULACRA2", color: "var(--series-2)", get: (c) => c.s2 },
+    { key: "ba", label: "Butteraugli (3-norm)", color: "var(--series-3)", get: (c) => c.ba },
+  ];
+  if (includeF3) {
+    series.push({ key: "f3", label: "F3 (internal 11-MOS)", color: "var(--series-4)", get: (c) => c.f3[0] });
+  }
+
+  const legend = el(
+    "div",
+    { className: "legend-row" },
+    series.map((s) => {
+      const sw = el("span", { className: "swatch-dot" });
+      sw.style.background = s.color;
+      return el("span", { className: "legend-item" }, [sw, s.label]);
+    })
+  );
+
+  const W = 560;
+  const left = 148;
+  const right = 22;
+  const top = 14;
+  const rowH = 31;
+  const bottom = 30;
+  const H = top + SELECTION_EVAL.collections.length * rowH + bottom;
+  const pw = W - left - right;
+  const d0 = 0.35;
+  const d1 = 1.0;
+  const xOf = (v) => left + ((Math.max(d0, Math.min(d1, v)) - d0) / (d1 - d0)) * pw;
+
+  const svg = svgEl("svg", {
+    viewBox: `0 0 ${W} ${H}`,
+    class: "chart",
+    role: "img",
+    "aria-label": "9-collection SROCC comparison against SSIMULACRA2 and Butteraugli",
+  });
+
+  const gridG = svgEl("g", { class: "grid" });
+  for (const t of [0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]) {
+    const xx = xOf(t);
+    gridG.appendChild(svgEl("line", { x1: xx, y1: top, x2: xx, y2: H - bottom }));
+    svg.appendChild(svgEl("text", { x: xx, y: H - 8, "text-anchor": "middle", text: fmt(t, 1) }));
+  }
+  svg.appendChild(gridG);
+
+  const mid = (series.length - 1) / 2;
+  SELECTION_EVAL.collections.forEach((c, idx) => {
+    const cy = top + idx * rowH + rowH / 2;
+    if (idx > 0) {
+      svg.appendChild(
+        svgEl("line", {
+          x1: 0,
+          y1: top + idx * rowH,
+          x2: W,
+          y2: top + idx * rowH,
+          stroke: "var(--border)",
+          "stroke-opacity": "0.4",
+        })
+      );
+    }
+    svg.appendChild(
+      svgEl("text", { x: left - 10, y: cy + 4, "text-anchor": "end", fill: "var(--ink)", text: c.name })
+    );
+
+    series.forEach((s, si) => {
+      const val = s.get(c);
+      const cx = xOf(val);
+      const yOff = cy + (si - mid) * 3.4;
+      const g = svgEl("g", { style: "cursor:pointer" });
+      g.appendChild(
+        svgEl("circle", {
+          cx,
+          cy: yOff,
+          r: s.key === "a0" ? 4.6 : 3.9,
+          fill: s.color,
+          stroke: "var(--surface-1)",
+          "stroke-width": "1.7",
+        })
+      );
+      g.appendChild(svgEl("circle", { cx, cy, r: 11, fill: "transparent" }));
+      bindInteractiveMark(g, () => ({
+        heading: `${c.name} (n = ${fmtInt(c.n)})`,
+        rows: [
+          ...series.map((sr) => ({
+            color: sr.color,
+            value: fmt(sr.get(c), 3),
+            label: `${sr.label} SROCC`,
+          })),
+          { value: `${fmt(c.a[1], 3)} PLCC · ${fmt(c.a[3], 1)}% MedAE`, label: "zensim A fit" },
+        ],
+      }));
+      svg.appendChild(g);
+    });
+  });
+
+  chartWrap.replaceChildren(legend, el("div", { className: "svg-wrap" }, [svg]));
+
+  const headCells = [
+    el("th", { text: "Collection" }),
+    el("th", { className: "num", text: "Rows" }),
+    el("th", { className: "num", text: "zensim A SROCC" }),
+    el("th", { className: "num", text: "SSIMULACRA2" }),
+    el("th", { className: "num", text: "Butteraugli (3-norm)" }),
+    el("th", { className: "num", text: "A: PLCC / KROCC / MedAE%" }),
+  ];
+  if (includeF3) {
+    headCells.push(el("th", { className: "num", text: "F3: SROCC / MedAE%" }));
+  }
+  theadRow.replaceChildren(...headCells);
+
+  evalBody.replaceChildren();
+  for (const c of SELECTION_EVAL.collections) {
+    const cells = [
+      el("td", { text: c.name }),
+      el("td", { className: "num", text: fmtInt(c.n) }),
+      el("td", { className: "num", text: fmt(c.a[0], 3) }),
+      el("td", { className: "num", text: fmt(c.s2, 3) }),
+      el("td", { className: "num", text: fmt(c.ba, 3) }),
+      el("td", {
+        className: "num muted",
+        text: `${fmt(c.a[1], 3)} / ${fmt(c.a[2], 3)} / ${fmt(c.a[3], 1)}%`,
+      }),
+    ];
+    if (includeF3) {
+      cells.push(el("td", { className: "num muted", text: `${fmt(c.f3[0], 3)} / ${fmt(c.f3[3], 1)}%` }));
+    }
+    evalBody.appendChild(el("tr", {}, cells));
+  }
+
+  // 2. Multi-peer summary table
+  const peerEvalBody = document.getElementById("eval-peers-tbody");
+  peerEvalBody.replaceChildren();
+  for (const p of SELECTION_EVAL.peers) {
+    if (p.internal && !includeF3) continue;
+    peerEvalBody.appendChild(
+      el("tr", {}, [
+        el("td", { text: p.metric }),
+        el("td", { className: "num", text: `${fmt(p.eight[0], 2)}% / ${fmt(p.eight[1], 3)}` }),
+        el("td", { className: "num", text: `${fmt(p.shared3[0], 2)}% / ${fmt(p.shared3[1], 3)}` }),
+        el("td", { className: "num", text: `${fmt(p.compression[0], 3)} / ${fmt(p.compression[1], 2)}%` }),
+        el("td", { className: "num", text: `${fmt(p.noncodec[0], 3)} / ${fmt(p.noncodec[1], 2)}%` }),
+      ])
+    );
+  }
+
+  // 3. Non-codec 7-collection peer table
+  const noncodecBody = document.getElementById("noncodec-peers-tbody");
+  noncodecBody.replaceChildren();
+  for (const r of SELECTION_EVAL.noncodec_sets) {
+    if (r.internal && !includeF3) continue;
+    noncodecBody.appendChild(
+      el("tr", {}, [
+        el("td", { text: r.metric }),
+        el("td", { className: "num", text: `${fmt(r.pooled[0], 3)} / ${fmt(r.pooled[1], 2)}%` }),
+        ...r.sets.map((s) => el("td", { className: "num", text: fmt(s, 3) })),
+      ])
+    );
+  }
+
+  // 4. Pre-final confirmation reads
+  const confReadsBody = document.getElementById("conf-reads-tbody");
+  confReadsBody.replaceChildren();
+  for (const cr of SELECTION_EVAL.confirmation_reads) {
+    confReadsBody.appendChild(
+      el("tr", {}, [
+        el("td", { text: cr.name }),
+        el("td", { className: "muted", text: cr.scope }),
+        el("td", { className: "mono", text: cr.a }),
+        el("td", { className: "muted", text: cr.peers + (includeF3 ? cr.peers_f3 : "") }),
+      ])
+    );
+  }
+}
+
 function populateStaticTables(data) {
   const confSpec = [
     ["B", "Research B (formula rev 5, codec_target)"],
@@ -1061,7 +1494,7 @@ function populateStaticTables(data) {
   ];
   const confBody = document.getElementById("kadid-conf-tbody");
   for (const [key, label] of confSpec) {
-    const c = data.kadid_conf[key]; // [comp_srocc, delta, limit, lo, hi, passed]
+    const c = data.kadid_conf[key];
     const chip = el("span", {
       className: "chip",
       "data-severity": c[5] ? "note" : "critical",
@@ -1075,27 +1508,6 @@ function populateStaticTables(data) {
         el("td", { className: "num", text: `≥ ${fmt(c[2], 6)}` }),
         el("td", { className: "num", text: `[${fmt(c[3], 6)}, ${fmt(c[4], 6)}]` }),
         el("td", {}, [chip]),
-      ])
-    );
-  }
-
-  const diagBody = document.getElementById("kadid-diag-tbody");
-  for (const m of ["A", "B", "V2", "S2", "BA"]) {
-    const d = data.kadid_diag[m];
-    const sw = el("span", { className: "swatch-dot" });
-    sw.style.background = MODEL_META[m].color;
-    diagBody.appendChild(
-      el("tr", {}, [
-        el("td", {}, [el("span", { className: "legend-item" }, [sw, MODEL_META[m].label])]),
-        el("td", { className: "num", text: fmt(d.geo.mad, 4) }),
-        el("td", { className: "num", text: fmt(d.geo.p99d, 4) }),
-        el("td", { className: "num", text: fmt(d.geo.maxd, 4) }),
-        el("td", { className: "num", text: fmt(d.geo.out4, 4) }),
-        el("td", { className: "num", text: fmt(d.geo.clump, 4) }),
-        el("td", { className: "num", text: fmt(d.raw.mad, 2) }),
-        el("td", { className: "num", text: fmt(d.raw.residual_p99, 2) }),
-        el("td", { className: "num", text: fmt(d.raw.clump, 4) }),
-        el("td", { className: "num", text: `[${fmt(d.raw.pred_min, 1)}, ${fmt(d.raw.pred_max, 1)}]` }),
       ])
     );
   }
@@ -1145,49 +1557,6 @@ function populateStaticTables(data) {
       ])
     );
   }
-
-  const evalBody = document.getElementById("eval9-tbody");
-  for (const c of SELECTION_EVAL.collections) {
-    evalBody.appendChild(
-      el("tr", {}, [
-        el("td", { text: c.name }),
-        el("td", { className: "num", text: fmtInt(c.n) }),
-        el("td", {
-          className: "num",
-          text: `${fmt(c.f3[0], 3)} / ${fmt(c.f3[1], 3)} / ${fmt(c.f3[2], 3)} / ${fmt(c.f3[3], 1)}%`,
-        }),
-        el("td", {
-          className: "num",
-          text: `${fmt(c.a[0], 3)} / ${fmt(c.a[1], 3)} / ${fmt(c.a[2], 3)} / ${fmt(c.a[3], 1)}%`,
-        }),
-      ])
-    );
-  }
-
-  const peerEvalBody = document.getElementById("eval-peers-tbody");
-  for (const p of SELECTION_EVAL.peers) {
-    peerEvalBody.appendChild(
-      el("tr", {}, [
-        el("td", { text: p.metric }),
-        el("td", { className: "num", text: `${fmt(p.eight[0], 2)}% / ${fmt(p.eight[1], 3)}` }),
-        el("td", { className: "num", text: `${fmt(p.shared3[0], 2)}% / ${fmt(p.shared3[1], 3)}` }),
-        el("td", { className: "num", text: `${fmt(p.compression[0], 3)} / ${fmt(p.compression[1], 2)}%` }),
-        el("td", { className: "num", text: `${fmt(p.noncodec[0], 3)} / ${fmt(p.noncodec[1], 2)}%` }),
-      ])
-    );
-  }
-
-  const confReadsBody = document.getElementById("conf-reads-tbody");
-  for (const cr of SELECTION_EVAL.confirmation_reads) {
-    confReadsBody.appendChild(
-      el("tr", {}, [
-        el("td", { text: cr.name }),
-        el("td", { className: "muted", text: cr.scope }),
-        el("td", { className: "mono", text: cr.a }),
-        el("td", { className: "muted", text: cr.peers }),
-      ])
-    );
-  }
 }
 
 async function init() {
@@ -1218,16 +1587,25 @@ async function init() {
   const resp = await fetch("./evaluations-data.json");
   if (!resp.ok) throw new Error(`Failed to load evaluations-data.json: ${resp.status}`);
   const data = await resp.json();
+  const dotGrid = Number(data.dot_grid || 256);
 
   document.getElementById("foot-commits").textContent =
     `zensim ${data.commits.zensim.slice(0, 10)} · zensimx ${data.commits.zensimx.slice(0, 10)} · bake ${data.commits.bake_sha256.slice(0, 12)}…`;
 
+  const frozenInternalWrap = document.getElementById("frozen-internal-wrap");
+  const frozenInternalCheck = document.getElementById("frozen-internal-check");
   renderFrozenChart(document.getElementById("frozen-chart-wrap"), data.views);
-  renderFrozenTable(document.getElementById("frozen-tbody"), data.views);
+  const syncFrozenTable = () =>
+    renderFrozenTable(document.getElementById("frozen-tbody"), data.views, frozenInternalCheck.checked);
+  syncFrozenTable();
+  frozenInternalCheck.addEventListener("change", syncFrozenTable);
   wireViewToggle(
     document.getElementById("frozen-toggle"),
     document.getElementById("frozen-chart-wrap"),
-    document.getElementById("frozen-table-wrap")
+    document.getElementById("frozen-table-wrap"),
+    (mode) => {
+      frozenInternalWrap.hidden = mode !== "table";
+    }
   );
 
   renderClicSection(
@@ -1248,33 +1626,64 @@ async function init() {
       el("option", { value: v.id, text: `${VIEW_META[v.id].title} (n = ${fmtInt(v.rows)})` })
     );
   }
+  let scatterMode = "dots";
+  const scatterTrendCheck = document.getElementById("scatter-trend-check");
+  const scatterTrendWrap = document.getElementById("scatter-trend-wrap");
+  const legendDots = document.getElementById("scatter-legend-dots");
+  const legendDensity = document.getElementById("scatter-legend-density");
+  const scatterStage = document.getElementById("scatter-stage");
+  const scatterTableWrap = document.getElementById("scatter-table-wrap");
+
   const updateScatter = () => {
     const view = data.views.find((v) => v.id === popSelect.value) || data.views[0];
+    const isTable = scatterMode === "table";
+    scatterStage.hidden = isTable;
+    scatterTableWrap.hidden = !isTable;
+    scatterTrendWrap.hidden = isTable;
+    legendDots.hidden = scatterMode !== "dots";
+    legendDensity.hidden = scatterMode !== "density";
     renderScatters(
-      document.getElementById("scatter-stage"),
+      scatterStage,
       document.getElementById("scatter-tbody"),
       document.getElementById("scatter-disclosure"),
-      view
+      view,
+      dotGrid,
+      scatterMode === "density" ? "density" : "dots",
+      scatterTrendCheck.checked
     );
   };
   popSelect.addEventListener("change", updateScatter);
+  scatterTrendCheck.addEventListener("change", updateScatter);
+  const scatterBtns = document.getElementById("scatter-toggle").querySelectorAll("button[data-mode]");
+  scatterBtns.forEach((b) => {
+    b.addEventListener("click", () => {
+      scatterMode = b.dataset.mode;
+      scatterBtns.forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+      updateScatter();
+    });
+  });
   updateScatter();
-  wireViewToggle(
-    document.getElementById("scatter-toggle"),
-    document.getElementById("scatter-stage"),
-    document.getElementById("scatter-table-wrap")
-  );
+
+  const kadidDiagInternal = document.getElementById("kadid-diag-internal-check");
+  const syncKadidDiag = () =>
+    renderKadidDiagTable(document.getElementById("kadid-diag-tbody"), data.kadid_diag, kadidDiagInternal.checked);
+  kadidDiagInternal.addEventListener("change", syncKadidDiag);
+  syncKadidDiag();
 
   const kadidSelect = document.getElementById("kadid-group-select");
+  const kadidInternal = document.getElementById("kadid-internal-check");
   const updateKadid = () => {
     renderKadidTypes(
       document.getElementById("kadid-chart-wrap"),
+      document.getElementById("kadid-types-thead-row"),
       document.getElementById("kadid-types-tbody"),
       data.kadid_types,
-      kadidSelect.value
+      kadidSelect.value,
+      kadidInternal.checked
     );
   };
   kadidSelect.addEventListener("change", updateKadid);
+  kadidInternal.addEventListener("change", updateKadid);
   updateKadid();
   wireViewToggle(
     document.getElementById("kadid-toggle"),
@@ -1292,6 +1701,16 @@ async function init() {
   };
   threadSelect.addEventListener("change", updateSpeed);
   updateSpeed();
+
+  const evalF3Check = document.getElementById("eval-f3-check");
+  const syncSelection = () => renderSelectionSection(evalF3Check.checked);
+  evalF3Check.addEventListener("change", syncSelection);
+  syncSelection();
+  wireViewToggle(
+    document.getElementById("eval9-toggle"),
+    document.getElementById("eval9-chart-wrap"),
+    document.getElementById("eval9-table-wrap")
+  );
 
   populateStaticTables(data);
   window.evalsReady = true;

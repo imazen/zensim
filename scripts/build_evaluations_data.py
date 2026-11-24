@@ -1,19 +1,24 @@
 #!/usr/bin/env python3
-"""Build verified aggregate JSON (<30 KB) for the public zensim evaluations page.
+"""Build verified aggregate & display-quantized JSON for the public zensim evaluations page.
 
 Reads completed frozen-A score caches and verifies every scalar against the
-committed RESULTS.json records before emitting aggregate 8x8 density grids,
-tie-preserving quantile medians/IQRs, CLIC margin bins, and KADID breakdowns.
+committed RESULTS.json records before emitting:
+  - 256x256 per-panel display-quantized dot multiplicities (all pairs retained,
+    no stimulus IDs, no filenames, no cross-metric row joins, no raw float tables),
+  - exact 8x8 density grids and tie-preserving quantile medians/IQRs,
+  - CLIC 2022 margin bins, and KADID per-distortion / scatter diagnostics.
 Explanatory copy and authored report tables live in evaluations.html / evaluations.js.
-Never emits row-level targets, stimulus IDs, local paths, or private corpus metadata.
+Never emits stimulus IDs, local paths, or private corpus metadata.
 """
 from __future__ import annotations
 
 import argparse
+import base64
 import csv
 import json
 import re
 import sys
+from collections import Counter
 from pathlib import Path
 
 import numpy as np
@@ -23,7 +28,8 @@ A_SHA256 = "d5e2a56db35c32620d9f9d9c19ba3bc78bd8fea2b8cd933cde8447428d85e62a"
 ZENSIM_DOC_REV = "f1cb811a50dfe969bbf548725a1f8f5d661bd4e3"
 ZENSIMX_RECORD_REV = "f3bc01a9ac8fd664c4798250aab628c6e050243c"
 VIZ_SOURCE_REV = "5d2c1a50cd2af9ea0111dae4e6169caf0e0c7b37"
-MAX_JSON_BYTES = 30_000
+MAX_JSON_BYTES = 85_000
+DOT_GRID = 256
 
 MODEL_SHORT = {
     "A": "A",
@@ -32,6 +38,8 @@ MODEL_SHORT = {
     "B": "B",
     "by_v2fy": "V2",
 }
+
+PEER_MODELS = ("A", "SSIMULACRA2", "butteraugli3_quality")
 
 FORBIDDEN = re.compile(
     r"/home/|/mnt/|/var/|/srv/|/tmp/|source_paths|zenpapers|imazen-26|"
@@ -109,7 +117,56 @@ def tie_preserving_quantile_bins(x: np.ndarray, max_bins: int) -> list[np.ndarra
     return bins
 
 
-def density_grid_8x8(
+def encode_dots_256(
+    x: np.ndarray, y: np.ndarray, x_range: tuple[float, float], y_range: tuple[float, float]
+) -> str:
+    """Pack 256x256 display-grid (ux, uy, count) cells per panel independently.
+
+    Stream format (repeated until EOF):
+      ix: uint8 (0..255)
+      n_single: uint8, followed by n_single * uy: uint8 (each has count = 1)
+      n_multi: uint8, followed by n_multi * (uy: uint8, count: uint8 if 2..254 else 255 + uint16 LE)
+    Preserves exact total pair count without exporting row indices or raw float targets.
+    """
+    xmin, xmax = x_range
+    ymin, ymax = y_range
+    ux = np.round((x - xmin) / max(1e-12, xmax - xmin) * (DOT_GRID - 1)).astype(int)
+    uy = np.round((y - ymin) / max(1e-12, ymax - ymin) * (DOT_GRID - 1)).astype(int)
+    assert int(ux.min()) >= 0 and int(ux.max()) < DOT_GRID
+    assert int(uy.min()) >= 0 and int(uy.max()) < DOT_GRID
+    cnts = Counter(zip(ux.tolist(), uy.tolist()))
+    assert sum(cnts.values()) == len(x)
+
+    by_x: list[list[tuple[int, int]]] = [[] for _ in range(DOT_GRID)]
+    for (ix, iy), c in sorted(cnts.items()):
+        by_x[ix].append((iy, c))
+
+    buf = bytearray()
+    decoded_sum = 0
+    for ix in range(DOT_GRID):
+        if not by_x[ix]:
+            continue
+        singles = [iy for iy, c in by_x[ix] if c == 1]
+        multis = [(iy, c) for iy, c in by_x[ix] if c > 1]
+        assert len(singles) <= 255 and len(multis) <= 255
+        buf.append(ix)
+        buf.append(len(singles))
+        buf.extend(singles)
+        buf.append(len(multis))
+        for iy, c in multis:
+            assert 2 <= c <= 65535
+            buf.append(iy)
+            if c < 255:
+                buf.append(c)
+            else:
+                buf.append(255)
+                buf.extend(int(c).to_bytes(2, "little"))
+        decoded_sum += len(singles) + sum(c for _, c in multis)
+    assert decoded_sum == len(x)
+    return base64.b64encode(bytes(buf)).decode("ascii")
+
+
+def scatter_summary(
     x: np.ndarray, y: np.ndarray, y_range: tuple[float, float], max_qbins: int
 ) -> dict:
     nb = 8
@@ -144,11 +201,15 @@ def density_grid_8x8(
             ]
         )
     assert sum(q[4] for q in quantiles) == len(x)
-    return {"xr": [r3(xmin), r3(xmax)], "c": cells, "q": quantiles}
+    return {
+        "xr": [r3(xmin), r3(xmax)],
+        "c": cells,
+        "q": quantiles,
+        "d": encode_dots_256(x, y, (xmin, xmax), y_range),
+    }
 
 
 def extract_metric_panel(mdata: dict) -> list:
-    # Compact 5-tuple: [srocc, krocc, plcc, rmse, within_or_null], each [val, lo, hi]
     out = []
     for k in ("srocc_signed", "krocc", "plcc", "rmse"):
         d = mdata[k]
@@ -173,7 +234,7 @@ def build_clic_margins(root: Path) -> dict:
     res = json.loads((root / "scores/clic22/RESULTS.json").read_text())
 
     models_out = {}
-    for m in ("A", "SSIMULACRA2", "butteraugli3_quality"):
+    for m in PEER_MODELS:
         mp = scores[m]
         deltas = np.empty(len(er), dtype=np.float64)
         agree = np.empty(len(er), dtype=np.float64)
@@ -251,10 +312,12 @@ def main() -> None:
         y = np.array([float(r["target"]) for r in rows], dtype=np.float64)
         y_range = (float(y.min()), float(y.max()))
 
+        # Retain B/by_v2fy in scalar panel metadata for optional full-record table view;
+        # scatter panels compare strictly against non-zensim external peers (A, S2, BA).
         model_order = (
-            ["A", "B", "by_v2fy", "SSIMULACRA2", "butteraugli3_quality"]
+            ["A", "SSIMULACRA2", "butteraugli3_quality", "B", "by_v2fy"]
             if set_dir == "kadid_terminal"
-            else ["A", "SSIMULACRA2", "butteraugli3_quality"]
+            else list(PEER_MODELS)
         )
         m_out = {}
         sc_out = {}
@@ -265,7 +328,8 @@ def main() -> None:
             assert abs(sr - rec) < 1e-12, (vid, m, sr, rec)
             mk = MODEL_SHORT[m]
             m_out[mk] = extract_metric_panel(res["models"][m])
-            sc_out[mk] = density_grid_8x8(x, y, y_range, max_qbins)
+            if m in PEER_MODELS:
+                sc_out[mk] = scatter_summary(x, y, y_range, max_qbins)
 
         views_out.append(
             {
@@ -308,11 +372,11 @@ def main() -> None:
                 r6(entry[m]["signed"]["lo"]),
                 r6(entry[m]["signed"]["hi"]),
             ]
-            for m in ("A", "B", "by_v2fy", "SSIMULACRA2", "butteraugli3_quality")
+            for m in ("A", "SSIMULACRA2", "butteraugli3_quality", "B", "by_v2fy")
         }
 
     kadid_diag = {}
-    for m in ("A", "B", "by_v2fy", "SSIMULACRA2", "butteraugli3_quality"):
+    for m in ("A", "SSIMULACRA2", "butteraugli3_quality", "B", "by_v2fy"):
         sc = json.loads((args.final_read_root / f"scores/kadid_terminal/all/scatter-{m}.json").read_text())
         kadid_diag[MODEL_SHORT[m]] = {
             "geo": {k: r6(v) for k, v in sc["geo"].items()},
@@ -320,7 +384,8 @@ def main() -> None:
         }
 
     payload = {
-        "schema": "zensim-evals-v1",
+        "schema": "zensim-evals-v2",
+        "dot_grid": DOT_GRID,
         "commits": {
             "bake_sha256": A_SHA256,
             "zensim": ZENSIM_DOC_REV,
