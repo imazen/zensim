@@ -120,13 +120,31 @@ do not establish that every larger size is unchanged. All 980 serial/parallel sc
 bit-identical. This is one host's measurement, not a universal optimum. Record:
 [`a_parallel_gate_2026-11-04.md`](https://github.com/imazen/zensimx/blob/main/benchmarks/a_parallel_gate_2026-11-04.md).
 
+**Multi-platform latency, 16-thread memory cut, and NEON parity (2026-11-25).** Shrinking horizontal
+moment scratch to 256-column L1/L2 panels, skipping dead streaming plane/fold allocations under
+`block_walk`, bounding wide-frame strip queues, and enabling ARM64 NEON + Wasm SIMD128 on the
+revision-7 `local11` and `l64` kernels cut 16-thread 12 MP (`4000×3000`) fresh-process peak RSS by
+42–45% (`584 MiB → 329–341 MiB`) and sped up 16-thread `1024²` scoring by 1.89× on Arrow Lake AVX2
+while keeping all 135,625 split-parity rows bit-identical (`0` diffs):
+
+| CPU & ISA tier | Threads | `64²` p50 (ms) | `256²` p50 (ms) | `1024²` p50 (ms) | `12 MP` p50 (ms) | Fit (`α + β·MP`) | `12 MP` peak RSS |
+|---|---:|---:|---:|---:|---:|---|---:|
+| AMD Ryzen 9 9950X3D (`v4x` AVX-512, CCD0) | 1 / 16 | 0.39 / 0.39 | 1.78 / 0.75 | 19.97 / 4.03 | 190.3 / 75.7 | `15.70` / `6.40 ms/MP` | 174.0 / 329.3 MiB |
+| AMD Ryzen 9 9950X3D (`v3` AVX2 forced, CCD0) | 1 / 16 | 0.40 / 0.40 | 2.28 / 0.84 | 28.85 / 4.87 | 291.3 / 81.6 | `24.13` / `6.88 ms/MP` | 173.9 / 340.9 MiB |
+| Intel Core Ultra 7 265K (`v3` AVX2, 8P+8E) | 1 / 16 | 0.49 / 0.48 | 2.81 / 1.84 | 35.84 / 11.81 | 382.1 / 167.4 | `31.72` / `14.05 ms/MP` | 174.1 / 330.9 MiB |
+| Apple M6 (`neon` ARM64, 12C) | 1 / 12 | 1.06 / 1.07 | 7.15 / 2.58 | 38.48 / 8.52 | 467.4 / 122.2 | `38.86` / `10.21 ms/MP` | 210.7 / 329.0 MiB |
+
+Full p50/p95 tables, forced-scalar NEON ratios (`3.06×–3.44×`), and `run-heavy` cgroup receipts:
+[`benchmarks/a_16t_rss_and_neon_2026-11-25.md`](../benchmarks/a_16t_rss_and_neon_2026-11-25.md).
+
 **Where the time goes, and why it stays.** At 256² on one thread the top costs are the dense detector
 kernel (24% of cycles), horizontal blur (17%), vertical blur (15%), colour conversion (10%) and the
 fused SSIM kernel (10%). The f64 divider is active for 22 to 24% of cycles at every size. Three
 bit-identical fusions of these passes each lost paired timing on at least one required cell, so none
 shipped. Removing every blur and pyramid pass would give at most 1.85×. Omitting the 156 lowest-effect
 damage features removes no pass and saves no measurable time. A larger speedup needs an arithmetic
-change that alters scores, such as f32 moments. Per-score peak memory has not been isolated. Record:
+change that alters scores, such as f32 moments. Fresh-process total peak RSS is tabulated above;
+incremental per-call heap delta inside a warm host process has not been isolated separately. Record:
 [`a_extraction_fusion_2026-11-04.md`](https://github.com/imazen/zensimx/blob/main/benchmarks/a_extraction_fusion_2026-11-04.md).
 
 ## 4. Training data

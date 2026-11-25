@@ -2605,7 +2605,7 @@ pub(crate) fn blockiness_row(
     if let (SumVar::L64(v), SumVar::L64(h)) = (&mut *sum_v, &mut *sum_h) {
         incant!(
             blockiness_row_l64(src, dst, row, width, horizontal, spread, v, h),
-            [v4x, v4, v3, scalar]
+            [v4x, v4, v3, neon, wasm128, scalar]
         );
         return;
     }
@@ -2640,7 +2640,7 @@ pub(crate) fn blockiness_row(
 /// time; with `spread` their eight terms go to the eight lanes at once
 /// (columns `8j … 8(j + 7)` with `j ≡ 1 (mod 8)` map to lanes 0–7), without
 /// it to lane 0 in column order.
-#[magetypes(define(f64x8), v4x, v4, v3, scalar)]
+#[magetypes(define(f64x8), v4x, v4, v3, neon, wasm128, scalar)]
 #[allow(clippy::too_many_arguments)]
 fn blockiness_row_l64(
     token: Token,

@@ -84,9 +84,9 @@
           <span class="stat-note">vs HaarPSI 8.92%, SSIMULACRA2 9.13%, CVVDP 9.82%, FSIMc 9.97%; FSIMc leads codec rows (0.906 vs 0.895)</span>
         </div>
         <div class="stat-tile">
-          <span class="stat-label">Resident RGB8 speed (16T AVX2)</span>
-          <span class="stat-value">8.67 ms/MP</span>
-          <span class="stat-note">+ 2.04 ms vs fast-ssim2 29.72 ms/MP on Core Ultra 7 270K Plus; slower than fast-ssim2 at 64²</span>
+          <span class="stat-label">Resident RGB8 speed &amp; 12 MP RSS</span>
+          <span class="stat-value">6.40–10.21 ms/MP</span>
+          <span class="stat-note">Ryzen 9 9950X3D v4x 6.40 ms/MP (v3 6.88), Core Ultra 7 270K+ 8.67 (vs fast-ssim2 29.72), Apple M6 NEON 10.21; 12 MP 12–16T RSS 329–341 MiB</span>
         </div>
       </div>
 
@@ -455,25 +455,60 @@
         <div class="section-head">
           <h2>6. Runtime latency, parallel cutoff, and process memory</h2>
           <p>
-            Measured on an <strong>Intel Core Ultra 7 270K Plus (x86-64 AVX2/v3, CPUs 0–15: 8P + 8E, no CCD boundary)</strong>:
+            Peer comparison measured on an <strong>Intel Core Ultra 7 270K Plus (x86-64 AVX2/v3, CPUs 0–15: 8P + 8E, no CCD boundary)</strong>:
             20 real images per size, <code>zenjpeg</code> q40 YCbCr 4:2:0 reconstructions, resident RGB8 sRGB bytes
             scored in-process (decode, encode, resize, I/O, and CLI startup excluded), 100 ms warmup, first 32 clean
             interleaved <code>zenbench</code> rounds per image (640 calls per arm/cell), type-7 quantiles, thin LTO, no
-            <code>-C target-cpu=native</code>. Comparators are registry <code>fast-ssim2 0.9.1</code> (published Rust
+            <code>-C target-cpu=native</code>, against registry <code>fast-ssim2 0.9.1</code> (published Rust
             SSIMULACRA2) and the in-process <code>margarine</code> <code>simd-row-malta</code> Butteraugli-family kernel
-            (primary max pooling; runtime baseline, not an accuracy comparator). Does not measure Zen 5 AVX-512, ARM
-            NEON, Wasm, or GPU.
+            (primary max pooling; runtime baseline, not an accuracy comparator). Refreshed post-optimization
+            multi-architecture measurements (2026-11-25) add <strong>AMD Ryzen 9 9950X3D</strong> (<code>v4x</code>
+            AVX-512 &amp; forced <code>v3</code> AVX2), <strong>Intel Core Ultra 7 265K</strong> (<code>v3</code> AVX2),
+            and <strong>Apple M6</strong> (<code>neon</code> ARM64).
           </p>
         </div>
 
         <div class="callout" data-kind="warning">
-          <strong>Pre-cutoff small-image caveat:</strong> All eight comparative rows below were measured before
-          shipping the <strong>36,864-padded-pixel (192²)</strong> serial cutoff. At <code>64²</code>, <code>A</code> is
-          slower than <code>fast-ssim2</code> at 1 thread (0.75 ms vs 0.40 ms) and suffered Rayon overhead at 16 threads
-          (2.15 ms pre-cutoff; 0.70 ms after forcing serial below 192²). At 12 MP (12.00–12.58M pixels), 16-thread
-          <code>A</code> scores in 105.4 ms p50 (3.39× faster than <code>fast-ssim2</code>, 5.22× faster than
-          <code>margarine</code>), while <code>margarine</code>’s tiled row buffers hold lower 16-thread total-process
-          peak RSS (167,168 KiB vs <code>A</code>’s 598,216 KiB).
+          <strong>2026-11-25 memory &amp; NEON refresh vs 2026-11-04 peer baseline:</strong> The 8-row 3-way peer table
+          below preserves the exact 2026-11-04 paired run (measured before the <strong>36,864-padded-pixel / 192²</strong>
+          serial cutoff and before the 2026-11-25 256-column L1/L2 horizontal-scratch &amp; <code>block_walk</code>
+          buffer optimizations). With both shipped (scores 100% bit-identical across all 135,625 split-parity rows),
+          <code>64²</code> 16-thread latency drops to <code>0.39–0.48 ms</code> on x86-64 (still behind
+          <code>fast-ssim2</code>’s <code>0.40 ms</code> at 1T), 16-thread <code>1024²</code> reaches
+          <code>4.03 ms</code> on Ryzen 9 9950X3D AVX-512 / <code>8.52 ms</code> on Apple M6 NEON (12T) /
+          <code>11.81 ms</code> on Core Ultra 7 265K AVX2, and 12 MP (<code>4000×3000</code>) 12–16T peak RSS drops
+          42–45% from <code>598,216 KiB</code> to <code>336,864–349,104 KiB</code> (<code>329–341 MiB</code>;
+          <code>margarine</code> remains lower at <code>167,168 KiB</code>).
+        </div>
+
+        <div class="card">
+          <div class="card-title">
+            <h3>Post-optimization multi-architecture latency &amp; fresh-process peak RSS (2026-11-25)</h3>
+            <span class="sub">
+              Bit-identical revision-7 <code>ZensimProfile::A</code> with 256-column horizontal panels, bounded wide-frame
+              strip queues, 192² serial cutoff, and native ARM64 NEON / Wasm SIMD128 <code>local11</code> +
+              <code>l64</code> kernels (thin LTO, no <code>-C target-cpu=native</code>; 0 score-bit mismatches across
+              threads).
+            </span>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>CPU · ISA tier</th>
+                  <th class="num">Threads</th>
+                  <th class="num">64² p50 / p95 (ms)</th>
+                  <th class="num">256² p50 / p95 (ms)</th>
+                  <th class="num">1024² p50 / p95 (ms)</th>
+                  <th class="num">4000×3000 (12 MP) p50 / p95 (ms)</th>
+                  <th class="num">Slope β (ms / MP)</th>
+                  <th class="num">1024² peak KiB</th>
+                  <th class="num">12 MP peak KiB</th>
+                </tr>
+              </thead>
+              <tbody id="multihost-speed-tbody"></tbody>
+            </table>
+          </div>
         </div>
 
         <div class="filter-row">

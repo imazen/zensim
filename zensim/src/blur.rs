@@ -4395,7 +4395,7 @@ fn fused_blur_h_ssim_local(
                 radius,
                 err
             ),
-            [v4x, v4, v3, scalar]
+            [v4x, v4, v3, neon, scalar]
         );
     } else {
         fused_blur_h_ssim_local_general(
@@ -4473,7 +4473,7 @@ fn local_sum_ring11(t: &[f32; 16], base: usize) -> f32 {
     let s8 = ((at(0) + at(1)) + (at(2) + at(3))) + ((at(4) + at(5)) + (at(6) + at(7)));
     s8 + (at(8) + at(9)) + at(10)
 }
-#[magetypes(define(f32x8), v4x, v4, v3, -scalar)]
+#[magetypes(define(f32x8), v4x, v4, v3, neon, -scalar)]
 fn fused_blur_h_local11(
     token: Token,
     src: &[f32],
@@ -4576,7 +4576,7 @@ fn fused_blur_h_local11(
 /// does at sixteen lanes. Every output keeps both kernels' trees, operands and
 /// roundings.
 #[cfg(feature = "threads")]
-#[magetypes(define(f32x8), v4x, v4, v3, -scalar)]
+#[magetypes(define(f32x8), v4x, v4, v3, neon, -scalar)]
 #[allow(clippy::too_many_arguments)]
 fn fused_blur_hv_local11(
     token: Token,
@@ -4833,16 +4833,68 @@ pub(crate) fn fused_blur_hv_ssim_at_revision(
             err,
             hbuf
         ),
-        [v4x, v4, v3, scalar]
+        [v4x, v4, v3, neon, scalar]
     );
     true
+}
+
+/// Panel scratch length required by [`fused_blur_hv_ssim_at_revision`] and
+/// [`activity_at_revision`] when a SIMD tier (`v4x`/`v4`/`v3`/`neon`) is live.
+/// Returns `None` when either kernel will fall back to whole-window planes.
+#[cfg(feature = "threads")]
+pub(crate) fn fused_panel_hbuf_len(
+    width: usize,
+    height: usize,
+    radius: usize,
+    revision: crate::feature_defs::FormulaRevision,
+) -> Option<usize> {
+    use crate::featcanon::BlurMode;
+    let revision_h = crate::ssim_form::effective_revision(revision);
+    let mode_h = crate::featcanon::mode(revision_h);
+    let local = |mode, rev| {
+        matches!(
+            crate::featcanon::canon_blur_axis_for(mode, rev),
+            BlurMode::Local
+        )
+    };
+    if radius != 5
+        || !mode_h.active()
+        || !local(mode_h, revision_h)
+        || !local(crate::featcanon::mode(revision), revision)
+    {
+        return None;
+    }
+    let simd_live = {
+        #[cfg(target_arch = "x86_64")]
+        {
+            #[cfg(feature = "avx512")]
+            let avx512 = <archmage::X64V4xToken as archmage::SimdToken>::summon().is_some()
+                || <archmage::X64V4Token as archmage::SimdToken>::summon().is_some();
+            #[cfg(not(feature = "avx512"))]
+            let avx512 = false;
+            avx512 || <archmage::X64V3Token as archmage::SimdToken>::summon().is_some()
+        }
+        #[cfg(target_arch = "aarch64")]
+        {
+            <archmage::NeonToken as archmage::SimdToken>::summon().is_some()
+        }
+        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+        {
+            false
+        }
+    };
+    if !simd_live {
+        return None;
+    }
+    let panel_cols = width.min(256);
+    Some((panel_cols * height).max(panel_cols + 26))
 }
 
 /// [`activity_local11_wide`] at eight lanes: `|src − mu|` through
 /// [`box_blur_h_local11`] then [`box_blur_v_local11`], a 256-column panel at a
 /// time through `row` and `hbuf`.
 #[cfg(feature = "threads")]
-#[magetypes(define(f32x8), v4x, v4, v3, -scalar)]
+#[magetypes(define(f32x8), v4x, v4, v3, neon, wasm128, -scalar)]
 #[allow(clippy::too_many_arguments)]
 fn activity_local11(
     token: Token,
@@ -5020,7 +5072,7 @@ pub(crate) fn activity_at_revision(
     }
     incant!(
         activity_local11(src, mu, output, width, height, hbuf, row),
-        [v4x, v4, v3, scalar]
+        [v4x, v4, v3, neon, wasm128, scalar]
     );
     true
 }
@@ -5040,7 +5092,7 @@ pub(crate) fn box_blur_h_local(
         }
         incant!(
             box_blur_h_local11(input, output, width, height, radius),
-            [v4x, v4, v3, scalar]
+            [v4x, v4, v3, neon, wasm128, scalar]
         );
     } else {
         box_blur_h_local_general(input, output, width, height, radius);
@@ -5073,7 +5125,7 @@ fn box_blur_h_local11_scalar(
         }
     }
 }
-#[magetypes(define(f32x8), v4x, v4, v3, -scalar)]
+#[magetypes(define(f32x8), v4x, v4, v3, neon, wasm128, -scalar)]
 fn box_blur_h_local11(
     token: Token,
     input: &[f32],
@@ -5134,7 +5186,7 @@ pub(crate) fn box_blur_v_local(
         }
         incant!(
             box_blur_v_local11(input, output, width, height, radius),
-            [v4x, v4, v3, scalar]
+            [v4x, v4, v3, neon, wasm128, scalar]
         );
     } else {
         box_blur_v_local_general(input, output, width, height, radius);
@@ -5163,7 +5215,7 @@ fn box_blur_v_local11_scalar(
         }
     }
 }
-#[magetypes(define(f32x8), v4x, v4, v3, -scalar)]
+#[magetypes(define(f32x8), v4x, v4, v3, neon, wasm128, -scalar)]
 fn box_blur_v_local11(
     token: Token,
     input: &[f32],

@@ -52,6 +52,9 @@
 - `Zensim::compute_hdr` and `HdrEncoding` (`Linear`, `Pq`, `Hlg`): HDR input in absolute display light through an anchored cube-root
   front end at 203 cd/m² and the revision-7 feature walk; features bit-identical to the research crate.
 
+#### Performance
+- Shrink `Rev5StripJob` horizontal-blur scratch to 256-column L1/L2 panels, skip unused streaming plane/fold buffers under `block_walk`, bound wide-frame strip queues, and enable `neon` + `wasm128` SIMD tiers on revision-7 `local11` and `l64` kernels (`benchmarks/a_16t_rss_and_neon_2026-11-25.md`): 16-thread 12 MP peak RSS drops 42–45% (`584 MiB → 329–341 MiB`), 16-thread `1024²` speeds up 1.89× on Arrow Lake AVX2 (`4.03 ms` on Ryzen 9 9950X3D AVX-512, `8.52 ms` on Apple M6 NEON), and all 135,625 split-parity rows remain bit-identical.
+
 #### Changed
 - Skip parallel streaming extraction below 36,864 pixels after existing small-image
   padding; scores are unchanged (`398578fc`).

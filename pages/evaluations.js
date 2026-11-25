@@ -163,6 +163,16 @@ const SPEED_BENCHMARK = {
     { threads: 4, size: "192²", before: [2.5, 2.46], after: [2.39, 2.29] },
     { threads: 4, size: "320²", before: [4.71, 4.81], after: [5.42, 4.28] },
   ],
+  multihost_rows: [
+    { cpu: "AMD Ryzen 9 9950X3D · v4x (AVX-512, CCD0)", threads: 16, s64: [0.39, 0.41], s256: [0.75, 0.93], s1024: [4.03, 4.87], s12m: [75.67, 77.42], beta: 6.40, rss1k: 115988, rss12m: 337180 },
+    { cpu: "AMD Ryzen 9 9950X3D · v4x (AVX-512, CCD0)", threads: 1, s64: [0.39, 0.41], s256: [1.78, 1.87], s1024: [19.97, 22.46], s12m: [190.32, 194.07], beta: 15.70, rss1k: 32544, rss12m: 178192 },
+    { cpu: "AMD Ryzen 9 9950X3D · v3 (AVX2 forced, CCD0)", threads: 16, s64: [0.40, 0.41], s256: [0.84, 1.03], s1024: [4.87, 6.01], s12m: [81.57, 85.18], beta: 6.88, rss1k: 120068, rss12m: 349104 },
+    { cpu: "AMD Ryzen 9 9950X3D · v3 (AVX2 forced, CCD0)", threads: 1, s64: [0.40, 0.41], s256: [2.28, 2.38], s1024: [28.85, 30.09], s12m: [291.27, 293.45], beta: 24.13, rss1k: 32636, rss12m: 178036 },
+    { cpu: "Intel Core Ultra 7 265K · v3 (AVX2, 8P+8E)", threads: 16, s64: [0.48, 0.69], s256: [1.84, 4.09], s1024: [11.81, 13.82], s12m: [167.44, 172.44], beta: 14.05, rss1k: 115836, rss12m: 338808 },
+    { cpu: "Intel Core Ultra 7 265K · v3 (AVX2, P-core)", threads: 1, s64: [0.49, 0.55], s256: [2.81, 3.08], s1024: [35.84, 36.46], s12m: [382.08, 434.89], beta: 31.72, rss1k: 32844, rss12m: 178300 },
+    { cpu: "Apple M6 · neon (ARM64, 2S+4P+6E)", threads: 12, s64: [1.07, 1.12], s256: [2.58, 2.86], s1024: [8.52, 11.90], s12m: [122.23, 125.20], beta: 10.21, rss1k: 147856, rss12m: 336864 },
+    { cpu: "Apple M6 · neon (ARM64, 1T)", threads: 1, s64: [1.06, 1.10], s256: [7.15, 8.08], s1024: [38.48, 39.45], s12m: [467.41, 472.19], beta: 38.86, rss1k: 46304, rss12m: 215760 },
+  ],
 };
 
 // Committed per-collection SROCC from zensim/README.md:46-56 + MODEL_A_REPORT.md:228-238 + e36_subset_test_2026-11-01.md:1620-1730
@@ -1510,6 +1520,25 @@ function populateStaticTables(data) {
         el("td", {}, [chip]),
       ])
     );
+  }
+
+  const mhBody = document.getElementById("multihost-speed-tbody");
+  if (mhBody) {
+    for (const r of SPEED_BENCHMARK.multihost_rows) {
+      mhBody.appendChild(
+        el("tr", {}, [
+          el("td", { text: r.cpu }),
+          el("td", { className: "num", text: String(r.threads) }),
+          el("td", { className: "num", text: `${fmt(r.s64[0], 2)} / ${fmt(r.s64[1], 2)}` }),
+          el("td", { className: "num", text: `${fmt(r.s256[0], 2)} / ${fmt(r.s256[1], 2)}` }),
+          el("td", { className: "num", text: `${fmt(r.s1024[0], 2)} / ${fmt(r.s1024[1], 2)}` }),
+          el("td", { className: "num", text: `${fmt(r.s12m[0], 2)} / ${fmt(r.s12m[1], 2)}` }),
+          el("td", { className: "num", text: fmt(r.beta, 2) }),
+          el("td", { className: "num", text: fmtInt(r.rss1k) }),
+          el("td", { className: "num", text: fmtInt(r.rss12m) }),
+        ])
+      );
+    }
   }
 
   const speedBody = document.getElementById("speed-tbody");

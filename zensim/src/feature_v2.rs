@@ -1233,16 +1233,38 @@ impl Rev5StripJob {
     }
 
     /// Take the strip and size the scratch for its window.
-    fn prepare(&mut self, info: crate::feature_v2_stream::StripInfo, ch: usize) {
+    fn prepare(
+        &mut self,
+        info: crate::feature_v2_stream::StripInfo,
+        ch: usize,
+        revision: FormulaRevision,
+    ) {
         self.info = info;
         self.ch = ch;
         let n = info.plane_w * info.wide_h();
-        if n > self.sized_for {
+        let threads = rayon::current_num_threads();
+        let panel = (threads >= 8)
+            .then(|| {
+                crate::blur::fused_panel_hbuf_len(
+                    info.plane_w,
+                    info.wide_h(),
+                    BLUR_RADIUS,
+                    revision,
+                )
+            })
+            .flatten();
+        let panel_act = panel.is_some() && (threads >= 12 || info.plane_w >= 2048);
+        let need_h01 = if panel_act { panel.unwrap() } else { n };
+        let need_h23 = panel.unwrap_or(n);
+        if n > self.sized_for
+            || need_h01 > self.scratch.mu1_h.len()
+            || need_h23 > self.scratch.ssq_h.len()
+        {
             // Release the previous allocation before constructing its larger
             // replacement, so both plane sets never coexist inside the cap.
             self.scratch = ScratchV2Strip::new(0);
             self.sized_for = 0;
-            self.scratch = rev5_job_scratch(n);
+            self.scratch = rev5_job_scratch_sized(n, need_h01, need_h23);
             self.sized_for = n;
         }
     }
@@ -1253,9 +1275,10 @@ impl Rev5StripJob {
         info: crate::feature_v2_stream::StripInfo,
         ch: usize,
         borrow_source: bool,
+        revision: FormulaRevision,
     ) {
         use crate::feature_v2_stream::Side;
-        self.prepare(info, ch);
+        self.prepare(info, ch, revision);
         let n = info.plane_w * info.wide_h();
         for (side, out) in [
             (Side::Source, &mut self.scratch.src_wide),
@@ -1274,13 +1297,15 @@ impl Rev5StripJob {
 }
 
 #[cfg(feature = "threads")]
-fn rev5_job_scratch(n: usize) -> ScratchV2Strip {
+fn rev5_job_scratch_sized(n: usize, need_h01: usize, need_h23: usize) -> ScratchV2Strip {
     let mut scratch = ScratchV2Strip::new_for(n, StripPlaneNeeds::NONE);
+    for plane in [&mut scratch.mu1_h, &mut scratch.mu2_h] {
+        plane.resize(need_h01, 0.0);
+    }
+    for plane in [&mut scratch.ssq_h, &mut scratch.s12_h] {
+        plane.resize(need_h23, 0.0);
+    }
     for plane in [
-        &mut scratch.mu1_h,
-        &mut scratch.mu2_h,
-        &mut scratch.ssq_h,
-        &mut scratch.s12_h,
         &mut scratch.mu1,
         &mut scratch.mu2,
         &mut scratch.ssq,
@@ -1337,7 +1362,10 @@ fn rev5_job_blur(
     // +0.1%, sixteen on eight cores −22.0% / −16.4%, 32 −10.8% / −3.1%); four
     // threads ran +2.4% / −3.0% and one thread 1–2% slower on the panels'
     // shorter row runs, so smaller pools and the serial walk keep two passes.
-    let fused = rayon::current_num_threads() >= 8
+    let threads = rayon::current_num_threads();
+    let h01_cap = mu1_h.len().min(n);
+    let h23_cap = ssq_h.len().min(n);
+    let fused = threads >= 8
         && crate::blur::fused_blur_hv_ssim_at_revision(
             src,
             &dst_wide[..n],
@@ -1350,10 +1378,10 @@ fn rev5_job_blur(
             BLUR_RADIUS,
             revision,
             [
-                &mut mu1_h[..n],
-                &mut mu2_h[..n],
-                &mut ssq_h[..n],
-                &mut s12_h[..n],
+                &mut mu1_h[..h01_cap],
+                &mut mu2_h[..h01_cap],
+                &mut ssq_h[..h23_cap],
+                &mut s12_h[..h23_cap],
             ],
         );
     if !fused {
@@ -1388,12 +1416,11 @@ fn rev5_job_blur(
         }
     }
     // The activity plane in one pass where its blurs run their per-output
-    // trees, `mu1_h` and `mu2_h` holding a panel's rows. Pools of sixteen or
-    // more threads only (paired against the fused moments alone, B at
-    // revision 7, 1507×2048 / 1024²: sixteen on eight cores −13.5% / −4.9%,
-    // 32 −8.1% / −7.9%, but eight +1.4% / +1.0%).
+    // trees, `mu1_h` and `mu2_h` holding a panel's rows. Enabled on >=12-thread
+    // pools (covering M-series 12T and x86 16T+) and on >=2048-wide strips at
+    // >=8 threads so `mu1_h`/`mu2_h` never grow to full strip planes on 4K+.
     if !(fused
-        && rayon::current_num_threads() >= 16
+        && (threads >= 12 || info.plane_w >= 2048)
         && crate::blur::activity_at_revision(
             src,
             &mu1[..n],
@@ -1402,8 +1429,8 @@ fn rev5_job_blur(
             info.wide_h(),
             BLUR_RADIUS,
             revision,
-            &mut mu1_h[..n],
-            &mut mu2_h[..n],
+            &mut mu1_h[..h01_cap],
+            &mut mu2_h[..h01_cap],
         ))
     {
         crate::simd_ops::abs_diff_into(src, &mu1[..n], &mut mu1_h[..n]);
@@ -1709,20 +1736,26 @@ fn rev5_block_walk<S: ImageSource, D: ImageSource, const ALL_CHANNELS: bool>(
     use std::sync::Arc;
 
     let n_scales = dims.len();
-    let h0 = dims[0].1;
+    let (w0, h0) = dims[0];
     let n_chunks = h0.div_ceil(CHUNK_ROWS);
     let threads = rayon::current_num_threads().max(2);
-    // Production may run this many scale-0 rows past the rows the next
-    // strip needs, with at most this many chunk tasks (one per side) queued.
-    // At most twelve strip jobs hold scratch at once: each holds about
-    // 9.8 MB at 1507 columns, and sixteen at once overflowed a 96 MiB L3 at
-    // sixteen threads on eight cores (paired, B at revision 7, 1507×2048:
-    // twelve −13.2% and eight −20.8% against sixteen; at 32 threads on two
-    // CCDs twelve −2.5% and eight +8.8%). Eight chunks of look-ahead instead
-    // of one per thread: −3.6% at sixteen threads, −7.6% at 32 (1024²).
-    let ahead = threads.min(8) * CHUNK_ROWS;
-    let prod_limit = 2 * threads.min(8);
-    let limit = limit.min(12);
+    // Bound lookahead and concurrent strip-scratch slots by width so 4K/12 MP
+    // walks stay L3-resident instead of buffering 512 scale-0 rows + 12×17 MiB
+    // strip scratch sets (~320 MiB) while keeping <=1600px geometries unchanged.
+    let ahead_chunks = if w0 > 1600 {
+        threads.min(4)
+    } else {
+        threads.min(8)
+    };
+    let ahead = ahead_chunks * CHUNK_ROWS;
+    let prod_limit = 2 * ahead_chunks;
+    let scratch_cap = if w0 > 1600 {
+        let per_job = w0 * (STRIP_ROWS + 2 * HALO_P) * 7 * core::mem::size_of::<f32>();
+        (134_217_728usize / per_job.max(1)).clamp(6, 12)
+    } else {
+        12
+    };
+    let limit = limit.min(scratch_cap);
     // The streaming producer's conversion revision.
     let revision = toggles.formula_revision;
     let compute = *compute;
@@ -1872,7 +1905,7 @@ fn rev5_block_walk<S: ImageSource, D: ImageSource, const ALL_CHANNELS: bool>(
                             job.scratch = scratch;
                             job.sized_for = sized_for;
                         }
-                        job.prepare(info, ch);
+                        job.prepare(info, ch, revision);
                         let (seq, tx) = (next_seq, tx.clone());
                         scope.spawn(move |_| {
                             let run =
@@ -3011,19 +3044,37 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
     };
     #[cfg(feature = "threads")]
     rev5_prepare_jobs(&mut scratch.rev5_jobs, batch_limit, strip_max_n);
-    let needs = compute.plane_needs(self_blur);
+    // Plain SDR walks whose every live scale runs the v2 blocks produce their
+    // rows in parallel chunk tasks, and their strip jobs copy their own
+    // windows (`rev5_block_walk`); skip allocating the unused streaming
+    // producer, strip scratch, and band pool scratch on that route.
     #[cfg(feature = "threads")]
-    let needs = if batch_limit > 0 {
-        // Only basic-only scale cells can reach the old phase A. They need
-        // horizontal planes; queued v2 cells own all their vertical planes.
-        StripPlaneNeeds {
-            h: needs.h && compute.v2_scales != ComputeSet::ALL_SCALES,
-            v2: false,
-        }
-    } else {
-        needs
+    let block_walk = {
+        let omit_xb = !compute.full_res_xb;
+        batch_limit > 0
+            && ref_planes.is_none()
+            && matches!(front_end, crate::feature_v2_stream::FrontEnd::Sdr)
+            && !(ALL_CHANNELS && omit_xb)
+            && (0..n_scales).all(|s| compute.scale_dead(s) || compute.at_scale(s).v2_blocks)
     };
-    scratch.ensure_for(strip_max_n, needs);
+    #[cfg(not(feature = "threads"))]
+    let block_walk = false;
+
+    if !block_walk {
+        let needs = compute.plane_needs(self_blur);
+        #[cfg(feature = "threads")]
+        let needs = if batch_limit > 0 {
+            // Only basic-only scale cells can reach the old phase A. They need
+            // horizontal planes; queued v2 cells own all their vertical planes.
+            StripPlaneNeeds {
+                h: needs.h && compute.v2_scales != ComputeSet::ALL_SCALES,
+                v2: false,
+            }
+        } else {
+            needs
+        };
+        scratch.ensure_for(strip_max_n, needs);
+    }
     let V2Scratch {
         strips: scratch_strips,
         stream_pool,
@@ -3037,44 +3088,14 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
     // Finite queries need the omitted raw scale-0 distorted channels too.
     // Keep them during the prepared walk instead of converting the image again.
     // This changes storage only; channel_active still controls every feature.
-    let mut accums: [StreamChannelAccums; 3] = std::array::from_fn(|_| {
-        StreamChannelAccums::at_revision(
-            n_scales,
-            band_slots_for(band_parallel),
-            compute.formula_revision,
-        )
-    });
-    let mut producer = StripPlaneProducer::new_with_ref_feed(
-        source,
-        distorted,
-        parallel,
-        stream_pool,
-        front_end,
-        ref_planes,
-        toggles.formula_revision,
-        !compute.full_res_xb,
-    );
-
-    #[cfg(feature = "threads")]
-    let mut queued = 0;
-    // Plain SDR walks whose every live scale runs the v2 blocks produce their
-    // rows in parallel chunk tasks, and their strip jobs copy their own
-    // windows (`rev5_block_walk`); the streaming producer above is unused.
-    #[cfg(feature = "threads")]
-    let block_walk = {
-        let omit_xb = !compute.full_res_xb;
-        batch_limit > 0
-            && ref_planes.is_none()
-            && matches!(front_end, crate::feature_v2_stream::FrontEnd::Sdr)
-            && !(ALL_CHANNELS && omit_xb)
-            && (0..n_scales).all(|s| compute.scale_dead(s) || compute.at_scale(s).v2_blocks)
+    let band_slots = if block_walk {
+        1
+    } else {
+        band_slots_for(band_parallel)
     };
-    // Other plain walks (nothing retained, no cached reference) run their
-    // strip jobs through the pipeline instead of batches: same merge order,
-    // no barrier between batches, production overlapped with the jobs.
-    #[cfg(feature = "threads")]
-    let mut pipeline = (batch_limit > 0 && ref_planes.is_none() && !block_walk)
-        .then(|| Rev5Pipeline::new(compute, fold_v1, batch_limit, core::mem::take(rev5_jobs)));
+    let mut accums: [StreamChannelAccums; 3] = std::array::from_fn(|_| {
+        StreamChannelAccums::at_revision(n_scales, band_slots, compute.formula_revision)
+    });
 
     #[cfg(feature = "threads")]
     if block_walk {
@@ -3092,187 +3113,198 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
             &mut accums,
             stop,
         );
-    }
-    loop {
-        #[cfg(feature = "threads")]
-        if block_walk {
-            break;
-        }
-        if stop.is_some_and(|token| token.check().is_err()) {
-            break;
-        }
-        let next = producer.next_strip();
-        let Some(info) = next else {
-            break;
-        };
-        let scale = info.scale;
-        let local = compute.at_scale(scale);
-        let v2_blocks = local.v2_blocks;
-        let toggles = V2NewFeatureToggles {
-            v1_pools: local.v1_pools,
-            v1_only: !v2_blocks,
-            gradient_features: local.gradient,
-            blockiness: local.blockiness,
-            ..toggles
-        };
-        // A declared-ID plan that reads no v1-era slot and runs no v2-era work at this scale skips its strips whole
-        // (the producer has already carried the pyramid through them). Only the pre-Rev5 scale-0 side channel keeps
-        // them.
-        if compute.scale_dead(scale)
-            && !(scale == 0
-                && compute.formula_revision < FormulaRevision::Rev5
-                && mean_offset.is_some())
-        {
-            #[cfg(test)]
-            SKIPPED_SCALES.with_borrow_mut(|v| *v |= 1 << scale);
-            continue;
-        }
+    } else {
+        let mut producer = StripPlaneProducer::new_with_ref_feed(
+            source,
+            distorted,
+            parallel,
+            stream_pool,
+            front_end,
+            ref_planes,
+            toggles.formula_revision,
+            !compute.full_res_xb,
+        );
+        let mut queued = 0;
+        // Other plain walks (nothing retained, no cached reference) run their
+        // strip jobs through the pipeline instead of batches: same merge order,
+        // no barrier between batches, production overlapped with the jobs.
+        let mut pipeline = (batch_limit > 0 && ref_planes.is_none())
+            .then(|| Rev5Pipeline::new(compute, fold_v1, batch_limit, core::mem::take(rev5_jobs)));
 
-        #[cfg(feature = "threads")]
-        if let Some(pipe) = pipeline.as_mut() {
-            // A basic-only cell keeps its existing path; finish every queued
-            // cell first so per-channel/scale ordering is never disturbed.
-            if !v2_blocks {
-                pipe.drain(&mut accums);
-            } else {
-                for ch in 0..3 {
-                    if !ALL_CHANNELS && !compute.channel_active(scale, ch) {
-                        continue;
-                    }
-                    let mut job = pipe.slot(info, ch, &mut accums);
-                    job.gather(&producer, info, ch, false);
-                    pipe.submit(job, toggles);
-                }
+        loop {
+            if stop.is_some_and(|token| token.check().is_err()) {
+                break;
+            }
+            let next = producer.next_strip();
+            let Some(info) = next else {
+                break;
+            };
+            let scale = info.scale;
+            let local = compute.at_scale(scale);
+            let v2_blocks = local.v2_blocks;
+            let toggles = V2NewFeatureToggles {
+                v1_pools: local.v1_pools,
+                v1_only: !v2_blocks,
+                gradient_features: local.gradient,
+                blockiness: local.blockiness,
+                ..toggles
+            };
+            // A declared-ID plan that reads no v1-era slot and runs no v2-era work at this scale skips its strips whole
+            // (the producer has already carried the pyramid through them). Only the pre-Rev5 scale-0 side channel keeps
+            // them.
+            if compute.scale_dead(scale)
+                && !(scale == 0
+                    && compute.formula_revision < FormulaRevision::Rev5
+                    && mean_offset.is_some())
+            {
+                #[cfg(test)]
+                SKIPPED_SCALES.with_borrow_mut(|v| *v |= 1 << scale);
                 continue;
             }
-        }
-        #[cfg(feature = "threads")]
-        if batch_limit > 0 && pipeline.is_none() {
-            // A basic-only cell keeps its existing path; finish older queued
-            // cells first so per-channel/scale ordering is never disturbed.
-            if !v2_blocks && queued > 0 {
-                rev5_run_jobs(
-                    &mut rev5_jobs[..queued],
-                    &compute,
-                    toggles,
-                    fold_v1,
-                    &mut accums,
-                    ref_planes.filter(|_| true),
-                );
-                queued = 0;
+
+            if let Some(pipe) = pipeline.as_mut() {
+                // A basic-only cell keeps its existing path; finish every queued
+                // cell first so per-channel/scale ordering is never disturbed.
+                if !v2_blocks {
+                    pipe.drain(&mut accums);
+                } else {
+                    for ch in 0..3 {
+                        if !ALL_CHANNELS && !compute.channel_active(scale, ch) {
+                            continue;
+                        }
+                        let mut job = pipe.slot(info, ch, &mut accums);
+                        job.gather(&producer, info, ch, false, compute.formula_revision);
+                        pipe.submit(job, toggles);
+                    }
+                    continue;
+                }
             }
-            if v2_blocks {
-                for ch in 0..3 {
-                    if !ALL_CHANNELS && !compute.channel_active(scale, ch) {
-                        continue;
-                    }
-                    if queued == rev5_jobs.len() {
-                        rev5_jobs.push(Rev5StripJob::new(info, ch));
-                    }
-                    let job = &mut rev5_jobs[queued];
-                    job.gather(
-                        &producer,
-                        info,
-                        ch,
-                        rev5_cached_window(ref_planes, &info, ch).is_some(),
+            if batch_limit > 0 && pipeline.is_none() {
+                // A basic-only cell keeps its existing path; finish older queued
+                // cells first so per-channel/scale ordering is never disturbed.
+                if !v2_blocks && queued > 0 {
+                    rev5_run_jobs(
+                        &mut rev5_jobs[..queued],
+                        &compute,
+                        toggles,
+                        fold_v1,
+                        &mut accums,
+                        ref_planes.filter(|_| true),
                     );
-                    queued += 1;
-                    if queued == batch_limit {
-                        rev5_run_jobs(
-                            &mut rev5_jobs[..queued],
-                            &compute,
+                    queued = 0;
+                }
+                if v2_blocks {
+                    for ch in 0..3 {
+                        if !ALL_CHANNELS && !compute.channel_active(scale, ch) {
+                            continue;
+                        }
+                        if queued == rev5_jobs.len() {
+                            rev5_jobs.push(Rev5StripJob::new(info, ch));
+                        }
+                        let job = &mut rev5_jobs[queued];
+                        job.gather(
+                            &producer,
+                            info,
+                            ch,
+                            rev5_cached_window(ref_planes, &info, ch).is_some(),
+                            compute.formula_revision,
+                        );
+                        queued += 1;
+                        if queued == batch_limit {
+                            rev5_run_jobs(
+                                &mut rev5_jobs[..queued],
+                                &compute,
+                                toggles,
+                                fold_v1,
+                                &mut accums,
+                                ref_planes.filter(|_| true),
+                            );
+                            queued = 0;
+                        }
+                    }
+                    continue;
+                }
+            }
+
+            // mean_offset side-channel (fold-engine lane): the scale-0 strips
+            // tile [0, h0) exactly once in ascending order, so each row's
+            // Σ_x (src − dst) is recorded exactly once here. Emitted for EVERY
+            // strip layout — the walk's toggles never change which strips the
+            // producer emits, only what is computed from them.
+            if scale == 0
+                && compute.formula_revision < FormulaRevision::Rev5
+                && let Some(mo) = mean_offset.as_deref_mut()
+            {
+                let y1 = info.y0 + info.strip_h;
+                let src: [&[f32]; 3] = core::array::from_fn(|ch| {
+                    producer.rows(crate::feature_v2_stream::Side::Source, ch, 0, info.y0, y1)
+                });
+                let dst: [&[f32]; 3] = core::array::from_fn(|ch| {
+                    producer.rows(
+                        crate::feature_v2_stream::Side::Distorted,
+                        ch,
+                        0,
+                        info.y0,
+                        y1,
+                    )
+                });
+                mo.add_strip(info.y0, info.strip_h, info.plane_w, src, dst, parallel);
+            }
+
+            let self_blur = fuse_channels && local.self_blur_eligible();
+
+            if fuse_channels {
+                use rayon::prelude::*;
+                scratch_strips
+                    .par_iter_mut()
+                    .zip(accums.par_iter_mut())
+                    .enumerate()
+                    .for_each(|(ch, (scr, acc))| {
+                        if !ALL_CHANNELS && !compute.channel_active(scale, ch) {
+                            return;
+                        }
+                        if self_blur {
+                            stream_gather_windows(&producer, &info, ch, scr);
+                        } else {
+                            stream_phase_a(
+                                &producer,
+                                &info,
+                                ch,
+                                false,
+                                false,
+                                v2_blocks,
+                                true,
+                                scr,
+                                compute.formula_revision,
+                            );
+                        }
+                        let (src_win, dst_win) = stream_windows_shared(&producer, &info, ch, scr);
+                        stream_phase_b(
+                            scr,
+                            src_win,
+                            dst_win,
+                            &info,
                             toggles,
                             fold_v1,
-                            &mut accums,
-                            ref_planes.filter(|_| true),
+                            v2_blocks,
+                            band_parallel,
+                            self_blur,
+                            local.fused_work(ch, scale),
+                            acc,
                         );
-                        queued = 0;
-                    }
-                }
+                    });
                 continue;
             }
-        }
 
-        // mean_offset side-channel (fold-engine lane): the scale-0 strips
-        // tile [0, h0) exactly once in ascending order, so each row's
-        // Σ_x (src − dst) is recorded exactly once here. Emitted for EVERY
-        // strip layout — the walk's toggles never change which strips the
-        // producer emits, only what is computed from them.
-        if scale == 0
-            && compute.formula_revision < FormulaRevision::Rev5
-            && let Some(mo) = mean_offset.as_deref_mut()
-        {
-            let y1 = info.y0 + info.strip_h;
-            let src: [&[f32]; 3] = core::array::from_fn(|ch| {
-                producer.rows(crate::feature_v2_stream::Side::Source, ch, 0, info.y0, y1)
-            });
-            let dst: [&[f32]; 3] = core::array::from_fn(|ch| {
-                producer.rows(
-                    crate::feature_v2_stream::Side::Distorted,
-                    ch,
-                    0,
-                    info.y0,
-                    y1,
-                )
-            });
-            mo.add_strip(info.y0, info.strip_h, info.plane_w, src, dst, parallel);
-        }
-
-        // FUSED PER-CHANNEL FAN-OUT (fold-MT lane). No channel reads another
-        // channel's phase-A output, so each worker finishes its own phase B.
-        // A split fan-out costs the walk's
-        // locality contract: it holds THREE channels' ~9 MB phase-A buffers
-        // live across a barrier, then re-reads them from wherever they landed.
-        // The serial arm already fuses A->B per channel for exactly that
-        // reason (measured +50 ms/pair on aic3-100 when interleaved); this is
-        // the same shape under threads.
-        //
-        // Byte-neutral by construction: identical kernels on identical inputs
-        // into per-channel accumulators that are already disjoint. Only which
-        // thread runs what, and when, changes.
-        // `fuse_channels` and `self_blur` are HOISTED above the strip loop —
-        // they are strip-independent, and the strip scratch is now SIZED from
-        // them (`StripPlaneNeeds`), so there is one definition of each.
-        //
-        // SELF-BLUR BANDS. With `v1_only` phase A's ONLY output is the four
-        // H-blurred planes over the strip's whole 148-row wide window, and the
-        // v1 bands are its only consumer. Writing them there and reading them
-        // back in a different task is four planes through L3/DRAM per strip —
-        // which the 16-independent-process throughput test measures as the
-        // fold's ceiling (4.2x against buffered's 10.9x from the same serial
-        // speed; `benchmarks/fold_mt_scaling_2026-08-31.md`). Letting each
-        // band blur exactly the rows it consumes into its own scratch drops
-        // phase A entirely and makes every band a self-contained task — the
-        // shape `streaming::process_channel_strip` has always had.
-        //
-        // `V1PoolsMode::Peaks` or `Peaks` is required because the band-local
-        // H buffer lives in the band's `FoldPoolScratch`, and one of those is
-        // what every fold-backed SCORE asks for. (`Peaks` hands the band the
-        // scratch for the H planes alone — see `BandPoolWork::HOnly`.)
-        // ONE owner: `ComputeSet::self_blur_eligible`, which is also what
-        // sized the strip scratch above. Re-deriving it here is what let the
-        // two drift apart on `Peaks` (see that function's doc); the local
-        // `fuse_channels` conjunct stays because it is a runtime parallelism
-        // fact the compute set does not model.
-        #[cfg(feature = "threads")]
-        let self_blur = fuse_channels && local.self_blur_eligible();
-
-        #[cfg(feature = "threads")]
-        if fuse_channels {
-            use rayon::prelude::*;
-            scratch_strips
-                .par_iter_mut()
-                .zip(accums.par_iter_mut())
-                .enumerate()
-                .for_each(|(ch, (scr, acc))| {
-                    if !ALL_CHANNELS && !compute.channel_active(scale, ch) {
-                        return;
-                    }
-                    if self_blur {
-                        // Phase A is skipped whole; only the wide-window
-                        // gather it also performs is still needed.
-                        stream_gather_windows(&producer, &info, ch, scr);
-                    } else {
+            let ran_parallel = if parallel {
+                use rayon::prelude::*;
+                scratch_strips
+                    .par_iter_mut()
+                    .enumerate()
+                    .for_each(|(ch, scr)| {
+                        if !ALL_CHANNELS && !compute.channel_active(scale, ch) {
+                            return;
+                        }
                         stream_phase_a(
                             &producer,
                             &info,
@@ -3284,7 +3316,50 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                             scr,
                             compute.formula_revision,
                         );
+                    });
+                let scratches: &[ScratchV2Strip; 3] = scratch_strips;
+                accums.par_iter_mut().enumerate().for_each(|(ch, acc)| {
+                    if !ALL_CHANNELS && !compute.channel_active(scale, ch) {
+                        return;
                     }
+                    let (src_win, dst_win) =
+                        stream_windows_shared(&producer, &info, ch, &scratches[ch]);
+                    stream_phase_b(
+                        &scratches[ch],
+                        src_win,
+                        dst_win,
+                        &info,
+                        toggles,
+                        fold_v1,
+                        v2_blocks,
+                        band_parallel,
+                        false,
+                        local.fused_work(ch, scale),
+                        acc,
+                    );
+                });
+                true
+            } else {
+                false
+            };
+
+            if !ran_parallel {
+                let scr = &mut scratch_strips[0];
+                for ch in [0usize, 2] {
+                    if !ALL_CHANNELS && !compute.channel_active(scale, ch) {
+                        continue;
+                    }
+                    stream_phase_a(
+                        &producer,
+                        &info,
+                        ch,
+                        false,
+                        false,
+                        v2_blocks,
+                        false,
+                        scr,
+                        compute.formula_revision,
+                    );
                     let (src_win, dst_win) = stream_windows_shared(&producer, &info, ch, scr);
                     stream_phase_b(
                         scr,
@@ -3295,50 +3370,25 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                         fold_v1,
                         v2_blocks,
                         band_parallel,
-                        self_blur,
+                        false,
                         local.fused_work(ch, scale),
-                        acc,
+                        &mut accums[ch],
                     );
-                });
-            continue;
-        }
-
-        #[cfg(feature = "threads")]
-        let ran_parallel = if parallel {
-            use rayon::prelude::*;
-            // Parallel fan-out keeps the two-phase shape (A for all
-            // channels, then B) — Y's cross inputs need X/B's phase A
-            // done. Values are identical to the serial order (pure
-            // kernels on identical inputs); only cache locality differs,
-            // and parallel wall is not the 1-thread gate path.
-            scratch_strips
-                .par_iter_mut()
-                .enumerate()
-                .for_each(|(ch, scr)| {
-                    if !ALL_CHANNELS && !compute.channel_active(scale, ch) {
-                        return;
-                    }
-                    stream_phase_a(
-                        &producer,
-                        &info,
-                        ch,
-                        false,
-                        false,
-                        v2_blocks,
-                        true,
-                        scr,
-                        compute.formula_revision,
-                    );
-                });
-            let scratches: &[ScratchV2Strip; 3] = scratch_strips;
-            accums.par_iter_mut().enumerate().for_each(|(ch, acc)| {
-                if !ALL_CHANNELS && !compute.channel_active(scale, ch) {
-                    return;
                 }
-                let (src_win, dst_win) =
-                    stream_windows_shared(&producer, &info, ch, &scratches[ch]);
+                stream_phase_a(
+                    &producer,
+                    &info,
+                    1,
+                    false,
+                    false,
+                    v2_blocks,
+                    false,
+                    scr,
+                    compute.formula_revision,
+                );
+                let (src_win, dst_win) = stream_windows_shared(&producer, &info, 1, scr);
                 stream_phase_b(
-                    &scratches[ch],
+                    scr,
                     src_win,
                     dst_win,
                     &info,
@@ -3347,33 +3397,89 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                     v2_blocks,
                     band_parallel,
                     false,
-                    local.fused_work(ch, scale),
-                    acc,
+                    local.fused_work(1, scale),
+                    &mut accums[1],
                 );
-            });
-            true
-        } else {
-            false
-        };
-        #[cfg(not(feature = "threads"))]
-        let ran_parallel = false;
+            }
+        }
 
-        if !ran_parallel {
-            // Serial: FUSED phase A+B per channel (the locality contract
-            // in `stream_phase_b`'s doc — H/V planes stay cache-hot into
-            // the band replay + kernels), and ONE shared scratch set for
-            // all three channels — each stage overwrites the same ~9 MB
-            // in place, so the working set stays L2/L3-resident across
-            // channels AND strips (three per-channel sets measured
-            // +15 ms/pair on aic3-100: each channel's buffers were
-            // evicted by the other two between its consecutive strips).
-            // Order X(0), B(2), then Y(1); Y's cross transducer reads
-            // X/B's activity STRIP rows, stashed into the (otherwise
-            // idle) second/third scratch sets' activity buffers — a
-            // 2×strip_n copy, bitwise-identical values.
-            let (s0, s_rest) = scratch_strips.split_at_mut(1);
-            let scr = &mut s0[0];
-            let (_stash_x_buf, _stash_b_buf) = s_rest.split_at_mut(1);
+        if queued > 0 {
+            rev5_run_jobs(
+                &mut rev5_jobs[..queued],
+                &compute,
+                toggles,
+                fold_v1,
+                &mut accums,
+                ref_planes.filter(|_| true),
+            );
+        }
+        if let Some(mut pipe) = pipeline.take() {
+            pipe.drain(&mut accums);
+            *rev5_jobs = core::mem::take(&mut pipe.free);
+        }
+
+        producer.recycle(stream_pool);
+    }
+
+    #[cfg(not(feature = "threads"))]
+    {
+        let mut producer = StripPlaneProducer::new_with_ref_feed(
+            source,
+            distorted,
+            parallel,
+            stream_pool,
+            front_end,
+            ref_planes,
+            toggles.formula_revision,
+            !compute.full_res_xb,
+        );
+        loop {
+            if stop.is_some_and(|token| token.check().is_err()) {
+                break;
+            }
+            let next = producer.next_strip();
+            let Some(info) = next else {
+                break;
+            };
+            let scale = info.scale;
+            let local = compute.at_scale(scale);
+            let v2_blocks = local.v2_blocks;
+            let toggles = V2NewFeatureToggles {
+                v1_pools: local.v1_pools,
+                v1_only: !v2_blocks,
+                gradient_features: local.gradient,
+                blockiness: local.blockiness,
+                ..toggles
+            };
+            if compute.scale_dead(scale)
+                && !(scale == 0
+                    && compute.formula_revision < FormulaRevision::Rev5
+                    && mean_offset.is_some())
+            {
+                #[cfg(test)]
+                SKIPPED_SCALES.with_borrow_mut(|v| *v |= 1 << scale);
+                continue;
+            }
+            if scale == 0
+                && compute.formula_revision < FormulaRevision::Rev5
+                && let Some(mo) = mean_offset.as_deref_mut()
+            {
+                let y1 = info.y0 + info.strip_h;
+                let src: [&[f32]; 3] = core::array::from_fn(|ch| {
+                    producer.rows(crate::feature_v2_stream::Side::Source, ch, 0, info.y0, y1)
+                });
+                let dst: [&[f32]; 3] = core::array::from_fn(|ch| {
+                    producer.rows(
+                        crate::feature_v2_stream::Side::Distorted,
+                        ch,
+                        0,
+                        info.y0,
+                        y1,
+                    )
+                });
+                mo.add_strip(info.y0, info.strip_h, info.plane_w, src, dst, parallel);
+            }
+            let scr = &mut scratch_strips[0];
             for ch in [0usize, 2] {
                 if !ALL_CHANNELS && !compute.channel_active(scale, ch) {
                     continue;
@@ -3404,54 +3510,34 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                     &mut accums[ch],
                 );
             }
-            {
-                stream_phase_a(
-                    &producer,
-                    &info,
-                    1,
-                    false,
-                    false,
-                    v2_blocks,
-                    false,
-                    scr,
-                    compute.formula_revision,
-                );
-                let (src_win, dst_win) = stream_windows_shared(&producer, &info, 1, scr);
-                stream_phase_b(
-                    scr,
-                    src_win,
-                    dst_win,
-                    &info,
-                    toggles,
-                    fold_v1,
-                    v2_blocks,
-                    band_parallel,
-                    false,
-                    local.fused_work(1, scale),
-                    &mut accums[1],
-                );
-            }
+            stream_phase_a(
+                &producer,
+                &info,
+                1,
+                false,
+                false,
+                v2_blocks,
+                false,
+                scr,
+                compute.formula_revision,
+            );
+            let (src_win, dst_win) = stream_windows_shared(&producer, &info, 1, scr);
+            stream_phase_b(
+                scr,
+                src_win,
+                dst_win,
+                &info,
+                toggles,
+                fold_v1,
+                v2_blocks,
+                band_parallel,
+                false,
+                local.fused_work(1, scale),
+                &mut accums[1],
+            );
         }
+        producer.recycle(stream_pool);
     }
-
-    #[cfg(feature = "threads")]
-    if queued > 0 {
-        rev5_run_jobs(
-            &mut rev5_jobs[..queued],
-            &compute,
-            toggles,
-            fold_v1,
-            &mut accums,
-            ref_planes.filter(|_| true),
-        );
-    }
-    #[cfg(feature = "threads")]
-    if let Some(mut pipe) = pipeline.take() {
-        pipe.drain(&mut accums);
-        *rev5_jobs = core::mem::take(&mut pipe.free);
-    }
-
-    producer.recycle(stream_pool);
 
     // --- Finalize: the materialized walk's per-scale epilogue, replayed
     //     on the merged accumulators (identical f64 ops on identical

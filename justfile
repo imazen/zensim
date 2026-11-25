@@ -44,8 +44,7 @@ profile-split-parity:
 
 # Populate the existing ignored classification PNG fixtures in a fresh checkout.
 profile-fixtures:
-    bash zensim/tests/fixtures/generate.sh
-    cargo test -p zensim --test generate_bitops -- --ignored
+    cargo test -p zensim --test generate_fixtures -- --ignored
 
 # Requires an outer run-heavy systemd scope; CPU_IDS must name one CPU class.
 profile-test-pinned cpu_ids *args:
