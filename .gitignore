@@ -72,3 +72,6 @@ Cargo.toml.original.txt
 fuzz-*.log
 
 .workongoing
+
+__pycache__/
+*.py[cod]
