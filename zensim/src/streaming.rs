@@ -1962,6 +1962,11 @@ pub struct ZensimScratch {
     /// `fold_ref_scratch_reuse_is_bit_identical` pins by comparing a reused
     /// scratch against a fresh one across a run of compares.
     pub(crate) v2: crate::feature_v2::V2Scratch,
+    /// Reusable interleaved linear RGBA scratch for planar-input scoring so
+    /// repeated iterations avoid per-call full-image RGBA allocations.
+    pub(crate) rgba_buf: Vec<[f32; 4]>,
+    /// Reusable trimmed `width * height` diffmap scratch for lending callbacks.
+    pub(crate) diffmap_buf: Vec<f32>,
 }
 
 impl ZensimScratch {
@@ -2023,6 +2028,49 @@ impl PrecomputedReference {
     /// See [`width`](Self::width) for the matching contract on distorted images.
     pub fn height(&self) -> usize {
         self.ref_height
+    }
+
+    /// Estimate the heap storage (in bytes) required to hold a precomputed
+    /// reference pyramid for an image of `width × height` pixels across
+    /// `num_scales` pyramid levels.
+    ///
+    /// Returns `None` when either dimension is zero or arithmetic overflows.
+    pub fn estimated_bytes(width: usize, height: usize, num_scales: usize) -> Option<u64> {
+        if width == 0 || height == 0 {
+            return None;
+        }
+        let (bw, bh) = if crate::metric::needs_pyramid_pad(width, height, num_scales) {
+            (
+                width.max(crate::metric::MIN_PYRAMID_DIM),
+                height.max(crate::metric::MIN_PYRAMID_DIM),
+            )
+        } else {
+            (width, height)
+        };
+        let mut w = pyramid_plane_stride(bw);
+        let mut h = bh;
+        let mut total: u64 = 0;
+        let bytes_per_pixel_3ch = (3usize * core::mem::size_of::<f32>()) as u64;
+        for _ in 0..num_scales {
+            if w < 8 || h < 8 {
+                break;
+            }
+            let level_pixels = (w as u64).checked_mul(h as u64)?;
+            let level_bytes = level_pixels.checked_mul(bytes_per_pixel_3ch)?;
+            total = total.checked_add(level_bytes)?;
+            w /= 2;
+            h /= 2;
+        }
+        Some(total)
+    }
+
+    /// Estimate the precomputed reference storage (in bytes) for `profile`.
+    pub fn estimated_bytes_for_profile(
+        width: usize,
+        height: usize,
+        profile: crate::profile::ZensimProfile,
+    ) -> Option<u64> {
+        Self::estimated_bytes(width, height, profile.params().num_scales)
     }
 
     pub(crate) fn new(
@@ -2177,6 +2225,29 @@ impl PrecomputedReference {
         parallel: bool,
         revision: crate::feature_defs::FormulaRevision,
     ) -> Self {
+        Self::from_linear_planes(
+            planes,
+            [stride; 3],
+            width,
+            height,
+            ColorPrimaries::Srgb,
+            num_scales,
+            parallel,
+            revision,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn from_linear_planes(
+        planes: [&[f32]; 3],
+        strides: [usize; 3],
+        width: usize,
+        height: usize,
+        primaries: ColorPrimaries,
+        num_scales: usize,
+        parallel: bool,
+        revision: crate::feature_defs::FormulaRevision,
+    ) -> Self {
         // Sub-64px planar sources can't form the 4-scale pyramid; reflect-pad
         // the LINEAR planes to the minimum — the planar analogue of
         // [`Self::new`]'s ImageSource branch (linear→XYB is pointwise, so
@@ -2192,6 +2263,7 @@ impl PrecomputedReference {
                 let bh = height.max(MIN_PYRAMID_DIM);
                 let padded: [Vec<f32>; 3] = std::array::from_fn(|c| {
                     let src = planes[c];
+                    let stride = strides[c];
                     let mut out = vec![0.0f32; bw * bh];
                     for y in 0..bh {
                         let sy = reflect_index(y, height);
@@ -2210,12 +2282,13 @@ impl PrecomputedReference {
                     parallel,
                     revision,
                     |scale0| {
-                        convert_linear_planar_to_xyb_into(
+                        convert_linear_planes_to_xyb_into(
                             padded_refs,
+                            [bw; 3],
                             bw,
                             bh,
-                            bw,
                             padded_width,
+                            primaries,
                             scale0,
                             revision,
                         );
@@ -2232,12 +2305,13 @@ impl PrecomputedReference {
             parallel,
             revision,
             |scale0| {
-                convert_linear_planar_to_xyb_into(
+                convert_linear_planes_to_xyb_into(
                     planes,
+                    strides,
                     width,
                     height,
-                    stride,
                     padded_width,
+                    primaries,
                     scale0,
                     revision,
                 );
@@ -2272,66 +2346,73 @@ impl MultiScaleRef for PrecomputedReference {
     }
 }
 
-/// Convert planar linear RGB f32 to padded positive-XYB planes.
-///
-/// `planes` are `[R, G, B]` with `stride` elements per row.
-/// Output is `[Vec<f32>; 3]` with `padded_width` elements per row,
-/// mirror-padded for SIMD alignment.
-pub(crate) fn convert_linear_planar_to_xyb(
+/// Convert planar linear RGB f32 with independent strides and primaries to padded positive-XYB planes.
+pub(crate) fn convert_linear_planes_to_xyb(
     planes: [&[f32]; 3],
+    strides: [usize; 3],
     width: usize,
     height: usize,
-    stride: usize,
     padded_width: usize,
+    primaries: ColorPrimaries,
     revision: crate::feature_defs::FormulaRevision,
 ) -> [Vec<f32>; 3] {
     let n = padded_width * height;
     let mut out: [Vec<f32>; 3] = std::array::from_fn(|_| vec![0.0f32; n]);
-    convert_linear_planar_to_xyb_into(
+    convert_linear_planes_to_xyb_into(
         planes,
+        strides,
         width,
         height,
-        stride,
         padded_width,
+        primaries,
         &mut out,
         revision,
     );
     out
 }
 
-/// Like [`convert_linear_planar_to_xyb`] but writes into pre-allocated planes
+/// Like [`convert_linear_planes_to_xyb`] but writes into pre-allocated planes
 /// (each at least `padded_width * height` elements).
-pub(crate) fn convert_linear_planar_to_xyb_into(
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn convert_linear_planes_to_xyb_into(
     planes: [&[f32]; 3],
+    strides: [usize; 3],
     width: usize,
     height: usize,
-    stride: usize,
     padded_width: usize,
+    primaries: ColorPrimaries,
     out: &mut [Vec<f32>; 3],
     revision: crate::feature_defs::FormulaRevision,
 ) {
-    use crate::color::linear_to_positive_xyb_planar_into;
+    use crate::color::{apply_gamut_matrix, linear_to_positive_xyb_planar_into};
 
     // Pack planar → interleaved [f32; 3] per row, then convert to XYB.
     // The per-row buffer fits in L1 cache (~12KB for 1024px).
     let mut rgb_row: Vec<[f32; 3]> = vec![[0.0; 3]; width];
+    let need_gamut = primaries != ColorPrimaries::Srgb;
 
     // Destructure for independent mutable borrows
     let [ref mut o0, ref mut o1, ref mut o2] = *out;
 
     for y in 0..height {
-        let row_off = y * stride;
+        let r_off = y * strides[0];
+        let g_off = y * strides[1];
+        let b_off = y * strides[2];
         for x in 0..width {
             // Clamp to [0, 1]: lossy reconstruction can produce out-of-range
             // linear RGB (negative from quantization error near black, >1 from
             // gaborish overshoot). A display clamps to its gamut, so the clamped
             // values are what the viewer actually sees — measuring error on
             // unclamped values would report differences that aren't perceptible.
-            rgb_row[x] = [
-                planes[0][row_off + x].clamp(0.0, 1.0),
-                planes[1][row_off + x].clamp(0.0, 1.0),
-                planes[2][row_off + x].clamp(0.0, 1.0),
+            let mut rgb = [
+                planes[0][r_off + x].clamp(0.0, 1.0),
+                planes[1][g_off + x].clamp(0.0, 1.0),
+                planes[2][b_off + x].clamp(0.0, 1.0),
             ];
+            if need_gamut {
+                apply_gamut_matrix(&mut rgb, primaries);
+            }
+            rgb_row[x] = rgb;
         }
         let out_off = y * padded_width;
         linear_to_positive_xyb_planar_into(
@@ -2649,7 +2730,51 @@ pub(crate) fn compute_zensim_streaming_with_ref_and_diffmap(
 }
 
 /// Like `compute_zensim_streaming_with_ref_and_diffmap`, but takes planar linear
+/// RGB f32 input with independent strides and primaries instead of `ImageSource`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn compute_zensim_streaming_with_ref_and_diffmap_linear_planes(
+    precomputed: &PrecomputedReference,
+    planes: [&[f32]; 3],
+    strides: [usize; 3],
+    width: usize,
+    height: usize,
+    primaries: ColorPrimaries,
+    config: &ZensimConfig,
+    weights: &[f64],
+    per_scale_channel_weights: &[[PixelFeatureWeights; 3]],
+    scale_blend_weights: &[f32],
+    guided_redistribution: bool,
+    stop: Option<&dyn enough::Stop>,
+) -> (crate::metric::ZensimResult, Vec<f32>, usize) {
+    let padded_width = pyramid_plane_stride(width);
+    let dst_planes = convert_linear_planes_to_xyb(
+        planes,
+        strides,
+        width,
+        height,
+        padded_width,
+        primaries,
+        config.revision(),
+    );
+
+    compute_diffmap_from_xyb(
+        precomputed,
+        dst_planes,
+        width,
+        height,
+        padded_width,
+        config,
+        weights,
+        per_scale_channel_weights,
+        scale_blend_weights,
+        guided_redistribution,
+        stop,
+    )
+}
+
+/// Like `compute_zensim_streaming_with_ref_and_diffmap`, but takes planar linear
 /// RGB f32 input instead of `ImageSource`. Eliminates interleaving overhead.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn compute_zensim_streaming_with_ref_and_diffmap_linear_planar(
     precomputed: &PrecomputedReference,
     planes: [&[f32]; 3],
@@ -2663,22 +2788,13 @@ pub(crate) fn compute_zensim_streaming_with_ref_and_diffmap_linear_planar(
     guided_redistribution: bool,
     stop: Option<&dyn enough::Stop>,
 ) -> (crate::metric::ZensimResult, Vec<f32>, usize) {
-    let padded_width = pyramid_plane_stride(width);
-    let dst_planes = convert_linear_planar_to_xyb(
-        planes,
-        width,
-        height,
-        stride,
-        padded_width,
-        config.revision(),
-    );
-
-    compute_diffmap_from_xyb(
+    compute_zensim_streaming_with_ref_and_diffmap_linear_planes(
         precomputed,
-        dst_planes,
+        planes,
+        [stride; 3],
         width,
         height,
-        padded_width,
+        ColorPrimaries::Srgb,
         config,
         weights,
         per_scale_channel_weights,

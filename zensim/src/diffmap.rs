@@ -352,7 +352,7 @@ fn reflect_pad_planes_f32(
     planes: [&[f32]; 3],
     w: usize,
     h: usize,
-    stride: usize,
+    strides: [usize; 3],
 ) -> ([Vec<f32>; 3], usize, usize) {
     use crate::metric::{MIN_PYRAMID_DIM, reflect_index};
     let (bw, bh) = (w.max(MIN_PYRAMID_DIM), h.max(MIN_PYRAMID_DIM));
@@ -365,11 +365,10 @@ fn reflect_pad_planes_f32(
         let sy = reflect_index(y, h);
         for x in 0..bw {
             let sx = reflect_index(x, w);
-            let si = sy * stride + sx;
             let di = y * bw + x;
-            out[0][di] = planes[0][si];
-            out[1][di] = planes[1][si];
-            out[2][di] = planes[2][si];
+            out[0][di] = planes[0][sy * strides[0] + sx];
+            out[1][di] = planes[1][sy * strides[1] + sx];
+            out[2][di] = planes[2][sy * strides[2] + sx];
         }
     }
     (out, bw, bh)
@@ -623,39 +622,35 @@ impl DiffmapResult {
 // Mask at the original compute dimensions before cropping reflected rows.
 // When only SIMD row padding is present, crop first, preserving the logical
 // row boundaries used by contrast masking.
-fn finish_diffmap(
+fn finish_diffmap_into(
     mut diffmap_padded: Vec<f32>,
     precomputed: &PrecomputedReference,
     width: usize,
     height: usize,
     padded_width: usize,
     options: DiffmapOptions,
-) -> Vec<f32> {
+    out: &mut Vec<f32>,
+) {
     let comp_h = precomputed.scales[0].2;
+    let total = width * height;
+    out.clear();
+    if out.capacity() < total {
+        out.reserve_exact(total - out.len());
+    }
     if comp_h == height {
-        let mut diffmap = if padded_width == width {
-            diffmap_padded
+        if padded_width == width {
+            out.extend_from_slice(&diffmap_padded[..total]);
         } else {
-            let mut out = Vec::with_capacity(width * height);
             for y in 0..height {
                 out.extend_from_slice(&diffmap_padded[y * padded_width..y * padded_width + width]);
             }
-            out
-        };
+        }
         if let Some(strength) = options.masking_strength {
-            apply_contrast_masking(
-                &mut diffmap,
-                precomputed,
-                width,
-                height,
-                padded_width,
-                strength,
-            );
+            apply_contrast_masking(out, precomputed, width, height, padded_width, strength);
         }
         if options.sqrt {
-            sqrt_inplace(&mut diffmap);
+            sqrt_inplace(out);
         }
-        diffmap
     } else {
         if let Some(strength) = options.masking_strength {
             apply_contrast_masking(
@@ -670,12 +665,31 @@ fn finish_diffmap(
         if options.sqrt {
             sqrt_inplace(&mut diffmap_padded);
         }
-        let mut out = Vec::with_capacity(width * height);
         for y in 0..height {
             out.extend_from_slice(&diffmap_padded[y * padded_width..y * padded_width + width]);
         }
-        out
     }
+}
+
+fn finish_diffmap(
+    diffmap_padded: Vec<f32>,
+    precomputed: &PrecomputedReference,
+    width: usize,
+    height: usize,
+    padded_width: usize,
+    options: DiffmapOptions,
+) -> Vec<f32> {
+    let mut out = Vec::new();
+    finish_diffmap_into(
+        diffmap_padded,
+        precomputed,
+        width,
+        height,
+        padded_width,
+        options,
+        &mut out,
+    );
+    out
 }
 
 impl crate::metric::Zensim {
@@ -876,7 +890,7 @@ impl crate::metric::Zensim {
         // top-left, recovered by the trim below.
         let (result, diffmap_padded, padded_width) =
             if width < crate::metric::MIN_PYRAMID_DIM || height < crate::metric::MIN_PYRAMID_DIM {
-                let (pp, pw, ph) = reflect_pad_planes_f32(planes, width, height, stride);
+                let (pp, pw, ph) = reflect_pad_planes_f32(planes, width, height, [stride; 3]);
                 let padded_width = crate::blur::pyramid_plane_stride(pw);
                 let (result, dm, _) =
                     crate::streaming::compute_zensim_streaming_with_ref_and_diffmap_linear_planar(
@@ -919,9 +933,9 @@ impl crate::metric::Zensim {
                 .flat_map(|y| {
                     (0..width).map(move |x| {
                         [
-                            planes[0][y * stride + x],
-                            planes[1][y * stride + x],
-                            planes[2][y * stride + x],
+                            planes[0][y * stride + x].clamp(0.0, 1.0),
+                            planes[1][y * stride + x].clamp(0.0, 1.0),
+                            planes[2][y * stride + x].clamp(0.0, 1.0),
                             1.0,
                         ]
                     })
@@ -953,6 +967,113 @@ impl crate::metric::Zensim {
             width,
             height,
         })
+    }
+
+    /// Compare planar linear RGB f32 with independent strides and explicit
+    /// [`crate::ColorPrimaries`] against a precomputed reference, reusing
+    /// `scratch` and lending the finished `width × height` diffmap directly
+    /// to `consume` before scratch is recycled.
+    ///
+    /// Designed for iterative encoder perceptual loops (and `zenpsy-api`
+    /// `PlanarWarmReference::with_evaluation`): reuses both the fold engine's
+    /// internal scratch and the output diffmap buffer across iterations, accepts
+    /// minimal final-row backing storage (`(height - 1) * stride + width`), and
+    /// honors an operation-local `stop` token.
+    #[allow(clippy::too_many_arguments)]
+    pub fn compute_with_ref_and_diffmap_linear_planes_with<R>(
+        &self,
+        precomputed: &PrecomputedReference,
+        planes: [&[f32]; 3],
+        strides: [usize; 3],
+        width: usize,
+        height: usize,
+        primaries: crate::source::ColorPrimaries,
+        options: impl Into<DiffmapOptions>,
+        scratch: &mut crate::streaming::ZensimScratch,
+        stop: Option<&dyn enough::Stop>,
+        consume: impl FnOnce(&ZensimResult, &[f32]) -> R,
+    ) -> Result<R, ZensimError> {
+        let options = options.into();
+        let params = self.profile().params();
+        crate::metric::validate_linear_planes(planes, strides, width, height, self.max_pixels())?;
+        if precomputed.width() != width || precomputed.height() != height {
+            return Err(ZensimError::DimensionMismatch);
+        }
+        let effective_stop = stop.or_else(|| self.stop_ref());
+        crate::metric::check_stop_ref(effective_stop)?;
+        let config = config_from_params(params, self.parallel());
+        crate::metric::validate_cached_revision(precomputed, config.revision())?;
+        let (per_scale_ch, scale_blend) = options.weighting.resolve_multiscale(
+            params.weights,
+            config.num_scales,
+            options.include_edge_mse,
+            options.include_hf,
+        );
+        let guided = false;
+
+        let (result, diffmap_padded, padded_width) =
+            if width < crate::metric::MIN_PYRAMID_DIM || height < crate::metric::MIN_PYRAMID_DIM {
+                let (pp, pw, ph) = reflect_pad_planes_f32(planes, width, height, strides);
+                let padded_width = crate::blur::pyramid_plane_stride(pw);
+                let (result, dm, _) =
+                    crate::streaming::compute_zensim_streaming_with_ref_and_diffmap_linear_planes(
+                        precomputed,
+                        [&pp[0], &pp[1], &pp[2]],
+                        [pw; 3],
+                        pw,
+                        ph,
+                        primaries,
+                        &config,
+                        params.weights,
+                        &per_scale_ch,
+                        &scale_blend,
+                        guided,
+                        effective_stop,
+                    );
+                (result, dm, padded_width)
+            } else {
+                let padded_width = crate::blur::pyramid_plane_stride(width);
+                let (result, dm, _) =
+                    crate::streaming::compute_zensim_streaming_with_ref_and_diffmap_linear_planes(
+                        precomputed,
+                        planes,
+                        strides,
+                        width,
+                        height,
+                        primaries,
+                        &config,
+                        params.weights,
+                        &per_scale_ch,
+                        &scale_blend,
+                        guided,
+                        effective_stop,
+                    );
+                (result, dm, padded_width)
+            };
+        crate::metric::check_stop_ref(effective_stop)?;
+        let result = self.score_diffmap(result, &config, width, height, || {
+            self.compute_with_ref_linear_planes_into_stoppable(
+                precomputed,
+                planes,
+                strides,
+                width,
+                height,
+                primaries,
+                scratch,
+                effective_stop,
+            )
+        })?;
+        crate::metric::check_stop_ref(effective_stop)?;
+        finish_diffmap_into(
+            diffmap_padded,
+            precomputed,
+            width,
+            height,
+            padded_width,
+            options,
+            &mut scratch.diffmap_buf,
+        );
+        Ok(consume(&result, &scratch.diffmap_buf[..width * height]))
     }
 
     /// Compare two images and return both score and per-pixel error map.

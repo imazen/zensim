@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = ["zensim", "zensim-regress"]
+exclude = ["zensim-psy"]
 
 [profile.release]
 lto = "thin"
