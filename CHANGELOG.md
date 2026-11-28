@@ -39,6 +39,8 @@
 ### Unreleased (0.3.0)
 
 #### Added
+- `zensim`: add `PrecomputedReference::estimated_bytes` and scratch-reusing, independent-stride, primaries-aware linear-planar reference preparation and diffmap scoring (`precompute_reference_linear_planes`, `compute_with_ref_linear_planes_with`, `compute_with_ref_and_diffmap_linear_planes_with`, plus `ZensimScratch::diffmap_len` / `diffmap_slice`) for zero-allocation perceptual encoder loops.
+- `zensim-psy` (unpublished standalone crate): `zenpsy-api` adapter for `zensim` defaulting to Revision-7 `ZensimProfile::A` (`zensim-a`), supporting packed `PixelSlice`, strided linear-RGB `PlanarSlice`, prepared references, zero-copy `with_evaluation` scratch lending, `estimated_reference_bytes`, and deterministic reporting.
 - `docs/MODEL_A_REPORT.md`: how `A` computes a score, the trained network's shape, development process, evaluation and known limits (`588e38a7`).
 - `ZensimProfile::A` (`zensim-a`, returned by `latest()`): the general-purpose model adopted on 2026-11-04, with
   full-resolution chroma inputs, trained with the human-rating legs narrowed to TID2013 and MDID

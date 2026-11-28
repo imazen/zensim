@@ -1,0 +1,23 @@
+[package]
+name = "zensim-psy"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.93.0"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/imazen/zensim"
+description = "zenpsy-api adapter for zensim (Revision-7 ZensimProfile::A and planar lending)"
+publish = false
+
+[workspace]
+
+[features]
+default = ["avx512", "threads"]
+avx512 = ["zensim/avx512"]
+threads = ["zensim/threads"]
+legacy-models = ["zensim/legacy-models"]
+
+[dependencies]
+zensim = { path = "../zensim", default-features = false }
+zenpsy-api = { git = "https://github.com/imazen/zenpixels", rev = "d51e31fb7fbe5d2887eaed1ed8ce79b47f64312c", default-features = false, features = ["std"] }
+bytemuck = "1.25"
+enough = { version = "0.4.2", default-features = false, features = ["std"] }

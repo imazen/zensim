@@ -1147,6 +1147,25 @@ impl Zensim {
         weights: &[f64],
         scratch: Option<&mut crate::streaming::ZensimScratch>,
     ) -> ZensimResult {
+        self.compare_against_ref_into_stoppable(
+            precomputed,
+            distorted,
+            config,
+            weights,
+            scratch,
+            self.stop_ref(),
+        )
+    }
+
+    fn compare_against_ref_into_stoppable(
+        &self,
+        precomputed: &crate::streaming::PrecomputedReference,
+        distorted: &impl ImageSource,
+        config: &ZensimConfig,
+        weights: &[f64],
+        scratch: Option<&mut crate::streaming::ZensimScratch>,
+        stop: Option<&dyn enough::Stop>,
+    ) -> ZensimResult {
         let mut scratch = scratch;
         if config.revision() >= crate::feature_defs::FormulaRevision::Rev5
             && crate::fold_engine::is_fold_backable(config)
@@ -1170,7 +1189,7 @@ impl Zensim {
                         v2,
                         plan.as_ref().map(|p| p.compute.v1_pools),
                         plan.as_ref(),
-                        self.stop_ref(),
+                        stop,
                     )
                 {
                     return result;
@@ -1199,7 +1218,7 @@ impl Zensim {
             distorted,
             config,
             weights,
-            self.stop_ref(),
+            stop,
         )
     }
 
@@ -1267,6 +1286,16 @@ impl Zensim {
         distorted: &impl ImageSource,
         scratch: &mut crate::streaming::ZensimScratch,
     ) -> Result<ZensimResult, ZensimError> {
+        self.compute_with_ref_into_stoppable(precomputed, distorted, scratch, self.stop_ref())
+    }
+
+    pub(crate) fn compute_with_ref_into_stoppable(
+        &self,
+        precomputed: &crate::streaming::PrecomputedReference,
+        distorted: &impl ImageSource,
+        scratch: &mut crate::streaming::ZensimScratch,
+        stop: Option<&dyn enough::Stop>,
+    ) -> Result<ZensimResult, ZensimError> {
         let params = self.profile.params();
         if distorted.width() == 0
             || distorted.height() == 0
@@ -1276,48 +1305,37 @@ impl Zensim {
         }
         validate_ref_match(precomputed, distorted)?;
         check_within_max_pixels(distorted.width(), distorted.height(), self.max_pixels)?;
+        check_stop_ref(stop)?;
         let config = config_from_params(params, self.parallel_now());
         validate_cached_revision(precomputed, config.revision())?;
         let (ow, oh) = (distorted.width(), distorted.height());
-        // ENGINE ROUTING (fold-MT lane). `compute_with_ref` has routed to the
-        // fold since the fold-engine lane; this entry did not, so a ref LOOP —
-        // the one shape that exists to amortise work — was the one shape that
-        // could not use the fold. It routes through the same
-        // `compare_against_ref_into` and hands it `scratch`, so the fold's
-        // per-compare `V2Scratch` is reused exactly like buffered's
-        // `dst_planes`. Out-of-domain requests still degrade to the buffered
-        // walk below, byte-for-byte.
         if config.revision() >= crate::feature_defs::FormulaRevision::Rev5
             && crate::fold_engine::is_fold_backable(&config)
         {
-            // Same shared reflect-pad `compute_with_ref` applies, so the two
-            // ref entries route identically rather than differing on sub-64.
             let mut result = if needs_pyramid_pad(ow, oh, config.num_scales) {
                 let d = reflect_pad_for_scales(distorted, config.num_scales);
-                self.compare_against_ref_into(
+                self.compare_against_ref_into_stoppable(
                     precomputed,
                     &d,
                     &config,
                     params.weights,
                     Some(scratch),
+                    stop,
                 )
             } else {
-                self.compare_against_ref_into(
+                self.compare_against_ref_into_stoppable(
                     precomputed,
                     distorted,
                     &config,
                     params.weights,
                     Some(scratch),
+                    stop,
                 )
             };
+            check_stop_ref(stop)?;
             apply_mlp_scoring(&mut result, params, ow as u32, oh as u32)?;
             return Ok(result.with_profile(self.profile));
         }
-        // Pad a sub-pyramid-minimum distorted so it aligns with the (also
-        // padded) reference pyramid — the same rule `compute_with_ref`
-        // applies. Without it this entry fed a 48-wide plane to a 64-wide
-        // reference scale and tripped `scale 0 width mismatch`; scoring still
-        // uses the ORIGINAL dims (2026-08-30).
         let (stats, mean_offset) = if needs_pyramid_pad(ow, oh, config.num_scales) {
             let d = reflect_pad_for_scales(distorted, config.num_scales);
             crate::streaming::compute_multiscale_stats_streaming_with_ref_borrowed(
@@ -1326,7 +1344,7 @@ impl Zensim {
                 &mut scratch.dst_planes,
                 &config,
                 params.weights,
-                self.stop_ref(),
+                stop,
             )
         } else {
             crate::streaming::compute_multiscale_stats_streaming_with_ref_borrowed(
@@ -1335,10 +1353,10 @@ impl Zensim {
                 &mut scratch.dst_planes,
                 &config,
                 params.weights,
-                self.stop_ref(),
+                stop,
             )
         };
-        self.check_stop()?;
+        check_stop_ref(stop)?;
         let mut result = combine_scores(&stats, params.weights, &config, mean_offset);
         apply_mlp_scoring(&mut result, params, ow as u32, oh as u32)?;
         Ok(result.with_profile(self.profile))
@@ -1387,6 +1405,121 @@ impl Zensim {
             self.parallel_now(),
             config_from_params(params, self.parallel_now()).revision(),
         ))
+    }
+
+    /// Precompute reference from planar linear RGB f32 planes with independent
+    /// strides, minimal final-row backing storage (`(height - 1) * stride + width`),
+    /// and explicit [`crate::ColorPrimaries`].
+    ///
+    /// Samples beyond `width` in each row are never read, so padding may hold
+    /// arbitrary or non-finite values.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ZensimError::ImageTooSmall`] if `width < 8 || height < 8`,
+    /// [`ZensimError::InvalidStride`] if any `stride < width`,
+    /// [`ZensimError::ImageTooLarge`] if geometry exceeds `max_pixels` or overflows,
+    /// or [`ZensimError::InvalidDataLength`] if any plane is shorter than its active rows.
+    pub fn precompute_reference_linear_planes(
+        &self,
+        planes: [&[f32]; 3],
+        strides: [usize; 3],
+        width: usize,
+        height: usize,
+        primaries: crate::source::ColorPrimaries,
+    ) -> Result<crate::streaming::PrecomputedReference, ZensimError> {
+        let params = self.profile.params();
+        validate_linear_planes(planes, strides, width, height, self.max_pixels)?;
+        self.check_stop()?;
+        Ok(crate::streaming::PrecomputedReference::from_linear_planes(
+            planes,
+            strides,
+            width,
+            height,
+            primaries,
+            params.num_scales,
+            self.parallel_now(),
+            config_from_params(params, self.parallel_now()).revision(),
+        ))
+    }
+
+    /// Score planar linear RGB f32 against a precomputed reference, reusing
+    /// `scratch` across repeated iterations.
+    ///
+    /// Accepts independent per-plane strides, minimal active-row backing storage
+    /// (`(height - 1) * stride + width`), and explicit [`crate::ColorPrimaries`].
+    pub fn compute_with_ref_linear_planes_into(
+        &self,
+        precomputed: &crate::streaming::PrecomputedReference,
+        planes: [&[f32]; 3],
+        strides: [usize; 3],
+        width: usize,
+        height: usize,
+        primaries: crate::source::ColorPrimaries,
+        scratch: &mut crate::streaming::ZensimScratch,
+    ) -> Result<ZensimResult, ZensimError> {
+        self.compute_with_ref_linear_planes_into_stoppable(
+            precomputed,
+            planes,
+            strides,
+            width,
+            height,
+            primaries,
+            scratch,
+            self.stop_ref(),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn compute_with_ref_linear_planes_into_stoppable(
+        &self,
+        precomputed: &crate::streaming::PrecomputedReference,
+        planes: [&[f32]; 3],
+        strides: [usize; 3],
+        width: usize,
+        height: usize,
+        primaries: crate::source::ColorPrimaries,
+        scratch: &mut crate::streaming::ZensimScratch,
+        stop: Option<&dyn enough::Stop>,
+    ) -> Result<ZensimResult, ZensimError> {
+        validate_linear_planes(planes, strides, width, height, self.max_pixels)?;
+        if precomputed.width() != width || precomputed.height() != height {
+            return Err(ZensimError::DimensionMismatch);
+        }
+        check_stop_ref(stop)?;
+        let n = width
+            .checked_mul(height)
+            .ok_or(ZensimError::ImageTooLarge)?;
+        let mut rgba = core::mem::take(&mut scratch.rgba_buf);
+        rgba.clear();
+        if rgba.capacity() < n {
+            rgba.reserve_exact(n - rgba.len());
+        }
+        for y in 0..height {
+            let r_row = &planes[0][y * strides[0]..y * strides[0] + width];
+            let g_row = &planes[1][y * strides[1]..y * strides[1] + width];
+            let b_row = &planes[2][y * strides[2]..y * strides[2] + width];
+            for x in 0..width {
+                rgba.push([
+                    r_row[x].clamp(0.0, 1.0),
+                    g_row[x].clamp(0.0, 1.0),
+                    b_row[x].clamp(0.0, 1.0),
+                    1.0,
+                ]);
+            }
+        }
+        let image = crate::source::StridedBytes::with_alpha_mode(
+            bytemuck::cast_slice(&rgba),
+            width,
+            height,
+            width * 16,
+            crate::source::PixelFormat::LinearF32Rgba,
+            crate::source::AlphaMode::Opaque,
+        )
+        .with_color_primaries(primaries);
+        let result = self.compute_with_ref_into_stoppable(precomputed, &image, scratch, stop);
+        scratch.rgba_buf = rgba;
+        result
     }
 
     /// Like `compute`, but always computes all features regardless of
@@ -1873,6 +2006,39 @@ pub(crate) fn check_within_max_pixels(
     // through every internal allocation site.
     let padded = crate::blur::pyramid_plane_stride(width);
     crate::blur::checked_padded_plane_len(padded, height)?;
+    Ok(())
+}
+
+pub(crate) fn check_stop_ref(stop: Option<&dyn enough::Stop>) -> Result<(), ZensimError> {
+    match stop {
+        Some(s) => s.check().map_err(ZensimError::from),
+        None => Ok(()),
+    }
+}
+
+pub(crate) fn validate_linear_planes(
+    planes: [&[f32]; 3],
+    strides: [usize; 3],
+    width: usize,
+    height: usize,
+    max_pixels: Option<usize>,
+) -> Result<(), ZensimError> {
+    if width < 8 || height < 8 {
+        return Err(ZensimError::ImageTooSmall);
+    }
+    check_within_max_pixels(width, height, max_pixels)?;
+    for (plane, stride) in planes.iter().zip(strides) {
+        if stride < width {
+            return Err(ZensimError::InvalidStride);
+        }
+        let needed = (height - 1)
+            .checked_mul(stride)
+            .and_then(|n| n.checked_add(width))
+            .ok_or(ZensimError::ImageTooLarge)?;
+        if plane.len() < needed {
+            return Err(ZensimError::InvalidDataLength);
+        }
+    }
     Ok(())
 }
 
