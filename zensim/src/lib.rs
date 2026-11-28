@@ -126,21 +126,26 @@
 //!
 //! ## zenpixels support
 //!
-//! With the `zenpixels` feature, any `zenpixels::PixelSlice` or
-//! `zenpixels::PixelBuffer` can be used directly via `ZenpixelsSource`:
+//! With the `zenpixels` feature, any `zenpixels::PixelView` or
+//! `zenpixels::PixelBuf` can be used directly via `ZenpixelsSource`:
 //!
 //! ```ignore
 //! use zensim::{Zensim, ZensimProfile, ZenpixelsSource};
 //!
-//! let source = ZenpixelsSource::try_from_slice(&pixel_slice)?;
-//! let distorted = ZenpixelsSource::try_from_slice(&other_slice)?;
+//! let source = ZenpixelsSource::try_from_view(&pixel_view)?;
+//! let distorted = ZenpixelsSource::try_from_view(&other_view)?;
 //! let result = Zensim::new(ZensimProfile::codec_target()).compute(&source, &distorted)?;
 //! ```
 //!
-//! Supported: Rgb8, Rgba8, Bgra8, Rgbx8, Bgrx8, Rgba16, RgbaF32 (sRGB/BT.709/linear).
-//! Premultiplied alpha is un-premultiplied automatically. RGBX/BGRX padding bytes
-//! are treated as opaque automatically. HDR (PQ, HLG) and grayscale are rejected
-//! with `UnsupportedFormat` (zenpixels feature).
+//! Supported SDR formats: `RGB8`, `RGBA8`, `BGRA8`, `RGBX8`, `BGRX8`, `RGBA16`
+//! (sRGB transfer) and `RGBAF32` (relative linear `[0.0, 1.0]` transfer), in
+//! BT.709 / sRGB, Display P3, or BT.2020 primaries, full range, full packing,
+//! identity orientation. RGBX/BGRX padding lanes are treated as opaque
+//! automatically. `ZenpixelsSource` un-premultiplies premultiplied alpha
+//! automatically; the `zenpsy-api` adapter rejects premultiplied alpha so
+//! callers convert explicitly. HDR transfers (PQ, HLG), `DiffuseWhite` /
+//! `HdrMetadata`, BT.709 transfer, unknown primaries, grayscale, pending
+//! orientation, and narrow range are rejected explicitly.
 //!
 //! ## Input requirements
 //!
@@ -284,6 +289,11 @@ mod zenpixels_compat;
 pub use error::UnsupportedFormat;
 #[cfg(feature = "zenpixels")]
 pub use zenpixels_compat::ZenpixelsSource;
+
+#[cfg(feature = "zenpsy-api")]
+mod zenpsy_compat;
+#[cfg(feature = "zenpsy-api")]
+pub use zenpsy_compat::{PreparedZensim, ZensimEvaluation};
 
 /// Number of downscale levels. Each level halves resolution.
 /// 4 scales covers 1x, 2x, 4x, 8x — sufficient for most perceptual effects.

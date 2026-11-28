@@ -870,6 +870,106 @@ pub struct Zensim {
     stop: Option<StopHandle>,
 }
 
+/// Stack-allocated composition of two [`enough::Stop`] tokens.
+pub(crate) struct CombinedStop<'a> {
+    first: &'a dyn enough::Stop,
+    second: &'a dyn enough::Stop,
+}
+
+impl enough::Stop for CombinedStop<'_> {
+    #[inline]
+    fn check(&self) -> Result<(), enough::StopReason> {
+        self.first.check()?;
+        self.second.check()
+    }
+
+    #[inline]
+    fn may_stop(&self) -> bool {
+        self.first.may_stop() || self.second.may_stop()
+    }
+}
+
+/// Sticky wrapper around any [`enough::Stop`]: once any checkpoint observes
+/// `Err(reason)`, every subsequent `check()` returns that exact first-observed
+/// `StopReason` even if the inner token only reports failure once.
+struct LatchingStop<'a> {
+    inner: &'a dyn enough::Stop,
+    latched: std::sync::OnceLock<enough::StopReason>,
+}
+
+impl<'a> LatchingStop<'a> {
+    #[inline]
+    fn new(inner: &'a dyn enough::Stop) -> Self {
+        Self {
+            inner,
+            latched: std::sync::OnceLock::new(),
+        }
+    }
+}
+
+impl enough::Stop for LatchingStop<'_> {
+    #[inline]
+    fn check(&self) -> Result<(), enough::StopReason> {
+        if let Some(&reason) = self.latched.get() {
+            return Err(reason);
+        }
+        match self.inner.check() {
+            Ok(()) => Ok(()),
+            Err(reason) => {
+                let first = *self.latched.get_or_init(|| reason);
+                Err(first)
+            }
+        }
+    }
+
+    #[inline]
+    fn may_stop(&self) -> bool {
+        true
+    }
+}
+
+#[inline]
+pub(crate) fn check_opt_stop(stop: Option<&dyn enough::Stop>) -> Result<(), ZensimError> {
+    match stop {
+        Some(s) => s.check().map_err(ZensimError::from),
+        None => Ok(()),
+    }
+}
+
+/// Borrow the installed stop token for threading into the walkers.
+impl Zensim {
+    /// Invoke `f` with the effective stop token combining `self.stop` and an
+    /// optional per-call borrowed `extra_stop`, wrapped in [`LatchingStop`] so
+    /// the first observed `StopReason` is sticky across all subsequent checks
+    /// and rayon workers (zero heap allocation).
+    pub(crate) fn with_effective_stop<R>(
+        &self,
+        extra_stop: Option<&dyn enough::Stop>,
+        f: impl FnOnce(Option<&dyn enough::Stop>) -> R,
+    ) -> R {
+        let extra = extra_stop.filter(|s| s.may_stop());
+        match (self.stop_ref(), extra) {
+            (Some(a), Some(b)) => {
+                let both = CombinedStop {
+                    first: a,
+                    second: b,
+                };
+                let latched = LatchingStop::new(&both);
+                f(Some(&latched))
+            }
+            (Some(a), None) => {
+                let latched = LatchingStop::new(a);
+                f(Some(&latched))
+            }
+            (None, Some(b)) => {
+                let latched = LatchingStop::new(b);
+                f(Some(&latched))
+            }
+            (None, None) => f(None),
+        }
+    }
+}
+
 /// Shared cancellation token stored on [`Zensim`]. Wraps the caller's
 /// [`enough::Stop`] in an `Arc` so `Zensim` stays `Clone` (clones share
 /// the same token). Debug output elides the token (trait objects have no
@@ -1072,26 +1172,38 @@ impl Zensim {
         source: &impl ImageSource,
         distorted: &impl ImageSource,
     ) -> Result<ZensimResult, ZensimError> {
+        self.with_effective_stop(None, |stop| self.compute_with_stop(source, distorted, stop))
+    }
+
+    /// Compare source and distorted images using an already-resolved effective `stop`.
+    pub(crate) fn compute_with_stop(
+        &self,
+        source: &impl ImageSource,
+        distorted: &impl ImageSource,
+        stop: Option<&dyn enough::Stop>,
+    ) -> Result<ZensimResult, ZensimError> {
         let params = self.profile.params();
         validate_pair(source, distorted)?;
         check_within_max_pixels(source.width(), source.height(), self.max_pixels)?;
-        self.check_stop()?;
+        check_opt_stop(stop)?;
         let config = config_from_params(params, self.parallel_now());
-        let mut result = compute_with_config_inner(
+        let mut result = compute_with_config_inner_stoppable(
             source,
             distorted,
             &config,
             params.weights,
-            self.stop_ref(),
+            stop,
             self.scoring_plan(params, &config).as_ref(),
-        );
-        self.check_stop()?;
+            self.max_pixels,
+        )?;
+        check_opt_stop(stop)?;
         apply_mlp_scoring_with_codec(
             &mut result,
             params,
             source.width() as u32,
             source.height() as u32,
         )?;
+        check_opt_stop(stop)?;
         Ok(result.with_profile(self.profile))
     }
 
@@ -1104,6 +1216,17 @@ impl Zensim {
         &self,
         source: &impl ImageSource,
     ) -> Result<crate::streaming::PrecomputedReference, ZensimError> {
+        self.with_effective_stop(None, |stop| {
+            self.precompute_reference_with_stop(source, stop)
+        })
+    }
+
+    /// Pre-compute reference image data using an already-resolved effective `stop`.
+    pub(crate) fn precompute_reference_with_stop(
+        &self,
+        source: &impl ImageSource,
+        stop: Option<&dyn enough::Stop>,
+    ) -> Result<crate::streaming::PrecomputedReference, ZensimError> {
         let params = self.profile.params();
         if source.width() == 0 || source.height() == 0 {
             return Err(ZensimError::ImageTooSmall);
@@ -1111,42 +1234,30 @@ impl Zensim {
         // Sub-64px sources are reflect-padded inside `PrecomputedReference::new`
         // (matching the buffered path), so no 8px floor here.
         check_within_max_pixels(source.width(), source.height(), self.max_pixels)?;
-        Ok(crate::streaming::PrecomputedReference::new(
+        check_opt_stop(stop)?;
+        crate::streaming::PrecomputedReference::new_stoppable(
             source,
             params.num_scales,
             self.parallel_now(),
             config_from_params(params, self.parallel_now()).revision(),
-        ))
+            self.max_pixels,
+            stop,
+        )
     }
 
-    /// The engine-routed body of [`Self::compute_with_ref`]: the fold-backed
-    /// ref-cached compare when this instance asks for it AND the fold can
-    /// serve the request bit-identically, the buffered `*_with_ref` walk
-    /// otherwise. Both consume the SAME `PrecomputedReference` — the pyramid
-    /// cache is not buffered-walk state (fold-engine lane stage 3).
-    fn compare_against_ref(
-        &self,
-        precomputed: &crate::streaming::PrecomputedReference,
-        distorted: &impl ImageSource,
-        config: &ZensimConfig,
-        weights: &[f64],
-    ) -> ZensimResult {
-        self.compare_against_ref_into(precomputed, distorted, config, weights, None)
-    }
-
-    /// [`Self::compare_against_ref`] with an optional caller-owned scratch.
-    /// `None` allocates a fresh one per call (what `compute_with_ref` does on
-    /// both engines); `Some` is the ref-loop shape `compute_with_ref_into`
-    /// exposes, and is what makes the fold's ref-cache saving match buffered's
-    /// instead of being halved by a per-compare allocation (fold-MT lane).
-    fn compare_against_ref_into(
+    /// [`Self::compare_against_ref_into`] with explicit effective `stop`.
+    /// Propagates cancellation immediately so a fired stop token never enters
+    /// a non-stoppable fallback walk.
+    fn compare_against_ref_into_stoppable(
         &self,
         precomputed: &crate::streaming::PrecomputedReference,
         distorted: &impl ImageSource,
         config: &ZensimConfig,
         weights: &[f64],
         scratch: Option<&mut crate::streaming::ZensimScratch>,
-    ) -> ZensimResult {
+        stop: Option<&dyn enough::Stop>,
+    ) -> Result<ZensimResult, ZensimError> {
+        check_opt_stop(stop)?;
         let mut scratch = scratch;
         if config.revision() >= crate::feature_defs::FormulaRevision::Rev5
             && crate::fold_engine::is_fold_backable(config)
@@ -1159,48 +1270,45 @@ impl Zensim {
                     &mut owned
                 }
             };
-            if config.revision() >= crate::feature_defs::FormulaRevision::Rev5 {
-                let plan = self.scoring_plan(self.profile.params(), config);
-                if let Some(result) =
-                    crate::fold_engine::compute_fold_backed_with_ref_stoppable_plan(
-                        precomputed,
-                        distorted,
-                        config,
-                        weights,
-                        v2,
-                        plan.as_ref().map(|p| p.compute.v1_pools),
-                        plan.as_ref(),
-                        self.stop_ref(),
-                    )
-                {
-                    return result;
-                }
-            }
-            // The ref-cached walk emits the v1 layout only; a wide bake is
-            // not servable through it yet (phase 2 — registered, and the
-            // servability census reports it as such rather than silently
-            // scoring a truncated vector). Take just the pool axis.
-            let pool_mode = self
-                .scoring_plan(self.profile.params(), config)
-                .map(|p| p.compute.v1_pools);
-            if let Some(r) = crate::fold_engine::compute_fold_backed_with_ref(
+            let plan = self.scoring_plan(self.profile.params(), config);
+            if let Some(result) = crate::fold_engine::compute_fold_backed_with_ref_stoppable_plan(
                 precomputed,
                 distorted,
                 config,
                 weights,
                 v2,
-                pool_mode,
+                plan.as_ref().map(|p| p.compute.v1_pools),
+                plan.as_ref(),
+                stop,
             ) {
-                return r;
+                check_opt_stop(stop)?;
+                return Ok(result);
+            }
+            check_opt_stop(stop)?;
+            // Only enter the non-stoppable fold fallback when no stop token is active.
+            if stop.is_none() {
+                let pool_mode = plan.map(|p| p.compute.v1_pools);
+                if let Some(r) = crate::fold_engine::compute_fold_backed_with_ref(
+                    precomputed,
+                    distorted,
+                    config,
+                    weights,
+                    v2,
+                    pool_mode,
+                ) {
+                    return Ok(r);
+                }
             }
         }
-        crate::streaming::compute_zensim_streaming_with_ref(
+        let r = crate::streaming::compute_zensim_streaming_with_ref(
             precomputed,
             distorted,
             config,
             weights,
-            self.stop_ref(),
-        )
+            stop,
+        );
+        check_opt_stop(stop)?;
+        Ok(r)
     }
 
     /// Compare a distorted image against a precomputed reference.
@@ -1219,6 +1327,19 @@ impl Zensim {
         precomputed: &crate::streaming::PrecomputedReference,
         distorted: &impl ImageSource,
     ) -> Result<ZensimResult, ZensimError> {
+        self.with_effective_stop(None, |stop| {
+            self.compute_with_ref_with_stop(precomputed, distorted, stop)
+        })
+    }
+
+    /// Compare a distorted image against a precomputed reference using an
+    /// already-resolved effective `stop`.
+    pub(crate) fn compute_with_ref_with_stop(
+        &self,
+        precomputed: &crate::streaming::PrecomputedReference,
+        distorted: &impl ImageSource,
+        stop: Option<&dyn enough::Stop>,
+    ) -> Result<ZensimResult, ZensimError> {
         let params = self.profile.params();
         if distorted.width() == 0 || distorted.height() == 0 {
             return Err(ZensimError::ImageTooSmall);
@@ -1228,24 +1349,60 @@ impl Zensim {
         // built on a reflect-padded source).
         validate_ref_match(precomputed, distorted)?;
         check_within_max_pixels(distorted.width(), distorted.height(), self.max_pixels)?;
-        // The precomputed reference was built via `precompute_reference`,
-        // which already rejected HDR — so only check the distorted side
-        // here. Symmetry across the call path is preserved.
         let config = config_from_params(params, self.parallel_now());
         validate_cached_revision(precomputed, config.revision())?;
         let (ow, oh) = (distorted.width(), distorted.height());
-        // Pad a sub-64px distorted to the pyramid minimum so it aligns with the
-        // (also-padded) reference pyramid; score with the original dims. The
-        // pad is SHARED — it runs before either engine, so both see the same
-        // pixels against the same cached pyramid.
-        let mut result = if needs_pyramid_pad(ow, oh, config.num_scales) {
-            let d = reflect_pad_for_scales(distorted, config.num_scales);
-            self.compare_against_ref(precomputed, &d, &config, params.weights)
-        } else {
-            self.compare_against_ref(precomputed, distorted, &config, params.weights)
+
+        check_opt_stop(stop)?;
+        let is_identical = match precomputed.ref_source.as_ref() {
+            Some(src) => images_byte_identical_stoppable(src, distorted, stop)?,
+            None => false,
         };
-        self.check_stop()?;
+        let is_rev5_fold = config.revision() >= crate::feature_defs::FormulaRevision::Rev5
+            && crate::fold_engine::is_fold_backable(&config);
+
+        if is_identical && !is_rev5_fold {
+            let plan = self.scoring_plan(params, &config);
+            let result = identical_result_at(&config, plan.map_or(0, |p| p.walk_width()));
+            check_opt_stop(stop)?;
+            return Ok(result.with_profile(self.profile));
+        }
+
+        // Pad a sub-64px distorted to the pyramid minimum so it aligns with the
+        // (also-padded) reference pyramid; score with the original dims.
+        let mut result = if needs_pyramid_pad(ow, oh, config.num_scales) {
+            let d = reflect_pad_for_scales_stoppable(
+                distorted,
+                config.num_scales,
+                self.max_pixels,
+                stop,
+            )?;
+            self.compare_against_ref_into_stoppable(
+                precomputed,
+                &d,
+                &config,
+                params.weights,
+                None,
+                stop,
+            )?
+        } else {
+            self.compare_against_ref_into_stoppable(
+                precomputed,
+                distorted,
+                &config,
+                params.weights,
+                None,
+                stop,
+            )?
+        };
+        check_opt_stop(stop)?;
+        if is_identical {
+            result.score = 100.0;
+            result.raw_distance = 0.0;
+            result = result.mark_identical();
+        }
         apply_mlp_scoring(&mut result, params, ow as u32, oh as u32)?;
+        check_opt_stop(stop)?;
         Ok(result.with_profile(self.profile))
     }
 
@@ -1267,11 +1424,22 @@ impl Zensim {
         distorted: &impl ImageSource,
         scratch: &mut crate::streaming::ZensimScratch,
     ) -> Result<ZensimResult, ZensimError> {
+        self.with_effective_stop(None, |stop| {
+            self.compute_with_ref_into_with_stop(precomputed, distorted, scratch, stop)
+        })
+    }
+
+    /// Compare against a precomputed reference into caller scratch using an
+    /// already-resolved effective `stop`.
+    pub(crate) fn compute_with_ref_into_with_stop(
+        &self,
+        precomputed: &crate::streaming::PrecomputedReference,
+        distorted: &impl ImageSource,
+        scratch: &mut crate::streaming::ZensimScratch,
+        stop: Option<&dyn enough::Stop>,
+    ) -> Result<ZensimResult, ZensimError> {
         let params = self.profile.params();
-        if distorted.width() == 0
-            || distorted.height() == 0
-            || (distorted.width() < 8 || distorted.height() < 8)
-        {
+        if distorted.width() == 0 || distorted.height() == 0 {
             return Err(ZensimError::ImageTooSmall);
         }
         validate_ref_match(precomputed, distorted)?;
@@ -1279,54 +1447,73 @@ impl Zensim {
         let config = config_from_params(params, self.parallel_now());
         validate_cached_revision(precomputed, config.revision())?;
         let (ow, oh) = (distorted.width(), distorted.height());
-        // ENGINE ROUTING (fold-MT lane). `compute_with_ref` has routed to the
-        // fold since the fold-engine lane; this entry did not, so a ref LOOP —
-        // the one shape that exists to amortise work — was the one shape that
-        // could not use the fold. It routes through the same
-        // `compare_against_ref_into` and hands it `scratch`, so the fold's
-        // per-compare `V2Scratch` is reused exactly like buffered's
-        // `dst_planes`. Out-of-domain requests still degrade to the buffered
-        // walk below, byte-for-byte.
-        if config.revision() >= crate::feature_defs::FormulaRevision::Rev5
-            && crate::fold_engine::is_fold_backable(&config)
-        {
-            // Same shared reflect-pad `compute_with_ref` applies, so the two
-            // ref entries route identically rather than differing on sub-64.
+
+        check_opt_stop(stop)?;
+        let is_identical = match precomputed.ref_source.as_ref() {
+            Some(src) => images_byte_identical_stoppable(src, distorted, stop)?,
+            None => false,
+        };
+        let is_rev5_fold = config.revision() >= crate::feature_defs::FormulaRevision::Rev5
+            && crate::fold_engine::is_fold_backable(&config);
+
+        if is_rev5_fold {
             let mut result = if needs_pyramid_pad(ow, oh, config.num_scales) {
-                let d = reflect_pad_for_scales(distorted, config.num_scales);
-                self.compare_against_ref_into(
+                let d = reflect_pad_for_scales_stoppable(
+                    distorted,
+                    config.num_scales,
+                    self.max_pixels,
+                    stop,
+                )?;
+                self.compare_against_ref_into_stoppable(
                     precomputed,
                     &d,
                     &config,
                     params.weights,
                     Some(scratch),
-                )
+                    stop,
+                )?
             } else {
-                self.compare_against_ref_into(
+                self.compare_against_ref_into_stoppable(
                     precomputed,
                     distorted,
                     &config,
                     params.weights,
                     Some(scratch),
-                )
+                    stop,
+                )?
             };
+            check_opt_stop(stop)?;
+            if is_identical {
+                result.score = 100.0;
+                result.raw_distance = 0.0;
+                result = result.mark_identical();
+            }
             apply_mlp_scoring(&mut result, params, ow as u32, oh as u32)?;
+            check_opt_stop(stop)?;
             return Ok(result.with_profile(self.profile));
         }
-        // Pad a sub-pyramid-minimum distorted so it aligns with the (also
-        // padded) reference pyramid — the same rule `compute_with_ref`
-        // applies. Without it this entry fed a 48-wide plane to a 64-wide
-        // reference scale and tripped `scale 0 width mismatch`; scoring still
-        // uses the ORIGINAL dims (2026-08-30).
+
+        if is_identical {
+            let plan = self.scoring_plan(params, &config);
+            let result = identical_result_at(&config, plan.map_or(0, |p| p.walk_width()));
+            check_opt_stop(stop)?;
+            return Ok(result.with_profile(self.profile));
+        }
+
         let (stats, mean_offset) = if needs_pyramid_pad(ow, oh, config.num_scales) {
-            let d = reflect_pad_for_scales(distorted, config.num_scales);
+            let d = reflect_pad_for_scales_stoppable(
+                distorted,
+                config.num_scales,
+                self.max_pixels,
+                stop,
+            )?;
             crate::streaming::compute_multiscale_stats_streaming_with_ref_borrowed(
                 precomputed,
                 &d,
                 &mut scratch.dst_planes,
                 &config,
                 params.weights,
-                self.stop_ref(),
+                stop,
             )
         } else {
             crate::streaming::compute_multiscale_stats_streaming_with_ref_borrowed(
@@ -1335,12 +1522,13 @@ impl Zensim {
                 &mut scratch.dst_planes,
                 &config,
                 params.weights,
-                self.stop_ref(),
+                stop,
             )
         };
-        self.check_stop()?;
+        check_opt_stop(stop)?;
         let mut result = combine_scores(&stats, params.weights, &config, mean_offset);
         apply_mlp_scoring(&mut result, params, ow as u32, oh as u32)?;
+        check_opt_stop(stop)?;
         Ok(result.with_profile(self.profile))
     }
 
@@ -1876,88 +2064,193 @@ pub(crate) fn check_within_max_pixels(
     Ok(())
 }
 
-/// Check if source and distorted images have byte-identical pixel data
-/// and matching color interpretation (format + primaries).
+/// Check if source and distorted images have perceptually identical pixel data
+/// and matching color interpretation (format + primaries + effective alpha).
+///
+/// Correctly handles:
+/// - Both `Opaque` (including `RGBx`/`BGRx` padding lanes): ignores the 4th lane.
+/// - Both `Straight`: skips RGB differences where both pixels have `A == 0`.
+/// - Mixed `Opaque` vs `Straight`: identical only if RGB matches AND every
+///   straight alpha sample is fully opaque (`255` / `65535` / `1.0`).
 pub(crate) fn images_byte_identical(
     source: &impl ImageSource,
     distorted: &impl ImageSource,
 ) -> bool {
+    images_byte_identical_stoppable(source, distorted, None).unwrap_or(false)
+}
+
+/// Cancellable variant of [`images_byte_identical`], polling `stop` every 64 rows.
+pub(crate) fn images_byte_identical_stoppable(
+    source: &impl ImageSource,
+    distorted: &impl ImageSource,
+    stop: Option<&dyn enough::Stop>,
+) -> Result<bool, ZensimError> {
     use crate::source::{AlphaMode, PixelFormat};
 
+    check_opt_stop(stop)?;
     let (w, h) = (source.width(), source.height());
     if w != distorted.width() || h != distorted.height() {
-        return false;
+        return Ok(false);
     }
     if source.pixel_format() != distorted.pixel_format() {
-        return false;
+        return Ok(false);
     }
     // Different primaries mean different perceptual colors even with identical bytes.
     if source.color_primaries() != distorted.color_primaries() {
-        return false;
+        return Ok(false);
     }
     let fmt = source.pixel_format();
     let bpp = fmt.bytes_per_pixel();
     let row_len = w * bpp;
 
-    // For RGBA formats with non-opaque alpha: pixels where both have A=0
-    // composite to the same background, so they're visually identical
-    // regardless of their RGB values.
-    let alpha_aware = fmt.has_alpha()
-        && !matches!(source.alpha_mode(), AlphaMode::Opaque)
-        && !matches!(distorted.alpha_mode(), AlphaMode::Opaque);
+    let src_opaque = !fmt.has_alpha() || matches!(source.alpha_mode(), AlphaMode::Opaque);
+    let dst_opaque = !fmt.has_alpha() || matches!(distorted.alpha_mode(), AlphaMode::Opaque);
 
     for y in 0..h {
+        if y & 63 == 0 {
+            check_opt_stop(stop)?;
+        }
         let sr = source.row_bytes(y);
         let dr = distorted.row_bytes(y);
-        if sr[..row_len] == dr[..row_len] {
-            continue; // fast path: row is byte-identical
-        }
-        if !alpha_aware {
-            return false;
-        }
-        // Slow path: check pixel-by-pixel, skipping A=0 pairs
-        match fmt {
-            PixelFormat::Srgb8Rgba | PixelFormat::Srgb8Bgra => {
-                for x in 0..w {
-                    let o = x * 4;
-                    if sr[o + 3] == 0 && dr[o + 3] == 0 {
-                        continue;
-                    }
-                    if sr[o..o + 4] != dr[o..o + 4] {
-                        return false;
-                    }
+
+        match (src_opaque, dst_opaque) {
+            // 3-channel RGB: exact row byte equality.
+            (true, true) if !fmt.has_alpha() => {
+                if sr[..row_len] != dr[..row_len] {
+                    return Ok(false);
                 }
             }
-            PixelFormat::Srgb16Rgba => {
-                for x in 0..w {
-                    let o = x * 8;
-                    let sa = u16::from_ne_bytes([sr[o + 6], sr[o + 7]]);
-                    let da = u16::from_ne_bytes([dr[o + 6], dr[o + 7]]);
-                    if sa == 0 && da == 0 {
-                        continue;
+            // Both 4-channel Opaque (RGBx / BGRx / Opaque RGBA): ignore 4th lane.
+            (true, true) => {
+                if sr[..row_len] == dr[..row_len] {
+                    continue;
+                }
+                match fmt {
+                    PixelFormat::Srgb8Rgba | PixelFormat::Srgb8Bgra => {
+                        for x in 0..w {
+                            let o = x * 4;
+                            if sr[o..o + 3] != dr[o..o + 3] {
+                                return Ok(false);
+                            }
+                        }
                     }
-                    if sr[o..o + 8] != dr[o..o + 8] {
-                        return false;
+                    PixelFormat::Srgb16Rgba => {
+                        for x in 0..w {
+                            let o = x * 8;
+                            if sr[o..o + 6] != dr[o..o + 6] {
+                                return Ok(false);
+                            }
+                        }
                     }
+                    PixelFormat::LinearF32Rgba => {
+                        for x in 0..w {
+                            let o = x * 16;
+                            if sr[o..o + 12] != dr[o..o + 12] {
+                                return Ok(false);
+                            }
+                        }
+                    }
+                    _ => return Ok(false),
                 }
             }
-            PixelFormat::LinearF32Rgba => {
-                for x in 0..w {
-                    let o = x * 16;
-                    let sa = f32::from_ne_bytes([sr[o + 12], sr[o + 13], sr[o + 14], sr[o + 15]]);
-                    let da = f32::from_ne_bytes([dr[o + 12], dr[o + 13], dr[o + 14], dr[o + 15]]);
-                    if sa <= 0.0 && da <= 0.0 {
-                        continue;
+            // Both Straight: identical row fast-path, else skip A==0 pairs.
+            (false, false) => {
+                if sr[..row_len] == dr[..row_len] {
+                    continue;
+                }
+                match fmt {
+                    PixelFormat::Srgb8Rgba | PixelFormat::Srgb8Bgra => {
+                        for x in 0..w {
+                            let o = x * 4;
+                            if sr[o + 3] == 0 && dr[o + 3] == 0 {
+                                continue;
+                            }
+                            if sr[o..o + 4] != dr[o..o + 4] {
+                                return Ok(false);
+                            }
+                        }
                     }
-                    if sr[o..o + 16] != dr[o..o + 16] {
-                        return false;
+                    PixelFormat::Srgb16Rgba => {
+                        for x in 0..w {
+                            let o = x * 8;
+                            let sa = u16::from_ne_bytes([sr[o + 6], sr[o + 7]]);
+                            let da = u16::from_ne_bytes([dr[o + 6], dr[o + 7]]);
+                            if sa == 0 && da == 0 {
+                                continue;
+                            }
+                            if sr[o..o + 8] != dr[o..o + 8] {
+                                return Ok(false);
+                            }
+                        }
                     }
+                    PixelFormat::LinearF32Rgba => {
+                        for x in 0..w {
+                            let o = x * 16;
+                            let sa = f32::from_ne_bytes([
+                                sr[o + 12],
+                                sr[o + 13],
+                                sr[o + 14],
+                                sr[o + 15],
+                            ]);
+                            let da = f32::from_ne_bytes([
+                                dr[o + 12],
+                                dr[o + 13],
+                                dr[o + 14],
+                                dr[o + 15],
+                            ]);
+                            if sa <= 0.0 && da <= 0.0 {
+                                continue;
+                            }
+                            if sr[o..o + 16] != dr[o..o + 16] {
+                                return Ok(false);
+                            }
+                        }
+                    }
+                    _ => return Ok(false),
                 }
             }
-            _ => return false,
+            // Mixed Opaque vs Straight: identical iff RGB matches and the straight side has full alpha.
+            (true, false) | (false, true) => {
+                let straight_row = if src_opaque { dr } else { sr };
+                match fmt {
+                    PixelFormat::Srgb8Rgba | PixelFormat::Srgb8Bgra => {
+                        for x in 0..w {
+                            let o = x * 4;
+                            if straight_row[o + 3] != 255 || sr[o..o + 3] != dr[o..o + 3] {
+                                return Ok(false);
+                            }
+                        }
+                    }
+                    PixelFormat::Srgb16Rgba => {
+                        for x in 0..w {
+                            let o = x * 8;
+                            let a = u16::from_ne_bytes([straight_row[o + 6], straight_row[o + 7]]);
+                            if a != 65535 || sr[o..o + 6] != dr[o..o + 6] {
+                                return Ok(false);
+                            }
+                        }
+                    }
+                    PixelFormat::LinearF32Rgba => {
+                        for x in 0..w {
+                            let o = x * 16;
+                            let a = f32::from_ne_bytes([
+                                straight_row[o + 12],
+                                straight_row[o + 13],
+                                straight_row[o + 14],
+                                straight_row[o + 15],
+                            ]);
+                            if a != 1.0 || sr[o..o + 12] != dr[o..o + 12] {
+                                return Ok(false);
+                            }
+                        }
+                    }
+                    _ => return Ok(false),
+                }
+            }
         }
     }
-    true
+    check_opt_stop(stop)?;
+    Ok(true)
 }
 
 /// Minimum per-dimension size for the full 4-scale pyramid (8·2³ = 64).
@@ -2038,6 +2331,56 @@ impl ImageSource for OwnedImage {
     }
 }
 
+fn fallible_zeroed_image_bytes(
+    width: usize,
+    height: usize,
+    bpp: usize,
+    max_pixels: Option<usize>,
+) -> Result<(Vec<u8>, usize), ZensimError> {
+    check_within_max_pixels(width, height, max_pixels)?;
+    let row_len = width.checked_mul(bpp).ok_or(ZensimError::ImageTooLarge)?;
+    let byte_len = row_len
+        .checked_mul(height)
+        .ok_or(ZensimError::ImageTooLarge)?;
+    let mut data = Vec::new();
+    data.try_reserve_exact(byte_len)
+        .map_err(|_| ZensimError::ImageTooLarge)?;
+    data.resize(byte_len, 0u8);
+    Ok((data, row_len))
+}
+
+impl OwnedImage {
+    /// Capture an owned tightly-packed copy of `src`'s active rows and
+    /// interpretation with checked bounds, fallible allocation, and stop polling.
+    pub(crate) fn from_source_stoppable(
+        src: &impl ImageSource,
+        max_pixels: Option<usize>,
+        stop: Option<&dyn enough::Stop>,
+    ) -> Result<Self, ZensimError> {
+        check_opt_stop(stop)?;
+        let (w, h) = (src.width(), src.height());
+        let bpp = src.pixel_format().bytes_per_pixel();
+        let (mut data, row_len) = fallible_zeroed_image_bytes(w, h, bpp, max_pixels)?;
+        for y in 0..h {
+            if y & 63 == 0 {
+                check_opt_stop(stop)?;
+            }
+            let src_row = src.row_bytes(y);
+            let dst_start = y * row_len;
+            data[dst_start..dst_start + row_len].copy_from_slice(&src_row[..row_len]);
+        }
+        check_opt_stop(stop)?;
+        Ok(Self {
+            data,
+            width: w,
+            height: h,
+            format: src.pixel_format(),
+            alpha: src.alpha_mode(),
+            primaries: src.color_primaries(),
+        })
+    }
+}
+
 /// reflect-101 index map (mirror without repeating the edge); `n == 1` → 0.
 #[inline]
 pub(crate) fn reflect_index(i: usize, n: usize) -> usize {
@@ -2053,13 +2396,51 @@ pub(crate) fn reflect_index(i: usize, n: usize) -> usize {
 }
 
 /// Reflect(mirror)-pad `src` up to at least [`MIN_PYRAMID_DIM`] in each dim.
+#[cfg_attr(not(feature = "training"), allow(dead_code))]
 pub(crate) fn reflect_pad_to_min(src: &impl ImageSource) -> OwnedImage {
     reflect_pad_for_scales(src, crate::NUM_SCALES)
 }
 
 /// Reflect(mirror)-pad `src` up to [`min_pyramid_dim_for_scales`] in each dim.
+#[cfg_attr(not(feature = "training"), allow(dead_code))]
 pub(crate) fn reflect_pad_for_scales(src: &impl ImageSource, num_scales: usize) -> OwnedImage {
     reflect_pad_to_size(src, min_pyramid_dim_for_scales(num_scales))
+}
+
+/// Cancellable, checked, fallible variant of [`reflect_pad_for_scales`].
+pub(crate) fn reflect_pad_for_scales_stoppable(
+    src: &impl ImageSource,
+    num_scales: usize,
+    max_pixels: Option<usize>,
+    stop: Option<&dyn enough::Stop>,
+) -> Result<OwnedImage, ZensimError> {
+    check_opt_stop(stop)?;
+    let min_dim = min_pyramid_dim_for_scales(num_scales);
+    let (w, h) = (src.width(), src.height());
+    let bpp = src.pixel_format().bytes_per_pixel();
+    let (bw, bh) = (w.max(min_dim), h.max(min_dim));
+    let (mut data, row_len) = fallible_zeroed_image_bytes(bw, bh, bpp, max_pixels)?;
+    for y in 0..bh {
+        if y & 63 == 0 {
+            check_opt_stop(stop)?;
+        }
+        let srow = src.row_bytes(reflect_index(y, h));
+        let row_dst = y * row_len;
+        for x in 0..bw {
+            let sx = reflect_index(x, w) * bpp;
+            let dx = row_dst + x * bpp;
+            data[dx..dx + bpp].copy_from_slice(&srow[sx..sx + bpp]);
+        }
+    }
+    check_opt_stop(stop)?;
+    Ok(OwnedImage {
+        data,
+        width: bw,
+        height: bh,
+        format: src.pixel_format(),
+        alpha: src.alpha_mode(),
+        primaries: src.color_primaries(),
+    })
 }
 
 pub(crate) fn reflect_pad_to_size(src: &impl ImageSource, min_dim: usize) -> OwnedImage {
@@ -2088,22 +2469,15 @@ pub(crate) fn reflect_pad_to_size(src: &impl ImageSource, min_dim: usize) -> Own
 /// **The shared front of every SDR scoring entry.** The reflect-pad and the
 /// byte-identical short-circuit run BEFORE either walk, so both walks see
 /// exactly the same pixels and the same identical-pair payload.
+#[cfg_attr(not(feature = "training"), allow(dead_code))]
 fn compute_with_config_inner(
     source: &impl ImageSource,
     distorted: &impl ImageSource,
     config: &ZensimConfig,
     weights: &[f64],
     stop: Option<&dyn enough::Stop>,
-    // The serving plan, resolved by the CALLER (only `Zensim` knows the
-    // profile's bakes). `None` = today's unconditional behaviour.
-    // Deliberately a resolved plan rather than a flag: the decision belongs
-    // to `fold_engine::score_plan`, and passing the answer keeps this shared
-    // front ignorant of bakes.
     plan: Option<&crate::feature_plan::Plan>,
 ) -> ZensimResult {
-    // Sub-64px inputs can't form the 4-scale pyramid. Reflect-pad both sides
-    // to the pyramid minimum so every metric/bake gets 4 genuinely-computed
-    // scales. NO-OP at ≥ 64px in both dims (the common path is untouched).
     let (w, h) = (source.width(), source.height());
     if needs_pyramid_pad(w, h, config.num_scales) {
         let s = reflect_pad_for_scales(source, config.num_scales);
@@ -2113,6 +2487,98 @@ fn compute_with_config_inner(
     compute_with_config_core(source, distorted, config, weights, stop, plan)
 }
 
+/// Checked, fallible, cancellable front of `Zensim::compute*`.
+fn compute_with_config_inner_stoppable(
+    source: &impl ImageSource,
+    distorted: &impl ImageSource,
+    config: &ZensimConfig,
+    weights: &[f64],
+    stop: Option<&dyn enough::Stop>,
+    plan: Option<&crate::feature_plan::Plan>,
+    max_pixels: Option<usize>,
+) -> Result<ZensimResult, ZensimError> {
+    check_opt_stop(stop)?;
+    let (w, h) = (source.width(), source.height());
+    if needs_pyramid_pad(w, h, config.num_scales) {
+        let s = reflect_pad_for_scales_stoppable(source, config.num_scales, max_pixels, stop)?;
+        let d = reflect_pad_for_scales_stoppable(distorted, config.num_scales, max_pixels, stop)?;
+        return compute_with_config_core_stoppable(&s, &d, config, weights, stop, plan);
+    }
+    compute_with_config_core_stoppable(source, distorted, config, weights, stop, plan)
+}
+
+fn compute_with_config_core_stoppable(
+    source: &impl ImageSource,
+    distorted: &impl ImageSource,
+    config: &ZensimConfig,
+    weights: &[f64],
+    stop: Option<&dyn enough::Stop>,
+    plan: Option<&crate::feature_plan::Plan>,
+) -> Result<ZensimResult, ZensimError> {
+    check_opt_stop(stop)?;
+    if config.revision() >= crate::feature_defs::FormulaRevision::Rev5
+        && crate::fold_engine::is_fold_backable(config)
+    {
+        let mut scratch = crate::feature_v2::V2Scratch::new();
+        match crate::fold_engine::compute_fold_backed_stoppable(
+            source,
+            distorted,
+            config,
+            weights,
+            &mut scratch,
+            plan,
+            stop,
+        ) {
+            Ok(mut result) => {
+                check_opt_stop(stop)?;
+                if images_byte_identical_stoppable(source, distorted, stop)? {
+                    result.score = 100.0;
+                    result.raw_distance = 0.0;
+                    result = result.mark_identical();
+                }
+                return Ok(result);
+            }
+            Err(ZensimError::Cancelled { reason }) => {
+                return Err(ZensimError::Cancelled { reason });
+            }
+            Err(_) => {
+                check_opt_stop(stop)?;
+            }
+        }
+    }
+
+    if images_byte_identical_stoppable(source, distorted, stop)? {
+        return Ok(identical_result_at(
+            config,
+            plan.map_or(0, |p| p.walk_width()),
+        ));
+    }
+
+    let plan_needs_fold =
+        plan.is_some_and(|p| p.walk_width() > crate::fold_engine::v1_feature_width(config));
+    if plan_needs_fold && stop.is_none() && crate::fold_engine::is_fold_backable(config) {
+        let mut scratch = crate::feature_v2::V2Scratch::new();
+        if let Ok(r) = crate::fold_engine::compute_fold_backed_stoppable(
+            source,
+            distorted,
+            config,
+            weights,
+            &mut scratch,
+            plan,
+            stop,
+        ) {
+            return Ok(r);
+        }
+    }
+
+    let r = crate::streaming::compute_zensim_streaming_stoppable(
+        source, distorted, config, weights, stop,
+    );
+    check_opt_stop(stop)?;
+    Ok(r)
+}
+
+#[cfg_attr(not(feature = "training"), allow(dead_code))]
 fn compute_with_config_core(
     source: &impl ImageSource,
     distorted: &impl ImageSource,

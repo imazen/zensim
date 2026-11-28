@@ -909,8 +909,40 @@ pub(crate) fn convert_source_to_xyb_into(
     parallel: bool,
     revision: crate::feature_defs::FormulaRevision,
 ) {
+    let _ = convert_source_to_xyb_into_stoppable(
+        source,
+        planes,
+        padded_width,
+        parallel,
+        revision,
+        None,
+    );
+}
+
+/// Cancellable variant of [`convert_source_to_xyb_into`].
+pub(crate) fn convert_source_to_xyb_into_stoppable(
+    source: &impl ImageSource,
+    planes: &mut [Vec<f32>; 3],
+    padded_width: usize,
+    parallel: bool,
+    revision: crate::feature_defs::FormulaRevision,
+    stop: Option<&dyn enough::Stop>,
+) -> Result<(), crate::ZensimError> {
+    crate::metric::check_opt_stop(stop)?;
     let [ref mut p0, ref mut p1, ref mut p2] = *planes;
-    convert_source_to_xyb_into_slices(source, p0, p1, p2, padded_width, parallel, 0, revision);
+    convert_source_to_xyb_into_slices_chunked_stoppable(
+        source,
+        p0,
+        p1,
+        p2,
+        padded_width,
+        parallel,
+        0,
+        DEFAULT_CONVERT_CHUNK_ROWS,
+        revision,
+        stop,
+    )?;
+    crate::metric::check_opt_stop(stop)
 }
 
 /// Slice-target core of [`convert_source_to_xyb_into`]: writes the XYB
@@ -981,11 +1013,39 @@ pub(crate) fn convert_source_to_xyb_into_slices_chunked(
     p1: &mut [f32],
     p2: &mut [f32],
     padded_width: usize,
-    #[allow(unused_variables)] parallel: bool,
+    parallel: bool,
     abs_row_offset: usize,
     chunk_rows: usize,
     revision: crate::feature_defs::FormulaRevision,
 ) {
+    let _ = convert_source_to_xyb_into_slices_chunked_stoppable(
+        source,
+        p0,
+        p1,
+        p2,
+        padded_width,
+        parallel,
+        abs_row_offset,
+        chunk_rows,
+        revision,
+        None,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn convert_source_to_xyb_into_slices_chunked_stoppable(
+    source: &impl ImageSource,
+    p0: &mut [f32],
+    p1: &mut [f32],
+    p2: &mut [f32],
+    padded_width: usize,
+    #[allow(unused_variables)] parallel: bool,
+    abs_row_offset: usize,
+    chunk_rows: usize,
+    revision: crate::feature_defs::FormulaRevision,
+    stop: Option<&dyn enough::Stop>,
+) -> Result<(), crate::ZensimError> {
+    crate::metric::check_opt_stop(stop)?;
     let width = source.width();
     let height = source.height();
 
@@ -1000,6 +1060,9 @@ pub(crate) fn convert_source_to_xyb_into_slices_chunked(
         && source.color_primaries() == ColorPrimaries::Srgb
     {
         for y in 0..height {
+            if y & 63 == 0 {
+                crate::metric::check_opt_stop(stop)?;
+            }
             let row: &[[u8; 3]] = bytemuck::cast_slice(&source.row_bytes(y)[..width * 3]);
             let offset = y * width;
             crate::color::srgb_to_positive_xyb_planar_into_at_revision(
@@ -1010,7 +1073,7 @@ pub(crate) fn convert_source_to_xyb_into_slices_chunked(
                 revision,
             );
         }
-        return;
+        return crate::metric::check_opt_stop(stop);
     }
 
     let chunk_rows = chunk_rows.max(1);
@@ -1040,6 +1103,9 @@ pub(crate) fn convert_source_to_xyb_into_slices_chunked(
     #[allow(clippy::type_complexity)]
     let process_chunk =
         |(chunk_idx, ((c0, c1), c2)): (usize, ((&mut [f32], &mut [f32]), &mut [f32]))| {
+            if stop.is_some_and(|s| s.check().is_err()) {
+                return;
+            }
             let row_start = chunk_idx * chunk_rows;
             let row_end = (row_start + chunk_rows).min(height);
             let rows = row_end - row_start;
@@ -1329,6 +1395,7 @@ pub(crate) fn convert_source_to_xyb_into_slices_chunked(
             .enumerate()
             .for_each(|args| process_chunk(args));
     }
+    crate::metric::check_opt_stop(stop)
 }
 
 /// Process one channel of one strip: blur, extract inner rows, accumulate features.
@@ -2005,6 +2072,10 @@ pub struct PrecomputedReference {
     pub(crate) ref_width: usize,
     /// Reference image height in pixels.
     pub(crate) ref_height: usize,
+    /// Exact active reference pixels and interpretation, retained when built
+    /// from an [`ImageSource`] so warm comparisons reproduce cold `compute`'s
+    /// exact byte-identical `100.0` short-circuit bit-for-bit.
+    pub(crate) ref_source: Option<crate::metric::OwnedImage>,
 }
 
 impl PrecomputedReference {
@@ -2025,49 +2096,78 @@ impl PrecomputedReference {
         self.ref_height
     }
 
+    #[cfg_attr(not(feature = "training"), allow(dead_code))]
     pub(crate) fn new(
         source: &impl ImageSource,
         num_scales: usize,
         parallel: bool,
         revision: crate::feature_defs::FormulaRevision,
     ) -> Self {
+        Self::new_stoppable(source, num_scales, parallel, revision, None, None)
+            .expect("unstoppable precompute cannot cancel")
+    }
+
+    pub(crate) fn new_stoppable(
+        source: &impl ImageSource,
+        num_scales: usize,
+        parallel: bool,
+        revision: crate::feature_defs::FormulaRevision,
+        max_pixels: Option<usize>,
+        stop: Option<&dyn enough::Stop>,
+    ) -> Result<Self, crate::ZensimError> {
+        crate::metric::check_opt_stop(stop)?;
         // Sub-64px sources can't form the 4-scale pyramid; reflect-pad to the
         // minimum (matching the buffered `compute_with_config_inner` path) so the
         // reference holds 4 genuinely-computed scales. The contract dims
         // (`ref_width`/`ref_height`) stay the ORIGINAL size so `compute_with_ref*`
         // still validates the distorted image against the caller's dimensions.
+        let ref_source =
+            crate::metric::OwnedImage::from_source_stoppable(source, max_pixels, stop)?;
         let (orig_w, orig_h) = (source.width(), source.height());
-        if crate::metric::needs_pyramid_pad(orig_w, orig_h, num_scales) {
-            let padded = crate::metric::reflect_pad_for_scales(source, num_scales);
-            let mut r = Self::new_inner(&padded, num_scales, parallel, revision);
+        let mut r = if crate::metric::needs_pyramid_pad(orig_w, orig_h, num_scales) {
+            let padded = crate::metric::reflect_pad_for_scales_stoppable(
+                source, num_scales, max_pixels, stop,
+            )?;
+            let mut r = Self::new_inner_stoppable(&padded, num_scales, parallel, revision, stop)?;
             r.ref_width = orig_w;
             r.ref_height = orig_h;
             r
         } else {
-            Self::new_inner(source, num_scales, parallel, revision)
-        }
+            Self::new_inner_stoppable(source, num_scales, parallel, revision, stop)?
+        };
+        r.ref_source = Some(ref_source);
+        Ok(r)
     }
 
-    fn new_inner(
+    fn new_inner_stoppable(
         source: &impl ImageSource,
         num_scales: usize,
         parallel: bool,
         revision: crate::feature_defs::FormulaRevision,
-    ) -> Self {
+        stop: Option<&dyn enough::Stop>,
+    ) -> Result<Self, crate::ZensimError> {
         let width = source.width();
         let height = source.height();
         let padded_width = pyramid_plane_stride(width);
-        Self::build_from_dims(
+        let r = Self::build_from_dims_stoppable(
             num_scales,
             padded_width,
             height,
             parallel,
             revision,
+            stop,
             |scale0| {
-                convert_source_to_xyb_into(source, scale0, padded_width, parallel, revision);
+                convert_source_to_xyb_into_stoppable(
+                    source,
+                    scale0,
+                    padded_width,
+                    parallel,
+                    revision,
+                    stop,
+                )
             },
-        )
-        .with_ref_dims(width, height)
+        )?;
+        Ok(r.with_ref_dims(width, height))
     }
 
     /// Allocate scale buffers up front and fill them via `fill_scale0`, then
@@ -2078,10 +2178,35 @@ impl PrecomputedReference {
         num_scales: usize,
         padded_width: usize,
         height: usize,
-        #[allow(unused_variables)] parallel: bool,
+        parallel: bool,
         revision: crate::feature_defs::FormulaRevision,
         fill_scale0: impl FnOnce(&mut [Vec<f32>; 3]),
     ) -> Self {
+        Self::build_from_dims_stoppable(
+            num_scales,
+            padded_width,
+            height,
+            parallel,
+            revision,
+            None,
+            |s0| {
+                fill_scale0(s0);
+                Ok(())
+            },
+        )
+        .expect("unstoppable pyramid build cannot cancel")
+    }
+
+    fn build_from_dims_stoppable(
+        num_scales: usize,
+        padded_width: usize,
+        height: usize,
+        #[allow(unused_variables)] parallel: bool,
+        revision: crate::feature_defs::FormulaRevision,
+        stop: Option<&dyn enough::Stop>,
+        fill_scale0: impl FnOnce(&mut [Vec<f32>; 3]) -> Result<(), crate::ZensimError>,
+    ) -> Result<Self, crate::ZensimError> {
+        crate::metric::check_opt_stop(stop)?;
         // Compute scale dimensions up front (powers-of-2 down)
         let mut dims = Vec::with_capacity(num_scales);
         let mut w = padded_width;
@@ -2107,11 +2232,13 @@ impl PrecomputedReference {
             .collect();
 
         // Fill scale 0 directly from the caller (no working buffer).
-        fill_scale0(&mut scales[0].0);
+        fill_scale0(&mut scales[0].0)?;
+        crate::metric::check_opt_stop(stop)?;
 
         // Downscale scale[i-1] -> scale[i] out of place. We need the previous
         // scale's data to remain owned, so use the _into variant.
         for i in 1..scales.len() {
+            crate::metric::check_opt_stop(stop)?;
             let prev_w = scales[i - 1].1;
             let (new_w, new_h) = (scales[i].1, scales[i].2);
             let (lo, hi) = scales.split_at_mut(i);
@@ -2143,13 +2270,15 @@ impl PrecomputedReference {
                 crate::blur::downscale_2x_into(&src[2], prev_w, d2, new_w, new_h);
             }
         }
+        crate::metric::check_opt_stop(stop)?;
 
-        Self {
+        Ok(Self {
             formula_revision: revision,
             scales,
             ref_width: 0,
             ref_height: 0,
-        }
+            ref_source: None,
+        })
     }
 
     /// Set the unpadded reference dimensions on a freshly-built pyramid.
@@ -2477,13 +2606,18 @@ pub(crate) fn compute_multiscale_accums_streaming_with_ref_borrowed<R: MultiScal
         }
     }
 
-    convert_source_to_xyb_into(
+    if convert_source_to_xyb_into_stoppable(
         distorted,
         dst_planes,
         padded_width,
         parallel,
         config.revision(),
-    );
+        stop,
+    )
+    .is_err()
+    {
+        return (Vec::new(), [0.0; 3], 0);
+    }
 
     // Borrow scale-0 planes from the abstract reference (owned or view).
     let (src_planes_s0, _, _) = precomputed.scale(0);
@@ -2622,16 +2756,21 @@ pub(crate) fn compute_zensim_streaming_with_ref_and_diffmap(
     scale_blend_weights: &[f32],
     guided_redistribution: bool,
     stop: Option<&dyn enough::Stop>,
-) -> (crate::metric::ZensimResult, Vec<f32>, usize) {
+) -> Result<(crate::metric::ZensimResult, Vec<f32>, usize), crate::ZensimError> {
+    crate::metric::check_opt_stop(stop)?;
     let width = distorted.width();
     let height = distorted.height();
     let padded_width = pyramid_plane_stride(width);
-    let dst_planes = convert_source_to_xyb(
+    let n = padded_width * height;
+    let mut dst_planes = [vec![0.0f32; n], vec![0.0f32; n], vec![0.0f32; n]];
+    convert_source_to_xyb_into_stoppable(
         distorted,
+        &mut dst_planes,
         padded_width,
         config.allow_multithreading,
         config.revision(),
-    );
+        stop,
+    )?;
 
     compute_diffmap_from_xyb(
         precomputed,
@@ -2662,7 +2801,8 @@ pub(crate) fn compute_zensim_streaming_with_ref_and_diffmap_linear_planar(
     scale_blend_weights: &[f32],
     guided_redistribution: bool,
     stop: Option<&dyn enough::Stop>,
-) -> (crate::metric::ZensimResult, Vec<f32>, usize) {
+) -> Result<(crate::metric::ZensimResult, Vec<f32>, usize), crate::ZensimError> {
+    crate::metric::check_opt_stop(stop)?;
     let padded_width = pyramid_plane_stride(width);
     let dst_planes = convert_linear_planar_to_xyb(
         planes,
@@ -2672,6 +2812,7 @@ pub(crate) fn compute_zensim_streaming_with_ref_and_diffmap_linear_planar(
         padded_width,
         config.revision(),
     );
+    crate::metric::check_opt_stop(stop)?;
 
     compute_diffmap_from_xyb(
         precomputed,
@@ -2702,7 +2843,8 @@ fn compute_diffmap_from_xyb(
     scale_blend_weights: &[f32],
     guided_redistribution: bool,
     stop: Option<&dyn enough::Stop>,
-) -> (crate::metric::ZensimResult, Vec<f32>, usize) {
+) -> Result<(crate::metric::ZensimResult, Vec<f32>, usize), crate::ZensimError> {
+    crate::metric::check_opt_stop(stop)?;
     let num_scales = config.num_scales.min(precomputed.scales.len());
     let parallel = config.allow_multithreading;
 
@@ -2722,8 +2864,12 @@ fn compute_diffmap_from_xyb(
             break;
         }
         // Cooperative cancellation (issue #48): abandon remaining scales.
-        if enough::Stop::should_stop(&stop) {
-            break;
+        if let Err(err) = crate::metric::check_opt_stop(stop) {
+            #[cfg(feature = "threads")]
+            dealloc_planes(dst_planes, None);
+            #[cfg(not(feature = "threads"))]
+            drop(dst_planes);
+            return Err(err);
         }
 
         let (src_planes, src_w, src_h) = precomputed.scale(scale);
@@ -2779,6 +2925,8 @@ fn compute_diffmap_from_xyb(
     #[cfg(not(feature = "threads"))]
     drop(dst_planes);
 
+    crate::metric::check_opt_stop(stop)?;
+
     // Fuse multi-scale diffmaps: scale 0 at full weight, coarser scales upsampled and blended
     let full_w = padded_width;
     let full_h = height;
@@ -2806,6 +2954,7 @@ fn compute_diffmap_from_xyb(
     };
 
     for (scale, (dm, dm_w, dm_h)) in scale_diffmaps.iter().enumerate() {
+        crate::metric::check_opt_stop(stop)?;
         let blend = scale_blend_weights.get(scale).copied().unwrap_or(0.0);
         if blend <= 0.0 {
             continue;
@@ -2821,8 +2970,9 @@ fn compute_diffmap_from_xyb(
         }
     }
 
+    crate::metric::check_opt_stop(stop)?;
     let result = combine_scores(&stats, weights, config, mean_offset);
-    (result, fused, padded_width)
+    Ok((result, fused, padded_width))
 }
 
 /// Entry point: compute zensim using streaming for scale 0, full-image for the rest.

@@ -35,11 +35,14 @@ training = ["legacy-models"]
 classification = []
 ## Enable ImageSource impls for imgref::ImgRef<Rgb<u8>> and ImgRef<Rgba<u8>>.
 imgref = ["dep:imgref", "dep:rgb"]
-## Enable ImageSource adapter for zenpixels PixelSlice/PixelBuffer types.
-## Automatically maps PixelDescriptor to correct format, alpha mode, and
-## color primaries. Handles RGBX/BGRX (automatic opaque) and premultiplied
-## alpha (un-premultiplied on the fly).
+## Enable ImageSource adapter for zenpixels 0.5 PixelView/PixelBuf types.
+## Automatically maps PixelFormat to zensim format, alpha mode, and color
+## primaries. Handles RGBX/BGRX (automatic opaque) and premultiplied alpha
+## (un-premultiplied on the fly).
 zenpixels = ["dep:zenpixels"]
+## Implement zenpsy-api Metric and PrepareReference traits for Zensim.
+## Score-only by default; diffmaps are strictly opt-in via EvalOpts.
+zenpsy-api = ["zenpixels", "dep:zenpsy-api"]
 
 [dependencies]
 archmage = { workspace = true }
@@ -51,7 +54,8 @@ thiserror = { workspace = true }
 linear-srgb = { workspace = true }
 imgref = { workspace = true, optional = true }
 rgb = { workspace = true, optional = true }
-zenpixels = { version = ">=0.2.11, <0.4.0", default-features = false, features = ["std"], optional = true }
+zenpixels = { workspace = true, features = ["std"], optional = true }
+zenpsy-api = { workspace = true, optional = true }
 # MLP runtime for the trained profiles (ZNPR v3 bakes).
 zenpredict = { workspace = true }
 # Cooperative cancellation: `Zensim::with_stop`, `ZensimError::Cancelled`.
@@ -74,7 +78,7 @@ too_many_arguments = "allow"
 
 [lints.rust.unexpected_cfgs]
 level = "warn"
-check-cfg = ['cfg(feature, values("training", "imgref", "classification", "zenpixels", "threads"))']
+check-cfg = ['cfg(feature, values("training", "imgref", "classification", "zenpixels", "zenpsy-api", "threads"))']
 
 [[example]]
 name = "split_parity_check"

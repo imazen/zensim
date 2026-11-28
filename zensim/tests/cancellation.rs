@@ -208,3 +208,29 @@ fn cancellation_interrupts_cached_default_mid_walk() {
     assert!(matches!(error, ZensimError::Cancelled { .. }));
     assert!(trip.checks_seen() < baseline.checks_seen());
 }
+
+#[test]
+fn precompute_reference_is_cancellable() {
+    let (src, _, w, h) = test_pair();
+    let s = RgbSlice::new(&src, w, h);
+    let baseline = CountingStop::new(usize::MAX);
+    let _ = Zensim::new(ZensimProfile::codec_target())
+        .with_parallel(false)
+        .with_stop(baseline.clone())
+        .precompute_reference(&s)
+        .unwrap();
+    assert!(
+        baseline.checks_seen() > 3,
+        "precompute_reference should check stop across prep phases"
+    );
+
+    let trip = CountingStop::new(1);
+    let err = Zensim::new(ZensimProfile::codec_target())
+        .with_parallel(false)
+        .with_stop(trip.clone())
+        .precompute_reference(&s)
+        .err()
+        .expect("cancelled precompute_reference must fail");
+    assert!(matches!(err, ZensimError::Cancelled { .. }), "{err:?}");
+    assert!(trip.checks_seen() < baseline.checks_seen());
+}

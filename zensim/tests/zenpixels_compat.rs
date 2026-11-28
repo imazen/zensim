@@ -1,14 +1,17 @@
 #![cfg(feature = "zenpixels")]
 #![allow(deprecated)]
 // exercises the adopted `ZensimProfile::A`
-//! End-to-end integration tests for the zenpixels ImageSource adapter.
+//! End-to-end integration tests for the zenpixels 0.5 ImageSource adapter.
 //!
 //! Validates that `ZenpixelsSource` produces identical scores to the
-//! equivalent native zensim types (RgbSlice, RgbaSlice, StridedBytes).
+//! equivalent native zensim types (`RgbSlice`, `RgbaSlice`, `StridedBytes`).
 //!
 //! Run with: `cargo test -p zensim --features zenpixels --test zenpixels_compat`
 
-use zenpixels::{AlphaMode as ZpAlpha, PixelBuffer, PixelDescriptor, PixelSlice, TransferFunction};
+use zenpixels::{
+    AlphaMode as ZpAlpha, ColorSpace, PixelBuf, PixelFormat as ZpPixelFormat, PixelView,
+    Primaries as ZpPrimaries, SampleLayout, SignalRange, Transfer, formats,
+};
 use zensim::{
     AlphaMode, ImageSource, RgbSlice, RgbaSlice, StridedBytes, ZenpixelsSource, Zensim,
     ZensimProfile,
@@ -76,28 +79,57 @@ fn rgb8_matches_rgbslice() {
     let src = test_pixels_rgb();
     let dst = distorted_pixels_rgb();
 
-    // Native
     let native = z
         .compute(&RgbSlice::new(&src, 16, 16), &RgbSlice::new(&dst, 16, 16))
         .unwrap();
 
-    // Via zenpixels
     let src_bytes: Vec<u8> = src.iter().flat_map(|p| p.iter().copied()).collect();
     let dst_bytes: Vec<u8> = dst.iter().flat_map(|p| p.iter().copied()).collect();
-    let src_slice =
-        PixelSlice::new(&src_bytes, 16, 16, 16 * 3, PixelDescriptor::RGB8_SRGB).unwrap();
-    let dst_slice =
-        PixelSlice::new(&dst_bytes, 16, 16, 16 * 3, PixelDescriptor::RGB8_SRGB).unwrap();
-    let zp_src = ZenpixelsSource::try_from_slice(&src_slice).unwrap();
-    let zp_dst = ZenpixelsSource::try_from_slice(&dst_slice).unwrap();
+    let src_view = PixelView::new(&src_bytes, 16, 16, 16 * 3, &formats::RGB8_SRGB).unwrap();
+    let dst_view = PixelView::new(&dst_bytes, 16, 16, 16 * 3, &formats::RGB8_SRGB).unwrap();
+    let zp_src = ZenpixelsSource::try_from_view(&src_view).unwrap();
+    let zp_dst = ZenpixelsSource::try_from_view(&dst_view).unwrap();
     let zp_result = z.compute(&zp_src, &zp_dst).unwrap();
 
-    assert!(
-        (native.score() - zp_result.score()).abs() < 0.001,
+    assert_eq!(
+        native.score().to_bits(),
+        zp_result.score().to_bits(),
         "RGB8 score mismatch: native={}, zenpixels={}",
         native.score(),
         zp_result.score()
     );
+}
+
+#[test]
+fn strided_rgb8_matches_packed_bit_exact() {
+    let z = zensim();
+    let src = test_pixels_rgb();
+    let dst = distorted_pixels_rgb();
+
+    let native = z
+        .compute(&RgbSlice::new(&src, 16, 16), &RgbSlice::new(&dst, 16, 16))
+        .unwrap();
+
+    // Add 13 poisoned padding bytes per row.
+    let stride = 16 * 3 + 13;
+    let pack_strided = |px: &[[u8; 3]]| {
+        let mut out = vec![0xAAu8; stride * 16];
+        for y in 0..16 {
+            for x in 0..16 {
+                out[y * stride + x * 3..y * stride + x * 3 + 3].copy_from_slice(&px[y * 16 + x]);
+            }
+        }
+        out
+    };
+    let src_bytes = pack_strided(&src);
+    let dst_bytes = pack_strided(&dst);
+    let src_view = PixelView::new(&src_bytes, 16, 16, stride, &formats::RGB8_SRGB).unwrap();
+    let dst_view = PixelView::new(&dst_bytes, 16, 16, stride, &formats::RGB8_SRGB).unwrap();
+    let zp_src = ZenpixelsSource::try_from_view(&src_view).unwrap();
+    let zp_dst = ZenpixelsSource::try_from_view(&dst_view).unwrap();
+    let zp_result = z.compute(&zp_src, &zp_dst).unwrap();
+
+    assert_eq!(native.score().to_bits(), zp_result.score().to_bits());
 }
 
 #[test]
@@ -112,20 +144,13 @@ fn rgba8_matches_rgbaslice() {
 
     let src_bytes: Vec<u8> = src.iter().flat_map(|p| p.iter().copied()).collect();
     let dst_bytes: Vec<u8> = dst.iter().flat_map(|p| p.iter().copied()).collect();
-    let src_slice =
-        PixelSlice::new(&src_bytes, 16, 16, 16 * 4, PixelDescriptor::RGBA8_SRGB).unwrap();
-    let dst_slice =
-        PixelSlice::new(&dst_bytes, 16, 16, 16 * 4, PixelDescriptor::RGBA8_SRGB).unwrap();
-    let zp_src = ZenpixelsSource::try_from_slice(&src_slice).unwrap();
-    let zp_dst = ZenpixelsSource::try_from_slice(&dst_slice).unwrap();
+    let src_view = PixelView::new(&src_bytes, 16, 16, 16 * 4, &formats::RGBA8_SRGB).unwrap();
+    let dst_view = PixelView::new(&dst_bytes, 16, 16, 16 * 4, &formats::RGBA8_SRGB).unwrap();
+    let zp_src = ZenpixelsSource::try_from_view(&src_view).unwrap();
+    let zp_dst = ZenpixelsSource::try_from_view(&dst_view).unwrap();
     let zp_result = z.compute(&zp_src, &zp_dst).unwrap();
 
-    assert!(
-        (native.score() - zp_result.score()).abs() < 0.001,
-        "RGBA8 score mismatch: native={}, zenpixels={}",
-        native.score(),
-        zp_result.score()
-    );
+    assert_eq!(native.score().to_bits(), zp_result.score().to_bits());
 }
 
 #[test]
@@ -134,7 +159,6 @@ fn rgbx8_treated_as_opaque() {
     let src = test_pixels_rgba();
     let dst = distorted_pixels_rgba();
 
-    // Native with explicit Opaque
     let native = z
         .compute(
             &RgbaSlice::with_alpha_mode(&src, 16, 16, AlphaMode::Opaque),
@@ -142,31 +166,22 @@ fn rgbx8_treated_as_opaque() {
         )
         .unwrap();
 
-    // RGBX8 — padding byte should be ignored
     let src_bytes: Vec<u8> = src.iter().flat_map(|p| p.iter().copied()).collect();
     let dst_bytes: Vec<u8> = dst.iter().flat_map(|p| p.iter().copied()).collect();
-    let src_slice =
-        PixelSlice::new(&src_bytes, 16, 16, 16 * 4, PixelDescriptor::RGBX8_SRGB).unwrap();
-    let dst_slice =
-        PixelSlice::new(&dst_bytes, 16, 16, 16 * 4, PixelDescriptor::RGBX8_SRGB).unwrap();
-    let zp_src = ZenpixelsSource::try_from_slice(&src_slice).unwrap();
-    let zp_dst = ZenpixelsSource::try_from_slice(&dst_slice).unwrap();
+    let src_view = PixelView::new(&src_bytes, 16, 16, 16 * 4, &formats::RGBX8_SRGB).unwrap();
+    let dst_view = PixelView::new(&dst_bytes, 16, 16, 16 * 4, &formats::RGBX8_SRGB).unwrap();
+    let zp_src = ZenpixelsSource::try_from_view(&src_view).unwrap();
+    let zp_dst = ZenpixelsSource::try_from_view(&dst_view).unwrap();
 
     assert_eq!(zp_src.alpha_mode(), AlphaMode::Opaque);
     let zp_result = z.compute(&zp_src, &zp_dst).unwrap();
 
-    assert!(
-        (native.score() - zp_result.score()).abs() < 0.001,
-        "RGBX8 score mismatch: native={}, zenpixels={}",
-        native.score(),
-        zp_result.score()
-    );
+    assert_eq!(native.score().to_bits(), zp_result.score().to_bits());
 }
 
 #[test]
 fn bgra8_matches_stridedbytes() {
     let z = zensim();
-    // BGRA layout: [B, G, R, A]
     let src_bgra: Vec<u8> = test_pixels_rgba()
         .iter()
         .flat_map(|[r, g, b, a]| [*b, *g, *r, *a])
@@ -194,20 +209,13 @@ fn bgra8_matches_stridedbytes() {
     );
     let native = z.compute(&native_src, &native_dst).unwrap();
 
-    let src_slice =
-        PixelSlice::new(&src_bgra, 16, 16, 16 * 4, PixelDescriptor::BGRA8_SRGB).unwrap();
-    let dst_slice =
-        PixelSlice::new(&dst_bgra, 16, 16, 16 * 4, PixelDescriptor::BGRA8_SRGB).unwrap();
-    let zp_src = ZenpixelsSource::try_from_slice(&src_slice).unwrap();
-    let zp_dst = ZenpixelsSource::try_from_slice(&dst_slice).unwrap();
+    let src_view = PixelView::new(&src_bgra, 16, 16, 16 * 4, &formats::BGRA8_SRGB).unwrap();
+    let dst_view = PixelView::new(&dst_bgra, 16, 16, 16 * 4, &formats::BGRA8_SRGB).unwrap();
+    let zp_src = ZenpixelsSource::try_from_view(&src_view).unwrap();
+    let zp_dst = ZenpixelsSource::try_from_view(&dst_view).unwrap();
     let zp_result = z.compute(&zp_src, &zp_dst).unwrap();
 
-    assert!(
-        (native.score() - zp_result.score()).abs() < 0.001,
-        "BGRA8 score mismatch: native={}, zenpixels={}",
-        native.score(),
-        zp_result.score()
-    );
+    assert_eq!(native.score().to_bits(), zp_result.score().to_bits());
 }
 
 #[test]
@@ -215,11 +223,11 @@ fn identical_images_score_100() {
     let z = zensim();
     let px = test_pixels_rgba();
     let bytes: Vec<u8> = px.iter().flat_map(|p| p.iter().copied()).collect();
-    let slice = PixelSlice::new(&bytes, 16, 16, 16 * 4, PixelDescriptor::RGBA8_SRGB).unwrap();
-    let src = ZenpixelsSource::try_from_slice(&slice).unwrap();
+    let view1 = PixelView::new(&bytes, 16, 16, 16 * 4, &formats::RGBA8_SRGB).unwrap();
+    let src = ZenpixelsSource::try_from_view(&view1).unwrap();
 
-    let slice2 = PixelSlice::new(&bytes, 16, 16, 16 * 4, PixelDescriptor::RGBA8_SRGB).unwrap();
-    let dst = ZenpixelsSource::try_from_slice(&slice2).unwrap();
+    let view2 = PixelView::new(&bytes, 16, 16, 16 * 4, &formats::RGBA8_SRGB).unwrap();
+    let dst = ZenpixelsSource::try_from_view(&view2).unwrap();
 
     let result = z.compute(&src, &dst).unwrap();
     assert_eq!(result.score(), 100.0);
@@ -236,10 +244,10 @@ fn different_images_score_below_100() {
         .iter()
         .flat_map(|p| p.iter().copied())
         .collect();
-    let s = PixelSlice::new(&src_bytes, 16, 16, 16 * 4, PixelDescriptor::RGBA8_SRGB).unwrap();
-    let d = PixelSlice::new(&dst_bytes, 16, 16, 16 * 4, PixelDescriptor::RGBA8_SRGB).unwrap();
-    let src = ZenpixelsSource::try_from_slice(&s).unwrap();
-    let dst = ZenpixelsSource::try_from_slice(&d).unwrap();
+    let s = PixelView::new(&src_bytes, 16, 16, 16 * 4, &formats::RGBA8_SRGB).unwrap();
+    let d = PixelView::new(&dst_bytes, 16, 16, 16 * 4, &formats::RGBA8_SRGB).unwrap();
+    let src = ZenpixelsSource::try_from_view(&s).unwrap();
+    let dst = ZenpixelsSource::try_from_view(&d).unwrap();
     let result = z.compute(&src, &dst).unwrap();
     assert!(
         result.score() < 100.0,
@@ -252,7 +260,6 @@ fn premultiplied_matches_straight() {
     let z = zensim();
     let straight = test_pixels_rgba_with_alpha();
 
-    // Create premultiplied version (floor-quantized, as stores commonly are)
     let premul: Vec<u8> = straight
         .iter()
         .flat_map(|[r, g, b, a]| {
@@ -268,16 +275,20 @@ fn premultiplied_matches_straight() {
 
     let straight_bytes: Vec<u8> = straight.iter().flat_map(|p| p.iter().copied()).collect();
 
-    // Premultiplied via zenpixels adapter (un-premultiplies internally)
-    let premul_desc = PixelDescriptor::RGBA8_SRGB.with_alpha(Some(ZpAlpha::Premultiplied));
-    let p_slice = PixelSlice::new(&premul, 16, 16, 16 * 4, premul_desc).unwrap();
-    let zp_src = ZenpixelsSource::try_from_slice(&p_slice).unwrap();
+    let premul_fmt = ZpPixelFormat::new(
+        SampleLayout::RGBA8,
+        ColorSpace::Rgb {
+            primaries: ZpPrimaries::Bt709,
+            transfer: Transfer::Srgb,
+            range: SignalRange::Full,
+            alpha: ZpAlpha::Premultiplied,
+            white: None,
+        },
+    );
+    let p_view = PixelView::new(&premul, 16, 16, 16 * 4, &premul_fmt).unwrap();
+    let zp_src = ZenpixelsSource::try_from_view(&p_view).unwrap();
 
-    // (1) Pixel-exact adapter contract: recovery must match a reference
-    // round-to-nearest un-premultiply byte-for-byte. zensim scores identical
-    // buffers at exactly 100, and even a single 1-level pixel difference on
-    // 16x16 drops the score to ~95.8 (measured), so == 100.0 is a byte-exact
-    // assertion. This is strictly stronger than the old score-threshold form.
+    // (1) Pixel-exact adapter contract: recovery must match round-to-nearest un-premultiply byte-for-byte.
     let reference: Vec<u8> = premul
         .as_chunks::<4>()
         .0
@@ -299,8 +310,8 @@ fn premultiplied_matches_straight() {
             }
         })
         .collect();
-    let r_slice = PixelSlice::new(&reference, 16, 16, 16 * 4, PixelDescriptor::RGBA8_SRGB).unwrap();
-    let r_src = ZenpixelsSource::try_from_slice(&r_slice).unwrap();
+    let r_view = PixelView::new(&reference, 16, 16, 16 * 4, &formats::RGBA8_SRGB).unwrap();
+    let r_src = ZenpixelsSource::try_from_view(&r_view).unwrap();
     let exact = z.compute(&zp_src, &r_src).unwrap();
     assert_eq!(
         exact.score(),
@@ -308,15 +319,9 @@ fn premultiplied_matches_straight() {
         "adapter un-premultiply must match the round-to-nearest reference exactly"
     );
 
-    // (2) Catastrophic canary vs the straight original. The test's premultiply
-    // floor-quantizes, so optimal recovery is within 2 LSB on ~36% of channels
-    // — Profile A scores that 93.4 (a half-image +1 LSB control scores 94.5),
-    // while a SKIPPED un-premultiply (premul scored as straight) scores 12.1.
-    // The 90 floor separates those regimes without re-coupling this test to
-    // metric-calibration drift; (1) above carries the exactness guarantee.
-    let s_slice =
-        PixelSlice::new(&straight_bytes, 16, 16, 16 * 4, PixelDescriptor::RGBA8_SRGB).unwrap();
-    let zp_dst = ZenpixelsSource::try_from_slice(&s_slice).unwrap();
+    // (2) Catastrophic canary vs the straight original.
+    let s_view = PixelView::new(&straight_bytes, 16, 16, 16 * 4, &formats::RGBA8_SRGB).unwrap();
+    let zp_dst = ZenpixelsSource::try_from_view(&s_view).unwrap();
     let zp_result = z.compute(&zp_src, &zp_dst).unwrap();
     assert!(
         zp_result.score() > 90.0,
@@ -327,33 +332,72 @@ fn premultiplied_matches_straight() {
 
 #[test]
 fn hdr_transfer_rejected() {
-    let desc = PixelDescriptor::RGBA8_SRGB.with_transfer(TransferFunction::Pq);
-    let data = vec![0u8; 16 * 16 * 4];
-    let slice = PixelSlice::new(&data, 16, 16, 16 * 4, desc).unwrap();
-    let result = ZenpixelsSource::try_from_slice(&slice);
-    assert!(result.is_err());
+    let fmt = ZpPixelFormat::new(
+        SampleLayout::RGBA16,
+        ColorSpace::Rgb {
+            primaries: ZpPrimaries::Bt2020,
+            transfer: Transfer::Pq,
+            range: SignalRange::Full,
+            alpha: ZpAlpha::Opaque,
+            white: None,
+        },
+    );
+    let data = vec![0u8; 16 * 16 * 8];
+    let view = PixelView::new(&data, 16, 16, 16 * 8, &fmt).unwrap();
+    assert!(ZenpixelsSource::try_from_view(&view).is_err());
 }
 
 #[test]
 fn grayscale_rejected() {
     let data = vec![128u8; 16 * 16];
-    let slice = PixelSlice::new(&data, 16, 16, 16, PixelDescriptor::GRAY8_SRGB).unwrap();
-    let result = ZenpixelsSource::try_from_slice(&slice);
-    assert!(result.is_err());
+    let view = PixelView::new(&data, 16, 16, 16, &formats::GRAY8_SRGB).unwrap();
+    assert!(ZenpixelsSource::try_from_view(&view).is_err());
 }
 
 #[test]
-fn pixel_buffer_end_to_end() {
+fn f32_nan_and_out_of_range_rejected() {
+    let mut px = vec![[0.5f32, 0.25, 0.75, 1.0]; 16 * 16];
+    px[10][1] = f32::NAN;
+    let view = PixelView::from_typed(&px, 16, 16, &formats::RGBAF32_LINEAR).unwrap();
+    assert!(ZenpixelsSource::try_from_view(&view).is_err());
+
+    px[10][1] = 1.5;
+    let view2 = PixelView::from_typed(&px, 16, 16, &formats::RGBAF32_LINEAR).unwrap();
+    assert!(ZenpixelsSource::try_from_view(&view2).is_err());
+
+    // Opaque alpha lane is logically ignored even if out of [0, 1].
+    let opaque_fmt = ZpPixelFormat::new(
+        SampleLayout::RGBAF32,
+        ColorSpace::Rgb {
+            primaries: ZpPrimaries::Bt709,
+            transfer: Transfer::Linear,
+            range: SignalRange::Full,
+            alpha: ZpAlpha::Opaque,
+            white: None,
+        },
+    );
+    let mut px_opaque = vec![[0.5f32, 0.25, 0.75, f32::NAN]; 16 * 16];
+    let view3 = PixelView::from_typed(&px_opaque, 16, 16, &opaque_fmt).unwrap();
+    assert!(ZenpixelsSource::try_from_view(&view3).is_ok());
+
+    // RGB still checked even when alpha is Opaque.
+    px_opaque[3][0] = -0.1;
+    let view4 = PixelView::from_typed(&px_opaque, 16, 16, &opaque_fmt).unwrap();
+    assert!(ZenpixelsSource::try_from_view(&view4).is_err());
+}
+
+#[test]
+fn pixel_buf_end_to_end() {
     let z = zensim();
     let px: Vec<u8> = test_pixels_rgba()
         .iter()
         .flat_map(|p| p.iter().copied())
         .collect();
-    let buf = PixelBuffer::from_vec(px.clone(), 16, 16, PixelDescriptor::RGBA8_SRGB).unwrap();
-    let src = ZenpixelsSource::try_from_buffer(&buf).unwrap();
+    let buf = PixelBuf::from_bytes(px.clone(), 16, 16, ZpPixelFormat::RGBA8_SRGB).unwrap();
+    let src = ZenpixelsSource::try_from_buf(&buf).unwrap();
 
-    let buf2 = PixelBuffer::from_vec(px, 16, 16, PixelDescriptor::RGBA8_SRGB).unwrap();
-    let dst = ZenpixelsSource::try_from_buffer(&buf2).unwrap();
+    let buf2 = PixelBuf::from_bytes(px, 16, 16, ZpPixelFormat::RGBA8_SRGB).unwrap();
+    let dst = ZenpixelsSource::try_from_buf(&buf2).unwrap();
 
     let result = z.compute(&src, &dst).unwrap();
     assert_eq!(result.score(), 100.0);

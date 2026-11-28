@@ -12,7 +12,7 @@ use zensim::{
 #[test]
 fn rev7_cached_and_reused_scratch_scores_match_streaming_across_tiers() {
     let report = for_each_token_permutation(CompileTimePolicy::Fail, |perm| {
-        for (w, h) in [(31, 17), (65, 63), (257, 193)] {
+        for (w, h) in [(1, 1), (7, 5), (31, 17), (65, 63), (257, 193)] {
             let (src, dst) = pair(w, h);
             let src = RgbSlice::new(&src, w, h);
             let dst = RgbSlice::new(&dst, w, h);
@@ -21,12 +21,27 @@ fn rev7_cached_and_reused_scratch_scores_match_streaming_across_tiers() {
                 for parallel in [false, true] {
                     let z = Zensim::new(profile).with_parallel(parallel);
                     let direct = z.compute(&src, &dst).unwrap();
+                    let direct_id = z.compute(&src, &src).unwrap();
                     let pre = z.precompute_reference(&src).unwrap();
+                    let cached_id = z.compute_with_ref(&pre, &src).unwrap();
                     let cached = z.compute_with_ref(&pre, &dst).unwrap();
                     let mut scratch = ZensimScratch::new();
-                    // Prime scratch with another candidate before checking reuse.
-                    z.compute_with_ref_into(&pre, &src, &mut scratch).unwrap();
+                    // Prime scratch with identical candidate and check identity parity.
+                    let scratch_id = z.compute_with_ref_into(&pre, &src, &mut scratch).unwrap();
                     let reused = z.compute_with_ref_into(&pre, &dst, &mut scratch).unwrap();
+                    assert_eq!(
+                        cached_id.score().to_bits(),
+                        direct_id.score().to_bits(),
+                        "{profile:?} {w}x{h} parallel={parallel} {} cached identity",
+                        perm.label
+                    );
+                    assert_eq!(
+                        scratch_id.score().to_bits(),
+                        direct_id.score().to_bits(),
+                        "{profile:?} {w}x{h} parallel={parallel} {} scratch identity",
+                        perm.label
+                    );
+                    assert_eq!(direct_id.score().to_bits(), 100.0f64.to_bits());
                     for (route, score, raw, features) in [
                         (
                             "cached",

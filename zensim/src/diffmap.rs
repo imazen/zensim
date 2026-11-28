@@ -623,25 +623,31 @@ impl DiffmapResult {
 // Mask at the original compute dimensions before cropping reflected rows.
 // When only SIMD row padding is present, crop first, preserving the logical
 // row boundaries used by contrast masking.
-fn finish_diffmap(
+fn finish_diffmap_stoppable(
     mut diffmap_padded: Vec<f32>,
     precomputed: &PrecomputedReference,
     width: usize,
     height: usize,
     padded_width: usize,
     options: DiffmapOptions,
-) -> Vec<f32> {
+    stop: Option<&dyn enough::Stop>,
+) -> Result<Vec<f32>, ZensimError> {
+    crate::metric::check_opt_stop(stop)?;
     let comp_h = precomputed.scales[0].2;
-    if comp_h == height {
+    let out = if comp_h == height {
         let mut diffmap = if padded_width == width {
             diffmap_padded
         } else {
             let mut out = Vec::with_capacity(width * height);
             for y in 0..height {
+                if y & 63 == 0 {
+                    crate::metric::check_opt_stop(stop)?;
+                }
                 out.extend_from_slice(&diffmap_padded[y * padded_width..y * padded_width + width]);
             }
             out
         };
+        crate::metric::check_opt_stop(stop)?;
         if let Some(strength) = options.masking_strength {
             apply_contrast_masking(
                 &mut diffmap,
@@ -651,6 +657,7 @@ fn finish_diffmap(
                 padded_width,
                 strength,
             );
+            crate::metric::check_opt_stop(stop)?;
         }
         if options.sqrt {
             sqrt_inplace(&mut diffmap);
@@ -666,16 +673,22 @@ fn finish_diffmap(
                 padded_width,
                 strength,
             );
+            crate::metric::check_opt_stop(stop)?;
         }
         if options.sqrt {
             sqrt_inplace(&mut diffmap_padded);
         }
         let mut out = Vec::with_capacity(width * height);
         for y in 0..height {
+            if y & 63 == 0 {
+                crate::metric::check_opt_stop(stop)?;
+            }
             out.extend_from_slice(&diffmap_padded[y * padded_width..y * padded_width + width]);
         }
         out
-    }
+    };
+    crate::metric::check_opt_stop(stop)?;
+    Ok(out)
 }
 
 impl crate::metric::Zensim {
@@ -728,6 +741,20 @@ impl crate::metric::Zensim {
         distorted: &impl ImageSource,
         options: impl Into<DiffmapOptions>,
     ) -> Result<DiffmapResult, ZensimError> {
+        self.with_effective_stop(None, |stop| {
+            self.compute_with_ref_and_diffmap_with_stop(precomputed, distorted, options, stop)
+        })
+    }
+
+    /// Compare a distorted image against a precomputed reference and produce a
+    /// diffmap using an already-resolved effective `stop`.
+    pub(crate) fn compute_with_ref_and_diffmap_with_stop(
+        &self,
+        precomputed: &PrecomputedReference,
+        distorted: &impl ImageSource,
+        options: impl Into<DiffmapOptions>,
+        stop: Option<&dyn enough::Stop>,
+    ) -> Result<DiffmapResult, ZensimError> {
         let options = options.into();
         let params = self.profile().params();
         if distorted.width() == 0 || distorted.height() == 0 {
@@ -742,9 +769,26 @@ impl crate::metric::Zensim {
 
         let width = distorted.width();
         let height = distorted.height();
-        self.check_stop()?;
         let config = config_from_params(params, self.parallel());
         crate::metric::validate_cached_revision(precomputed, config.revision())?;
+
+        crate::metric::check_opt_stop(stop)?;
+        let is_identical = match precomputed.ref_source.as_ref() {
+            Some(src) => crate::metric::images_byte_identical_stoppable(src, distorted, stop)?,
+            None => false,
+        };
+        if is_identical {
+            let result = self.compute_with_ref_with_stop(precomputed, distorted, stop)?;
+            let diffmap = vec![0.0; width * height];
+            crate::metric::check_opt_stop(stop)?;
+            return Ok(DiffmapResult {
+                result,
+                diffmap,
+                width,
+                height,
+            });
+        }
+
         let (per_scale_ch, scale_blend) = options.weighting.resolve_multiscale(
             params.weights,
             config.num_scales,
@@ -762,7 +806,12 @@ impl crate::metric::Zensim {
         // top-left, so the diffmap trim below recovers it via `width`/`height`.
         let (result, diffmap_padded, padded_width) =
             if width < crate::metric::MIN_PYRAMID_DIM || height < crate::metric::MIN_PYRAMID_DIM {
-                let d = crate::metric::reflect_pad_to_min(distorted);
+                let d = crate::metric::reflect_pad_for_scales_stoppable(
+                    distorted,
+                    crate::NUM_SCALES,
+                    self.max_pixels(),
+                    stop,
+                )?;
                 crate::streaming::compute_zensim_streaming_with_ref_and_diffmap(
                     precomputed,
                     &d,
@@ -771,8 +820,8 @@ impl crate::metric::Zensim {
                     &per_scale_ch,
                     &scale_blend,
                     guided,
-                    self.stop_ref(),
-                )
+                    stop,
+                )?
             } else {
                 crate::streaming::compute_zensim_streaming_with_ref_and_diffmap(
                     precomputed,
@@ -782,22 +831,25 @@ impl crate::metric::Zensim {
                     &per_scale_ch,
                     &scale_blend,
                     guided,
-                    self.stop_ref(),
-                )
+                    stop,
+                )?
             };
-        self.check_stop()?;
+        crate::metric::check_opt_stop(stop)?;
         let result = self.score_diffmap(result, &config, width, height, || {
-            self.compute_with_ref(precomputed, distorted)
+            self.compute_with_ref_with_stop(precomputed, distorted, stop)
         })?;
+        crate::metric::check_opt_stop(stop)?;
 
-        let diffmap = finish_diffmap(
+        let diffmap = finish_diffmap_stoppable(
             diffmap_padded,
             precomputed,
             width,
             height,
             padded_width,
             options,
-        );
+            stop,
+        )?;
+        crate::metric::check_opt_stop(stop)?;
 
         Ok(DiffmapResult {
             result,
@@ -859,7 +911,6 @@ impl crate::metric::Zensim {
             }
         }
 
-        self.check_stop()?;
         let config = config_from_params(params, self.parallel());
         crate::metric::validate_cached_revision(precomputed, config.revision())?;
         let (per_scale_ch, scale_blend) = options.weighting.resolve_multiscale(
@@ -871,12 +922,19 @@ impl crate::metric::Zensim {
 
         let guided = false;
 
-        // Sub-64px planes are reflect-padded to the pyramid minimum (matching
-        // the also-padded reference). The reflect-pad keeps the original in the
-        // top-left, recovered by the trim below.
-        let (result, diffmap_padded, padded_width) =
-            if width < crate::metric::MIN_PYRAMID_DIM || height < crate::metric::MIN_PYRAMID_DIM {
+        self.with_effective_stop(None, |stop| {
+            crate::metric::check_opt_stop(stop)?;
+            // Sub-64px planes are reflect-padded to the pyramid minimum (matching
+            // the also-padded reference). The reflect-pad keeps the original in the
+            // top-left, recovered by the trim below.
+            let (result, diffmap_padded, padded_width) = if width < crate::metric::MIN_PYRAMID_DIM
+                || height < crate::metric::MIN_PYRAMID_DIM
+            {
+                let pw = width.max(crate::metric::MIN_PYRAMID_DIM);
+                let ph = height.max(crate::metric::MIN_PYRAMID_DIM);
+                crate::metric::check_within_max_pixels(pw, ph, self.max_pixels())?;
                 let (pp, pw, ph) = reflect_pad_planes_f32(planes, width, height, stride);
+                crate::metric::check_opt_stop(stop)?;
                 let padded_width = crate::blur::pyramid_plane_stride(pw);
                 let (result, dm, _) =
                     crate::streaming::compute_zensim_streaming_with_ref_and_diffmap_linear_planar(
@@ -890,8 +948,8 @@ impl crate::metric::Zensim {
                         &per_scale_ch,
                         &scale_blend,
                         guided,
-                        self.stop_ref(),
-                    );
+                        stop,
+                    )?;
                 (result, dm, padded_width)
             } else {
                 let padded_width = crate::blur::pyramid_plane_stride(width);
@@ -907,51 +965,55 @@ impl crate::metric::Zensim {
                         &per_scale_ch,
                         &scale_blend,
                         guided,
-                        self.stop_ref(),
-                    );
+                        stop,
+                    )?;
                 (result, dm, padded_width)
             };
-        self.check_stop()?;
-        let result = self.score_diffmap(result, &config, width, height, || {
-            // This legacy planar entry has no ImageSource view. Preserve its
-            // explicit linear-sRGB/opaque semantics for the canonical owner.
-            let pixels: Vec<[f32; 4]> = (0..height)
-                .flat_map(|y| {
-                    (0..width).map(move |x| {
-                        [
-                            planes[0][y * stride + x],
-                            planes[1][y * stride + x],
-                            planes[2][y * stride + x],
-                            1.0,
-                        ]
+            crate::metric::check_opt_stop(stop)?;
+            let result = self.score_diffmap(result, &config, width, height, || {
+                // This legacy planar entry has no ImageSource view. Preserve its
+                // explicit linear-sRGB/opaque semantics for the canonical owner.
+                let pixels: Vec<[f32; 4]> = (0..height)
+                    .flat_map(|y| {
+                        (0..width).map(move |x| {
+                            [
+                                planes[0][y * stride + x],
+                                planes[1][y * stride + x],
+                                planes[2][y * stride + x],
+                                1.0,
+                            ]
+                        })
                     })
-                })
-                .collect();
-            let image = crate::source::StridedBytes::with_alpha_mode(
-                bytemuck::cast_slice(&pixels),
+                    .collect();
+                let image = crate::source::StridedBytes::with_alpha_mode(
+                    bytemuck::cast_slice(&pixels),
+                    width,
+                    height,
+                    width * 16,
+                    crate::source::PixelFormat::LinearF32Rgba,
+                    crate::source::AlphaMode::Opaque,
+                );
+                self.compute_with_ref_with_stop(precomputed, &image, stop)
+            })?;
+            crate::metric::check_opt_stop(stop)?;
+
+            let diffmap = finish_diffmap_stoppable(
+                diffmap_padded,
+                precomputed,
                 width,
                 height,
-                width * 16,
-                crate::source::PixelFormat::LinearF32Rgba,
-                crate::source::AlphaMode::Opaque,
-            );
-            self.compute_with_ref(precomputed, &image)
-        })?;
+                padded_width,
+                options,
+                stop,
+            )?;
+            crate::metric::check_opt_stop(stop)?;
 
-        let diffmap = finish_diffmap(
-            diffmap_padded,
-            precomputed,
-            width,
-            height,
-            padded_width,
-            options,
-        );
-
-        Ok(DiffmapResult {
-            result,
-            diffmap,
-            width,
-            height,
+            Ok(DiffmapResult {
+                result,
+                diffmap,
+                width,
+                height,
+            })
         })
     }
 
@@ -969,40 +1031,43 @@ impl crate::metric::Zensim {
     ///
     /// A byte-identical pair returns exactly what
     /// [`Zensim::compute`](crate::Zensim::compute) returns — 100 — with an
-    /// all-zero map. The
-    /// [`compute_with_ref_and_diffmap`](Self::compute_with_ref_and_diffmap)
-    /// form cannot make that call: a [`PrecomputedReference`] holds an XYB
-    /// pyramid, not the source pixels, so there is nothing for the identity
-    /// owner to compare against and a perfect copy is scored through the model
-    /// like any other pair.
+    /// all-zero map.
     pub fn compute_with_diffmap(
         &self,
         source: &impl ImageSource,
         distorted: &impl ImageSource,
         options: impl Into<DiffmapOptions>,
     ) -> Result<DiffmapResult, ZensimError> {
+        self.with_effective_stop(None, |stop| {
+            self.compute_with_diffmap_with_stop(source, distorted, options, stop)
+        })
+    }
+
+    /// Compare two images and return both score and per-pixel error map using
+    /// an already-resolved effective `stop`.
+    pub(crate) fn compute_with_diffmap_with_stop(
+        &self,
+        source: &impl ImageSource,
+        distorted: &impl ImageSource,
+        options: impl Into<DiffmapOptions>,
+        stop: Option<&dyn enough::Stop>,
+    ) -> Result<DiffmapResult, ZensimError> {
         validate_pair(source, distorted)?;
-        // ONE identity owner for every entry that holds both images
-        // (`metric::images_byte_identical` -> `identical_result_at`, reached
-        // through `compute`). Before 2026-09-18 this path had none, so a
-        // perfect copy scored the model's forward on an all-zero feature row —
-        // 96.2017 for `B` at 900x675 — while `compute` returned exactly 100 on
-        // the same pair. Delegating to `compute` cannot drift from it, and
-        // `compute` short-circuits before any walk, so nothing is recomputed.
-        // `validate_pair` above has already refused HDR-declared input, so this
-        // never diverts an HDR pair away from that refusal. The map is exactly
-        // zero, which `sqrt` and contrast masking both preserve.
-        if crate::metric::images_byte_identical(source, distorted) {
+        crate::metric::check_opt_stop(stop)?;
+        if crate::metric::images_byte_identical_stoppable(source, distorted, stop)? {
             let (width, height) = (distorted.width(), distorted.height());
             let _ = options.into();
+            let result = self.compute_with_stop(source, distorted, stop)?;
+            let diffmap = vec![0.0; width * height];
+            crate::metric::check_opt_stop(stop)?;
             return Ok(DiffmapResult {
-                result: self.compute(source, distorted)?,
-                diffmap: vec![0.0; width * height],
+                result,
+                diffmap,
                 width,
                 height,
             });
         }
-        let precomputed = self.precompute_reference(source)?;
-        self.compute_with_ref_and_diffmap(&precomputed, distorted, options)
+        let precomputed = self.precompute_reference_with_stop(source, stop)?;
+        self.compute_with_ref_and_diffmap_with_stop(&precomputed, distorted, options, stop)
     }
 }
